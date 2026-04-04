@@ -2,6 +2,8 @@
 
 A markdown annotation editor built with [Svelte](https://svelte.dev/) and [CodeMirror 6](https://codemirror.net/).
 
+**Live at: https://cm6-app.vercel.app/**
+
 Designed for ESL teachers giving feedback on student assignments.
 
 ## Features
