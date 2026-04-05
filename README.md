@@ -14,6 +14,7 @@ Designed for ESL teachers giving feedback on student assignments.
 - **Status Bar** — Live mode, line, and column display
 - **Space Key** — Wrap word or selection in backticks
 - **Paste in Normal Mode** — `p` replaces entire document with clipboard content
+- **Color Annotations** — Highlight text with 6 colors for feedback (Alt+H/L, Alt+J/K)
 
 ## Tech Stack
 
@@ -58,6 +59,10 @@ Then connect your repo to your preferred platform.
 | `V` | Visual Line mode |
 | `p` | Replace document with clipboard |
 | `Space` | Wrap word/selection in backticks |
+| `Alt+H` | Set annotation style 1 (yellow) |
+| `Alt+L` | Set annotation style 6 (orange) |
+| `Alt+J` | Previous annotation style |
+| `Alt+K` | Next annotation style |
 | `/` | Search |
 | `:wq` | Save and... well, it's a web app |
 

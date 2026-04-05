@@ -10,12 +10,16 @@
     drawSelection,
     highlightActiveLineGutter,
     ViewPlugin,
+    Decoration,
+    WidgetType,
+    type DecorationSet,
     type ViewUpdate
   } from "@codemirror/view";
 
 
   import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-  import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
+  import { searchKeymap } from "@codemirror/search";
+  import { RangeSetBuilder } from "@codemirror/state";
 
   import {
     indentOnInput,
@@ -29,24 +33,37 @@
   import { tags } from "@lezer/highlight";
   import { vim, Vim, getCM, CodeMirror } from "@replit/codemirror-vim";
 
-  declare global {
-    interface Window {
-      CodeMirror?: {
-        Vim?: {
-          on: (event: string, handler: (data: any) => void) => void;
-          off?: (event: string, handler: (data: any) => void) => void;
-        };
-      };
-    }
-  }
-
   let editorEl: HTMLDivElement;
   let view: EditorView;
 
   let statusMode = "NORMAL";
+  let currentStyle = 0;
   let line = 1;
   let column = 1;
   let selectionInfo = "0 selected";
+
+  const highlightStyles = [
+    { name: "yellow", color: "#fabd2f" },
+    { name: "green", color: "#b8bb26" },
+    { name: "blue", color: "#83a598" },
+    { name: "red", color: "#fb4934" },
+    { name: "purple", color: "#d3869b" },
+    { name: "orange", color: "#fe8019" }
+  ];
+
+  function cycleStyle(delta: number) {
+    if (currentStyle === 0) {
+      currentStyle = delta > 0 ? 1 : 6;
+    } else {
+      currentStyle = ((currentStyle - 1 + delta + 6) % 6) + 1;
+    }
+  }
+
+  function setStyle(num: number) {
+    if (num >= 1 && num <= 6) {
+      currentStyle = num;
+    }
+  }
 
   const gruvbox = {
     bg: "#282828",
@@ -71,30 +88,44 @@
   };
 
   function starterDoc() {
-    return `# Markdown first
+    const bt = '`';
+    return `# The Quick Brown Fox
 
-This editor now starts in **Markdown**.
+The quick brown fox jumps over the ${bt}lazy${bt}<!-- yellow 2026-04-06T10:00:00 --> dog. It was an unremarkable morning in the valley, the kind where mist clings to the hedgerows and the air smells faintly of damp earth and pine.
 
-## Checklist
+## The Fox
 
-- CodeMirror 6
-- Vim bindings
-- Alt+M wraps selection or word in backticks
-- Gruvbox shell + editor theme
-- Custom syntax highlighting
-- Status bar
-- Real Vim mode display
+The fox was neither ${bt}quick${bt}<!-- green 2026-04-06T10:00:01 --> nor particularly brown — more of a ${bt}tawny${bt}<!-- orange 2026-04-06T10:00:02 --> amber, with a white-tipped tail that flickered like a candle in the undergrowth. She had been awake since before dawn, padding silently along the ridge above the farm.
 
-Inline code: \`hello_world\`
+- She was **bold** by nature
+- She was *cautious* by experience
+- She was, above all, ${bt}hungry${bt}<!-- red 2026-04-06T10:00:03 -->
 
-\`\`\`js
-function hello(name) {
-  return \`Hello, \${name}\`;
-}
-\`\`\`
+## The Dog
 
+The dog, for his part, was not lazy in any meaningful sense. He was simply ${bt}old${bt}<!-- blue 2026-04-06T10:00:04 -->. His name was Jasper, and he had been guarding the same gate for eleven years. He watched the fox with one open eye and decided, as he always did, that the effort was not worth it.
 
+> "Some battles," Jasper seemed to say, "are won by not fighting them."
 
+## The Valley
+
+The valley stretched south toward the river, flanked by two long ridges of ${bt}limestone${bt}<!-- purple 2026-04-06T10:00:05 -->. Farmers had worked this land for generations, leaving behind dry-stone walls, sunken lanes, and the occasional rusted harrow half-buried in a hedgerow.
+
+### Flora
+
+The hedgerows were thick with **hawthorn** and **blackthorn**, their branches still bare in the early spring. Beneath them, the first *celandines* had opened — small, sharp yellow stars against the dark soil.
+
+### Fauna
+
+Besides the fox and the dog, the valley was home to:
+
+1. A pair of **buzzards** that nested on the eastern ridge
+2. Several dozen **rabbits** in the lower field
+3. One extremely territorial **robin** near the barn door
+
+## Conclusion
+
+By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asleep. The buzzards turned slow circles overhead, and the valley went about its quiet business, indifferent and unhurried, as it always had.
 `;
   }
 
@@ -134,15 +165,15 @@ function hello(name) {
     { tag: [tags.operator, tags.compareOperator, tags.logicOperator], color: gruvbox.red },
     { tag: [tags.punctuation, tags.separator, tags.bracket], color: gruvbox.fgMuted },
 
-    { tag: tags.comment, color: gruvbox.comment, fontStyle: "italic" },
-    { tag: tags.lineComment, color: gruvbox.comment, fontStyle: "italic" },
-    { tag: tags.blockComment, color: gruvbox.comment, fontStyle: "italic" },
-    { tag: tags.docComment, color: gruvbox.comment, fontStyle: "italic" },
+    { tag: tags.comment, color: gruvbox.comment },
+    { tag: tags.lineComment, color: gruvbox.comment },
+    { tag: tags.blockComment, color: gruvbox.comment },
+    { tag: tags.docComment, color: gruvbox.comment },
 
     { tag: tags.meta, color: gruvbox.orange },
     { tag: tags.processingInstruction, color: gruvbox.orange },
 
-    { tag: tags.monospace, color: gruvbox.yellow }
+    { tag: tags.monospace, color: "inherit" }
   ]);
 
   function buildGruvboxTheme(): Extension {
@@ -226,6 +257,14 @@ function hello(name) {
           borderRadius: "4px",
           padding: "0 0.25rem"
         },
+
+        // Annotation classes override inline-code color — defined after so they win
+        ...Object.fromEntries(
+          highlightStyles.map(s => [
+            `.cm-inline-code.cm-annotation-${s.name}, .cm-annotation-${s.name}`,
+            { color: `${contrastColor(s.color)} !important`, backgroundColor: `${s.color} !important`, border: "none" }
+          ])
+        ),
 
         ".cm-formatting-code": {
           color: gruvbox.orange
@@ -326,22 +365,25 @@ function hello(name) {
     }
   });
 
-  function wrapSelectionOrWordInBackticks(view: EditorView) {
+  function wrapSelectionOrWord(view: EditorView, style: number = 0) {
     const state = view.state;
     const range = state.selection.main;
 
+    const makeInsert = (text: string): string => {
+      if (style === 0) return `\`${text}\``;
+      const id = new Date().toISOString().slice(0, 19);
+      const colorName = highlightStyles[style - 1].name;
+      return `\`${text}\`<!-- ${colorName} ${id} -->`;
+    };
+
     if (!range.empty) {
       const selected = state.doc.sliceString(range.from, range.to);
+      const insert = makeInsert(selected);
+      // Place cursor one char past the span so the annotation collapses immediately
+      const anchor = range.from + insert.length + (style > 0 ? 1 : 0);
       view.dispatch({
-        changes: {
-          from: range.from,
-          to: range.to,
-          insert: `\`${selected}\``
-        },
-        selection: {
-          anchor: range.from + 1,
-          head: range.to + 1
-        }
+        changes: { from: range.from, to: range.to, insert },
+        selection: { anchor: Math.min(anchor, view.state.doc.length) }
       });
       updateStatusFromView(view);
       return true;
@@ -365,20 +407,186 @@ function hello(name) {
     const from = lineInfo.from + start;
     const to = lineInfo.from + end;
     const word = state.doc.sliceString(from, to);
+    const insert = makeInsert(word);
+    // Place cursor one char past the span so the annotation collapses immediately
+    const anchor = from + insert.length + (style > 0 ? 1 : 0);
 
     view.dispatch({
-      changes: { from, to, insert: `\`${word}\`` },
-      selection: { anchor: from + word.length + 2 }
+      changes: { from, to, insert },
+      selection: { anchor: Math.min(anchor, view.state.doc.length) }
     });
 
     updateStatusFromView(view);
     return true;
   }
 
-  // const altMKeymap = keymap.of([
-  //   { key: "Alt-m", run: wrapSelectionOrWordInBackticks },
-  //   { key: "Alt-M", run: wrapSelectionOrWordInBackticks }
-  // ]);
+  // Annotation hide/reveal decorator
+  // - When cursor is outside a span: backticks and comment are hidden, word gets colored bg
+  // - When cursor is inside a span: full raw text is shown for editing
+
+  const annotationPattern = /`([^`]+)`<!--\s*(\w+)\s+[\w:T-]+[^>]*-->/g;
+  const styleColorMap: Record<string, string> = Object.fromEntries(
+    highlightStyles.map(s => [s.name, s.color])
+  );
+
+  // Returns theme bg or fg based on which has better contrast against the annotation color
+  function contrastColor(hex: string): string {
+    const toLinear = (c: number) => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    const luminance = (h: string) => {
+      const r = toLinear(parseInt(h.slice(1, 3), 16) / 255);
+      const g = toLinear(parseInt(h.slice(3, 5), 16) / 255);
+      const b = toLinear(parseInt(h.slice(5, 7), 16) / 255);
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const contrast = (L1: number, L2: number) =>
+      (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
+    const Lbg  = luminance(gruvbox.bg);
+    const Lfg  = luminance(gruvbox.fg);
+    const Lann = luminance(hex);
+    return contrast(Lann, Lbg) >= contrast(Lann, Lfg) ? gruvbox.bg : gruvbox.fg;
+  }
+
+  class EmptyWidget extends WidgetType {
+    toDOM() { const s = document.createElement("span"); return s; }
+    ignoreEvent() { return false; }
+  }
+
+  function buildHighlightDecorator(): Extension {
+    // Build per-color CSS classes in the theme so specificity beats syntax highlighting
+    const colorTheme = EditorView.theme(
+      Object.fromEntries([
+        ...highlightStyles.map(s => [
+          `.cm-annotation-${s.name}`,
+          { backgroundColor: s.color, color: contrastColor(s.color), borderRadius: "3px", padding: "0 2px" }
+        ])
+      ])
+    );
+
+    const plugin = ViewPlugin.fromClass(
+      class {
+        decorations: DecorationSet;
+
+        constructor(view: EditorView) {
+          this.decorations = this.buildDecorations(view);
+        }
+
+        update(update: ViewUpdate) {
+          if (update.docChanged || update.viewportChanged || update.selectionSet) {
+            this.decorations = this.buildDecorations(update.view);
+          }
+        }
+
+        buildDecorations(view: EditorView): DecorationSet {
+          const builder = new RangeSetBuilder<Decoration>();
+          const cursor = view.state.selection.main.head;
+
+          for (const { from, to } of view.visibleRanges) {
+            const text = view.state.doc.sliceString(from, to);
+            annotationPattern.lastIndex = 0;
+            let match: RegExpExecArray | null;
+            while ((match = annotationPattern.exec(text)) !== null) {
+              const colorName = match[2];
+              const color = styleColorMap[colorName];
+              if (!color) continue;
+
+              const spanStart = from + match.index;
+              const spanEnd   = spanStart + match[0].length;
+              const wordStart = spanStart + 1;
+              const wordEnd   = wordStart + match[1].length;
+              const closeBacktick = wordEnd;
+
+              const cursorInside = cursor >= spanStart && cursor <= spanEnd;
+
+              if (cursorInside) {
+                builder.add(spanStart, spanEnd, Decoration.mark({
+                  attributes: { style: `background-color: ${color}30; border-radius: 3px;` }
+                }));
+              } else {
+                builder.add(spanStart, wordStart,
+                  Decoration.replace({ widget: new EmptyWidget() }));
+                builder.add(wordStart, wordEnd, Decoration.mark({
+                  class: `cm-annotation-${colorName}`
+                }));
+                builder.add(closeBacktick, spanEnd,
+                  Decoration.replace({ widget: new EmptyWidget() }));
+              }
+            }
+          }
+          return builder.finish();
+        }
+      },
+      { decorations: (v) => v.decorations }
+    );
+
+    // Plain code decorator: yellow for `word` spans not overlapping any annotation
+    const plainPattern = /`([^`\n]+)`/g;
+    const plainPlugin = ViewPlugin.fromClass(
+      class {
+        decorations: DecorationSet;
+        constructor(v: EditorView) { this.decorations = this.build(v); }
+        update(u: ViewUpdate) {
+          if (u.docChanged || u.viewportChanged || u.selectionSet)
+            this.decorations = this.build(u.view);
+        }
+        build(view: EditorView): DecorationSet {
+          const builder = new RangeSetBuilder<Decoration>();
+          for (const { from, to } of view.visibleRanges) {
+            const text = view.state.doc.sliceString(from, to);
+
+            // Collect annotation ranges to exclude
+            const annotationRanges: Array<[number, number]> = [];
+            annotationPattern.lastIndex = 0;
+            let am: RegExpExecArray | null;
+            while ((am = annotationPattern.exec(text)) !== null) {
+              annotationRanges.push([am.index, am.index + am[0].length]);
+            }
+
+            plainPattern.lastIndex = 0;
+            let m: RegExpExecArray | null;
+            while ((m = plainPattern.exec(text)) !== null) {
+              const start = m.index;
+              const end = start + m[0].length;
+              // Skip if this span overlaps any annotation range
+              const overlaps = annotationRanges.some(([as, ae]) => start < ae && end > as);
+              if (overlaps) continue;
+              builder.add(from + start, from + end, Decoration.mark({ class: "cm-plain-code" }));
+            }
+          }
+          return builder.finish();
+        }
+      },
+      { decorations: (v) => v.decorations }
+    );
+
+    const plainTheme = EditorView.theme({
+      ".cm-plain-code": {
+        color: `${gruvbox.yellow} !important`,
+        backgroundColor: gruvbox.bgSoft,
+        border: `1px solid ${gruvbox.border}`,
+        borderRadius: "4px",
+        padding: "0 0.25rem",
+      }
+    });
+
+    return [colorTheme, plugin, plainTheme, plainPlugin];
+  }
+
+  // Alt keybindings for style selection (normal mode only)
+  function isInsertMode(view: EditorView): boolean {
+    return !!(getCM(view) as any)?.state?.vim?.insertMode;
+  }
+
+  const styleKeymap = keymap.of([]);
+
+  // Status bar reactive values
+  $: styleLabel = currentStyle === 0
+    ? "Style: -"
+    : `Style: ${currentStyle}/6 (${highlightStyles[currentStyle - 1].name})`;
+
+  $: styleColor = currentStyle === 0
+    ? gruvbox.fgMuted
+    : highlightStyles[currentStyle - 1].color;
+
 
   const statusPlugin = ViewPlugin.fromClass(
     class {
@@ -406,15 +614,13 @@ function hello(name) {
       history(),
       indentOnInput(),
       bracketMatching(),
-      // highlightActiveLine(),
       highlightActiveLineGutter(),
-      // highlightSelectionMatches(),
       syntaxHighlighting(gruvboxHighlight),
       keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
-      markdown({
-        base: markdownLanguage
-      }),
+      styleKeymap,
+      markdown({ base: markdownLanguage }),
       statusPlugin,
+      buildHighlightDecorator(),
       buildGruvboxTheme()
     ];
   }
@@ -456,9 +662,9 @@ function hello(name) {
     Vim.defineAction("wrap-inline-code", () => {
       if (statusMode !== "NORMAL" && statusMode !== "VISUAL") return;
 
-      wrapSelectionOrWordInBackticks(view);
+      wrapSelectionOrWord(view, currentStyle);
 
-      const cm = getCM(view);
+      const cm = getCM(view) as any;
       if (cm.state?.vim?.visualMode) {
         Vim.exitVisualMode(cm);
       }
@@ -487,6 +693,17 @@ function hello(name) {
 
     // Explicitly ensure Shift+V triggers visual line mode
     Vim.mapCommand("V", "action", "toggleVisualMode", { linewise: true }, { context: "normal" });
+
+    // Style keybindings via Vim so they are intercepted before browser/terminal
+    Vim.defineAction("style-set-1",  () => { setStyle(1); });
+    Vim.defineAction("style-set-6",  () => { setStyle(6); });
+    Vim.defineAction("style-prev",   () => { cycleStyle(-1); });
+    Vim.defineAction("style-next",   () => { cycleStyle(+1); });
+
+    Vim.mapCommand("<A-h>", "action", "style-set-1",  {}, { context: "normal" });
+    Vim.mapCommand("<A-l>", "action", "style-set-6",  {}, { context: "normal" });
+    Vim.mapCommand("<A-j>", "action", "style-prev",   {}, { context: "normal" });
+    Vim.mapCommand("<A-k>", "action", "style-next",   {}, { context: "normal" });
 
     vimKeysRegistered = true;
   }
@@ -542,6 +759,7 @@ function hello(name) {
     <div class="status-left">
       <span class="segment mode">{statusMode}</span>
       <span class="segment">{selectionInfo}</span>
+      <span class="segment style" style="color: {styleColor}">{styleLabel}</span>
     </div>
 
     <div class="status-right">
