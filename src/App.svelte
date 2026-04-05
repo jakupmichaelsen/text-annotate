@@ -88,28 +88,35 @@
   };
 
   function starterDoc() {
+    const fmt = (d: Date) => d.toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+    const t0 = fmt(new Date("2026-04-06T10:00:00"));
+    const t1 = fmt(new Date("2026-04-06T10:00:01"));
+    const t2 = fmt(new Date("2026-04-06T10:00:02"));
+    const t3 = fmt(new Date("2026-04-06T10:00:03"));
+    const t4 = fmt(new Date("2026-04-06T10:00:04"));
+    const t5 = fmt(new Date("2026-04-06T10:00:05"));
     const bt = '`';
     return `# The Quick Brown Fox
 
-The quick brown fox jumps over the ${bt}lazy${bt}<!-- yellow 2026-04-06T10:00:00 --> dog. It was an unremarkable morning in the valley, the kind where mist clings to the hedgerows and the air smells faintly of damp earth and pine.
+The quick brown fox jumps over the ${bt}lazy${bt}<!-- yellow ${t0} --> dog. It was an unremarkable morning in the valley, the kind where mist clings to the hedgerows and the air smells faintly of damp earth and pine.
 
 ## The Fox
 
-The fox was neither ${bt}quick${bt}<!-- green 2026-04-06T10:00:01 --> nor particularly brown — more of a ${bt}tawny${bt}<!-- orange 2026-04-06T10:00:02 --> amber, with a white-tipped tail that flickered like a candle in the undergrowth. She had been awake since before dawn, padding silently along the ridge above the farm.
+The fox was neither ${bt}quick${bt}<!-- green ${t1} --> nor particularly brown — more of a ${bt}tawny${bt}<!-- orange ${t2} --> amber, with a white-tipped tail that flickered like a candle in the undergrowth. She had been awake since before dawn, padding silently along the ridge above the farm.
 
 - She was **bold** by nature
 - She was *cautious* by experience
-- She was, above all, ${bt}hungry${bt}<!-- red 2026-04-06T10:00:03 -->
+- She was, above all, ${bt}hungry${bt}<!-- red ${t3} -->
 
 ## The Dog
 
-The dog, for his part, was not lazy in any meaningful sense. He was simply ${bt}old${bt}<!-- blue 2026-04-06T10:00:04 -->. His name was Jasper, and he had been guarding the same gate for eleven years. He watched the fox with one open eye and decided, as he always did, that the effort was not worth it.
+The dog, for his part, was not lazy in any meaningful sense. He was simply ${bt}old${bt}<!-- blue ${t4} -->. His name was Jasper, and he had been guarding the same gate for eleven years. He watched the fox with one open eye and decided, as he always did, that the effort was not worth it.
 
 > "Some battles," Jasper seemed to say, "are won by not fighting them."
 
 ## The Valley
 
-The valley stretched south toward the river, flanked by two long ridges of ${bt}limestone${bt}<!-- purple 2026-04-06T10:00:05 -->. Farmers had worked this land for generations, leaving behind dry-stone walls, sunken lanes, and the occasional rusted harrow half-buried in a hedgerow.
+The valley stretched south toward the river, flanked by two long ridges of ${bt}limestone${bt}<!-- purple ${t5} -->. Farmers had worked this land for generations, leaving behind dry-stone walls, sunken lanes, and the occasional rusted harrow half-buried in a hedgerow.
 
 ### Flora
 
@@ -371,7 +378,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
 
     const makeInsert = (text: string): string => {
       if (style === 0) return `\`${text}\``;
-      const id = new Date().toISOString().slice(0, 19);
+    const id = new Date().toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
       const colorName = highlightStyles[style - 1].name;
       return `\`${text}\`<!-- ${colorName} ${id} -->`;
     };
@@ -424,7 +431,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
   // - When cursor is outside a span: backticks and comment are hidden, word gets colored bg
   // - When cursor is inside a span: full raw text is shown for editing
 
-  const annotationPattern = /`([^`]+)`<!--\s*(\w+)\s+[\w:T-]+[^>]*-->/g;
+  const annotationPattern = /`([^`]+)`<!--\s*(\w+)\s+[\d\s\w:,]+-->/g;
   const styleColorMap: Record<string, string> = Object.fromEntries(
     highlightStyles.map(s => [s.name, s.color])
   );
