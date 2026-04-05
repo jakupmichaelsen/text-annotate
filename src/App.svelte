@@ -98,25 +98,25 @@
     const bt = '`';
     return `# The Quick Brown Fox
 
-The quick brown fox jumps over the ${bt}lazy${bt}<!-- yellow ${t0} --> dog. It was an unremarkable morning in the valley, the kind where mist clings to the hedgerows and the air smells faintly of damp earth and pine.
+The quick brown fox jumps over the ${bt}lazy${bt}<!-- yellow, ${t0}: "" --> dog. It was an unremarkable morning in the valley, the kind where mist clings to the hedgerows and the air smells faintly of damp earth and pine.
 
 ## The Fox
 
-The fox was neither ${bt}quick${bt}<!-- green ${t1} --> nor particularly brown — more of a ${bt}tawny${bt}<!-- orange ${t2} --> amber, with a white-tipped tail that flickered like a candle in the undergrowth. She had been awake since before dawn, padding silently along the ridge above the farm.
+The fox was neither ${bt}quick${bt}<!-- green, ${t1}: "Check spelling" --> nor particularly brown — more of a ${bt}tawny${bt}<!-- orange, ${t2}: "Too informal" --> amber, with a white-tipped tail that flickered like a candle in the undergrowth. She had been awake since before dawn, padding silently along the ridge above the farm.
 
 - She was **bold** by nature
 - She was *cautious* by experience
-- She was, above all, ${bt}hungry${bt}<!-- red ${t3} -->
+- She was, above all, ${bt}hungry${bt}<!-- red, ${t3}: "" -->
 
 ## The Dog
 
-The dog, for his part, was not lazy in any meaningful sense. He was simply ${bt}old${bt}<!-- blue ${t4} -->. His name was Jasper, and he had been guarding the same gate for eleven years. He watched the fox with one open eye and decided, as he always did, that the effort was not worth it.
+The dog, for his part, was not lazy in any meaningful sense. He was simply ${bt}old${bt}<!-- blue, ${t4}: "Consider 'elderly'" -->. His name was Jasper, and he had been guarding the same gate for eleven years. He watched the fox with one open eye and decided, as he always did, that the effort was not worth it.
 
 > "Some battles," Jasper seemed to say, "are won by not fighting them."
 
 ## The Valley
 
-The valley stretched south toward the river, flanked by two long ridges of ${bt}limestone${bt}<!-- purple ${t5} -->. Farmers had worked this land for generations, leaving behind dry-stone walls, sunken lanes, and the occasional rusted harrow half-buried in a hedgerow.
+The valley stretched south toward the river, flanked by two long ridges of ${bt}limestone${bt}<!-- purple, ${t5}: "Geological fact" -->. Farmers had worked this land for generations, leaving behind dry-stone walls, sunken lanes, and the occasional rusted harrow half-buried in a hedgerow.
 
 ### Flora
 
@@ -376,11 +376,11 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     const state = view.state;
     const range = state.selection.main;
 
-    const makeInsert = (text: string): string => {
+  const makeInsert = (text: string): string => {
       if (style === 0) return `\`${text}\``;
-    const id = new Date().toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+      const id = new Date().toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
       const colorName = highlightStyles[style - 1].name;
-      return `\`${text}\`<!-- ${colorName} ${id} -->`;
+      return `\`${text}\`<!-- ${colorName}, ${id}: "" -->`;
     };
 
     if (!range.empty) {
@@ -431,7 +431,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
   // - When cursor is outside a span: backticks and comment are hidden, word gets colored bg
   // - When cursor is inside a span: full raw text is shown for editing
 
-  const annotationPattern = /`([^`]+)`<!--\s*(\w+)\s+[\d\s\w:,]+-->/g;
+  const annotationPattern = /`([^`]+)`<!--\s*(\w+),\s*[\d\s\w:,]+:\s*"([^"]*)"\s*-->/g;
   const styleColorMap: Record<string, string> = Object.fromEntries(
     highlightStyles.map(s => [s.name, s.color])
   );
@@ -451,6 +451,84 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     const Lfg  = luminance(gruvbox.fg);
     const Lann = luminance(hex);
     return contrast(Lann, Lbg) >= contrast(Lann, Lfg) ? gruvbox.bg : gruvbox.fg;
+  }
+
+  class AnnotationWidget extends WidgetType {
+    color: string;
+    comment: string;
+    spanStart: number;
+    spanEnd: number;
+    view: EditorView;
+
+    constructor(
+      color: string,
+      comment: string,
+      spanStart: number,
+      spanEnd: number,
+      view: EditorView
+    ) {
+      super();
+      this.color = color;
+      this.comment = comment;
+      this.spanStart = spanStart;
+      this.spanEnd = spanEnd;
+      this.view = view;
+    }
+
+    toDOM() {
+      const wrap = document.createElement("span");
+      wrap.style.display = "inline-flex";
+      wrap.style.alignItems = "center";
+      wrap.style.backgroundColor = this.color + "30";
+      wrap.style.borderRadius = "3px";
+      wrap.style.padding = "0 4px";
+      wrap.style.margin = "0 2px";
+
+      const input = document.createElement("input");
+      input.type = "text";
+      input.value = this.comment;
+      input.placeholder = "💬";
+      input.style.background = "transparent";
+      input.style.border = "none";
+      input.style.color = contrastColor(this.color);
+      input.style.outline = "none";
+      input.style.fontFamily = "inherit";
+      input.style.fontSize = "inherit";
+      input.style.width = this.comment ? `${this.comment.length}ch` : "2ch";
+      input.style.minWidth = "2ch";
+
+      input.addEventListener("blur", () => {
+        this.updateComment(input.value);
+      });
+
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          input.blur();
+        } else if (e.key === "Escape") {
+          input.blur();
+          this.view.focus();
+        }
+      });
+
+      input.addEventListener("input", () => {
+        input.style.width = Math.max(input.value.length, 2) + "ch";
+      });
+
+      wrap.appendChild(input);
+      setTimeout(() => input.focus(), 0);
+      return wrap;
+    }
+
+    ignoreEvent() { return false; }
+
+    updateComment(newComment: string) {
+      const doc = this.view.state.doc;
+      const fullText = doc.sliceString(this.spanStart, this.spanEnd);
+      const newText = fullText.replace(/"([^"]*)"$/, `"${newComment}"`);
+      this.view.dispatch({
+        changes: { from: this.spanStart, to: this.spanEnd, insert: newText }
+      });
+    }
   }
 
   class EmptyWidget extends WidgetType {
@@ -493,6 +571,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
             let match: RegExpExecArray | null;
             while ((match = annotationPattern.exec(text)) !== null) {
               const colorName = match[2];
+              const comment = match[3] || "";
               const color = styleColorMap[colorName];
               if (!color) continue;
 
@@ -501,12 +580,20 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
               const wordStart = spanStart + 1;
               const wordEnd   = wordStart + match[1].length;
               const closeBacktick = wordEnd;
+              const quoteStart = match[0].indexOf('"');
+              const commentStart = spanStart + quoteStart + 1;
+              const commentEnd = commentStart + comment.length;
 
               const cursorInside = cursor >= spanStart && cursor <= spanEnd;
 
               if (cursorInside) {
-                builder.add(spanStart, spanEnd, Decoration.mark({
-                  attributes: { style: `background-color: ${color}30; border-radius: 3px;` }
+                builder.add(spanStart, wordStart,
+                  Decoration.replace({ widget: new EmptyWidget() }));
+                builder.add(wordStart, wordEnd, Decoration.mark({
+                  class: `cm-annotation-${colorName}`
+                }));
+                builder.add(wordEnd, spanEnd, Decoration.replace({
+                  widget: new AnnotationWidget(color, comment, spanStart, spanEnd, view)
                 }));
               } else {
                 builder.add(spanStart, wordStart,
@@ -514,8 +601,17 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
                 builder.add(wordStart, wordEnd, Decoration.mark({
                   class: `cm-annotation-${colorName}`
                 }));
-                builder.add(closeBacktick, spanEnd,
-                  Decoration.replace({ widget: new EmptyWidget() }));
+                if (comment) {
+                  builder.add(wordEnd, spanEnd,
+                    Decoration.replace({ widget: new EmptyWidget() }));
+                } else {
+                  const emptyMsgStart = wordEnd + 1;
+                  const emptyMsgEnd = spanEnd;
+                  builder.add(wordEnd, emptyMsgStart,
+                    Decoration.replace({ widget: new EmptyWidget() }));
+                  builder.add(emptyMsgStart, emptyMsgEnd,
+                    Decoration.replace({ widget: new EmptyWidget() }));
+                }
               }
             }
           }
