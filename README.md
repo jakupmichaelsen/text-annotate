@@ -15,6 +15,9 @@ Designed for ESL teachers giving feedback on student assignments.
 - **Space Key** — Wrap word or selection in backticks
 - **Paste in Normal Mode** — `p` replaces entire document with clipboard content
 - **Color Annotations** — Highlight text with 6 colors for feedback (Alt+H/L, Alt+J/K)
+- **Annotation Tooltips** — Hover or place cursor on annotation to see metadata
+- **Edit Annotations** — Double-click or press Enter to edit annotation notes
+- **Raw Mode** — Toggle to reveal raw annotation markup
 
 ## Tech Stack
 
@@ -63,6 +66,7 @@ Then connect your repo to your preferred platform.
 | `Alt+L` | Set annotation style 6 (orange) |
 | `Alt+J` | Previous annotation style |
 | `Alt+K` | Next annotation style |
+| `Enter` | Edit annotation note (when cursor on annotation) |
 | `/` | Search |
 | `:wq` | Save and... well, it's a web app |
 
