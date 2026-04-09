@@ -8,31 +8,28 @@ Designed for ESL teachers giving feedback on student assignments.
 
 ## Features
 
-- **Vim Mode** — Full Vim keybindings (Normal, Insert, Visual modes)
-- **Gruvbox Theme** — Warm, eye-friendly syntax highlighting
-- **Markdown** — Write and edit markdown with full syntax highlighting
-- **Status Bar** — Live mode, line, column, and active annotation style
-- **Space Key** — Wrap word or selection using the active annotation style
-- **Paste in Normal Mode** — `p` replaces entire document with clipboard content
-- **Color Annotations** — Highlight text with 6 named colors (yellow, green, blue, red, purple, orange)
-- **Annotation Format** — Annotations are stored as standard markdown: `` `word`<!-- color timestamp "note" --> ``
+- **Gruvbox Theme** — Warm, eye-friendly dark theme with syntax highlighting
+- **Markdown** — Full markdown support with syntax highlighting
+- **Color Annotations** — Highlight text with 6 named colors (yellow, green, blue, red, purple, orange), plus plain backtick style
+- **Annotation Format** — Stored as standard markdown: `` `word`<!-- color, timestamp: "note" --> ``
 - **Tooltip Preview** — Cursor on annotation shows a floating bubble with color, timestamp, and note
-- **Edit Annotations** — Double-click or press `Enter` to edit the annotation note inline
-- **Recolor Annotations** — `Alt+J/K` cycles colors on an existing annotation when cursor is on it
-- **Raw Annotations** — Checkbox in the footer reveals full HTML comment markup for editing
-- **Display Line Navigation** — `j`/`k` and arrow keys navigate visual (wrapped) lines
-- **Line-Wrapping Motion** — `h`/`l` and left/right arrows continue across line boundaries
+- **Inline Note Editing** — Double-click or press `Enter` on an annotation to edit its note inline
+- **Recolor Annotations** — `q`/`e` or `n`/`N` cycles colors on an annotation when cursor is on it
+- **Display Modes** — Clean (hidden syntax), Raw current (reveal on cursor), Raw all (reveal everything)
+- **Padding Controls** — Sidebar sliders for L/R/T/B editor padding
+- **Status Bar** — Live line, column, selection count, and active style
+- **Custom Keymap** — Ergonomic single-hand navigation without vim mode
 
 ## Annotation Format
 
-Annotations are stored directly in the markdown file as invisible HTML comments:
+Annotations are stored directly in the markdown as invisible HTML comments:
 
 ```markdown
-The fox was `quick`<!-- green 2026-04-06T10:00:01 "Check spelling" --> nor particularly brown.
+The fox was `quick`<!-- green, 6 Apr 2026 10:00:01: "Check spelling" --> nor particularly brown.
 ```
 
 - **color** — one of: `yellow`, `green`, `blue`, `red`, `purple`, `orange`
-- **timestamp** — ISO-style local datetime, auto-generated on wrap
+- **timestamp** — local datetime, auto-generated on wrap
 - **note** — optional free-text comment, editable inline
 
 The file remains valid, portable markdown. HTML comments are invisible in rendered output.
@@ -41,7 +38,6 @@ The file remains valid, portable markdown. HTML comments are invisible in render
 
 - Svelte 5
 - CodeMirror 6
-- Vim (via @replit/codemirror-vim)
 - Vite
 
 ## Getting Started
@@ -60,19 +56,18 @@ npm run preview  # preview production build
 
 | Key | Action |
 |-----|--------|
-| `i` | Enter Insert mode |
-| `Esc` | Enter Normal mode |
-| `v` / `V` | Visual / Visual Line mode |
-| `p` | Replace document with clipboard |
-| `Space` | Wrap word/selection with active annotation style |
-| `Alt+H` | Set style 1 (yellow) — or recolor annotation under cursor |
-| `Alt+L` | Set style 6 (orange) — or recolor annotation under cursor |
-| `Alt+J` | Previous style — or cycle annotation color left |
-| `Alt+K` | Next style — or cycle annotation color right |
-| `Enter` | Edit annotation note (cursor on annotation, normal mode) |
-| `j` / `k` | Move by display line (respects word wrap) |
-| `h` / `l` | Move left/right, wrapping across line boundaries |
-| `/` | Search |
+| `h` / `l` | Char left / right |
+| `j` / `k` | Word forward / back |
+| `w` / `s` | Line up / down (visual, preserves column) |
+| `a` / `d` | Line start / end |
+| `Space` | Wrap word or selection with active style |
+| `q` / `e` | Style prev / next (or recolor annotation under cursor) |
+| `n` / `N` | Style next / prev (same as e/q) |
+| `Enter` | Toggle inline note editor on annotation under cursor |
+| `x` | Remove annotation (leaves plain word) |
+| `u` / `U` | Undo / redo |
+| `Ctrl+Z` | Undo |
+| `Ctrl+Y` | Redo |
 
 ## License
 
