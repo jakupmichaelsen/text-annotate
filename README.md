@@ -16,8 +16,12 @@ Designed for ESL teachers giving feedback on student assignments.
 - **Inline Note Editing** — Double-click or press `Enter` on an annotation to edit its note inline
 - **Recolor Annotations** — `q`/`e` or `n`/`N` cycles colors on an annotation when cursor is on it
 - **Display Modes** — Clean (hidden syntax), Raw current (reveal on cursor), Raw all (reveal everything)
-- **Padding Controls** — Sidebar sliders for L/R/T/B editor padding
-- **Status Bar** — Live line, column, selection count, and active style
+- **Blockquote Comments** — Use `>` blockquotes as teacher comments; styled with background, border, and italic text. Configurable alignment and width via sidebar
+- **File Loading** — Load `.txt`, `.md`, and `.docx` files directly in the browser (DOCX via mammoth.js)
+- **Auto-save** — Editor content persisted to `localStorage` automatically
+- **Padding Controls** — Sidebar sliders for L/R/T/B editor padding, line height, and font size
+- **Notes Controls** — Sidebar sliders for blockquote alignment and background width
+- **Status Bar** — Live line, column, word count (total and selection), and active style
 - **Custom Keymap** — Ergonomic single-hand navigation without vim mode
 
 ## Annotation Format
@@ -34,11 +38,22 @@ The fox was `quick`<!-- green, 6 Apr 2026 10:00:01: "Check spelling" --> nor par
 
 The file remains valid, portable markdown. HTML comments are invisible in rendered output.
 
+## Blockquote Comments
+
+Use standard markdown blockquotes as document-level teacher comments:
+
+```markdown
+> This paragraph needs more detail.
+```
+
+Blockquotes are styled with a warm background, orange left border, and italic text — visually distinct from the student's writing. Alignment and background width are adjustable in the sidebar.
+
 ## Tech Stack
 
 - Svelte 5
 - CodeMirror 6
 - Vite
+- mammoth.js (DOCX → text conversion)
 
 ## Getting Started
 
@@ -56,10 +71,16 @@ npm run preview  # preview production build
 
 | Key | Action |
 |-----|--------|
-| `h` / `l` | Char left / right |
-| `j` / `k` | Word forward / back |
-| `w` / `s` | Line up / down (visual, preserves column) |
-| `a` / `d` | Line start / end |
+| `j` / `k` | Char left / word right |
+| `h` / `l` | Word left / char right |
+| `w` / `s` | Line up / down |
+| `a` / `d` | Sentence start / end |
+| `A` / `D` | Line start / end (Home / End) |
+| `W` / `S` | Doc start / end |
+| `Shift+j/k` | Select char left / word right |
+| `Shift+h/l` | Select word left / char right |
+| `Shift+w/s` | Select to doc start / end |
+| `Shift+a/d` | Select to line start / end |
 | `Space` | Wrap word or selection with active style |
 | `q` / `e` | Style prev / next (or recolor annotation under cursor) |
 | `n` / `N` | Style next / prev (same as e/q) |

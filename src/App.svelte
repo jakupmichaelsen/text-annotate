@@ -7,12 +7,17 @@
     WidgetType, showTooltip, type Tooltip,
     type DecorationSet, type ViewUpdate
   } from "@codemirror/view";
-  import { EditorSelection, RangeSet, StateField } from "@codemirror/state";
+  import { EditorSelection, RangeSet, StateField, type Range, type SelectionRange } from "@codemirror/state";
   import {
     defaultKeymap, history, historyKeymap, undo, redo,
     cursorLineUp, cursorLineDown, cursorLineStart, cursorLineEnd,
-    cursorCharLeft, cursorCharRight, cursorGroupForward, cursorGroupBackward,
-    selectAll
+    cursorCharLeft, cursorCharRight,
+    cursorDocStart, cursorDocEnd,
+    selectCharLeft, selectCharRight,
+    selectLineUp, selectLineDown,
+    selectLineStart, selectLineEnd,
+    selectDocStart, selectDocEnd,
+    selectGroupForward, selectGroupBackward
   } from "@codemirror/commands";
   import { searchKeymap } from "@codemirror/search";
   import { RangeSetBuilder } from "@codemirror/state";
@@ -25,24 +30,103 @@
 
   let editorEl: HTMLDivElement;
   let view: EditorView;
+  let fileInput: HTMLInputElement;
+
+  const SENTENCE_END = /[.!?\n]/;
+
+  function cursorSentenceStart(v: EditorView) {
+    const pos = v.state.selection.main.head;
+    const text = v.state.doc.toString();
+    let i = Math.max(0, pos - 1);
+    while (i > 0 && text[i] === ' ') i--;
+    while (i > 0 && !SENTENCE_END.test(text[i - 1])) i--;
+    while (i < pos && text[i] === ' ') i++;
+    v.dispatch({ selection: { anchor: i } });
+  }
+
+  function cursorSentenceEnd(v: EditorView) {
+    const pos = v.state.selection.main.head;
+    const text = v.state.doc.toString();
+    let i = pos;
+    while (i < text.length && !SENTENCE_END.test(text[i])) i++;
+    if (i < text.length) i++; // include the punctuation
+    v.dispatch({ selection: { anchor: i } });
+  }
+
+  function selectToSentenceStart(v: EditorView) {
+    const { anchor, head } = v.state.selection.main;
+    const text = v.state.doc.toString();
+    let i = Math.max(0, head - 1);
+    while (i > 0 && text[i] === ' ') i--;
+    while (i > 0 && !SENTENCE_END.test(text[i - 1])) i--;
+    while (i < head && text[i] === ' ') i++;
+    v.dispatch({ selection: { anchor, head: i } });
+  }
+
+  function selectToSentenceEnd(v: EditorView) {
+    const { anchor, head } = v.state.selection.main;
+    const text = v.state.doc.toString();
+    let i = head;
+    while (i < text.length && !SENTENCE_END.test(text[i])) i++;
+    if (i < text.length) i++;
+    v.dispatch({ selection: { anchor, head: i } });
+  }
+
+  function loadFile(e: Event) {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+    const insert = (text: string) =>
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+    if (file.name.endsWith(".docx")) {
+      file.arrayBuffer().then(buf =>
+        import("mammoth").then(m => m.extractRawText({ arrayBuffer: buf }))
+      ).then(r => insert(r.value));
+    } else {
+      file.text().then(insert);
+    }
+    (e.target as HTMLInputElement).value = "";
+  }
   let padLeft = 40;
   let padRight = 40;
   let padTop = 16;
   let padBottom = 64;
+  let lineHeight = 1.6;
+  let fontSize = 14;
+  let showHelp = false;
 
   let currentStyle = 0;
   let annotationMode: "clean" | "raw" | "all" = "clean";
+  let blockquoteAlign: "left" | "center" | "right" = "left";
+  let blockquoteBgWidth = 100;
+  let editorMode: "normal" | "insert" = "normal";
   let line = 1;
   let column = 1;
   let selectionInfo = "0 selected";
+  let wordCount = 0;
+  let selWordCount = 0;
+
+  function setMode(mode: "normal" | "insert") {
+    editorMode = mode;
+    if (view) {
+      view.dispatch({});  // trigger keymap/decoration rebuild
+      // In normal mode, show a block cursor via a theme class on the editor dom
+      view.dom.classList.toggle("mode-insert", mode === "insert");
+      view.dom.classList.toggle("mode-normal", mode === "normal");
+    }
+  }
 
   $: if (view) {
-    const el = view.dom.querySelector<HTMLElement>(".cm-content");
-    if (el) {
-      el.style.paddingLeft   = `${padLeft}px`;
-      el.style.paddingRight  = `${padRight}px`;
-      el.style.paddingTop    = `${padTop}px`;
-      el.style.paddingBottom = `${padBottom}px`;
+    const content = view.dom.querySelector<HTMLElement>(".cm-content");
+    if (content) {
+      content.style.paddingLeft   = `${padLeft}px`;
+      content.style.paddingRight  = `${padRight}px`;
+      content.style.paddingTop    = `${padTop}px`;
+      content.style.paddingBottom = `${padBottom}px`;
+    }
+    const scroller = view.dom.querySelector<HTMLElement>(".cm-scroller");
+    if (scroller) {
+      scroller.style.lineHeight = `${lineHeight}`;
+      scroller.style.fontSize   = `${fontSize}px`;
     }
   }
 
@@ -84,6 +168,8 @@
     return `# The Quick Brown Fox
 
 The quick brown fox jumps over the ${bt}lazy${bt}<!-- yellow, ${t0}: "" --> dog. It was an unremarkable morning in the valley, the kind where mist clings to the hedgerows and the air smells faintly of damp earth and pine.
+
+> This is a teacher comment — check the adjective choice in this paragraph.
 
 ## The Fox
 
@@ -132,7 +218,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     { tag: tags.labelName, color: gruvbox.yellow },
     { tag: tags.keyword, color: gruvbox.red },
     { tag: [tags.atom, tags.bool, tags.null], color: gruvbox.purple },
-    { tag: [tags.number, tags.integer, tags.float], color: gruvbox.purple },
+    { tag: [tags.number, tags.integer, tags.float], color: gruvbox.purple   },
     { tag: [tags.string, tags.special(tags.string)], color: gruvbox.green },
     { tag: tags.regexp, color: gruvbox.aqua },
     { tag: tags.escape, color: gruvbox.orange },
@@ -142,6 +228,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     { tag: [tags.operator, tags.compareOperator, tags.logicOperator], color: gruvbox.red },
     { tag: [tags.punctuation, tags.separator, tags.bracket], color: gruvbox.fgMuted },
     { tag: tags.comment, color: gruvbox.comment },
+    { tag: tags.quote, color: "inherit" },
     { tag: tags.meta, color: gruvbox.orange },
     { tag: tags.monospace, color: "inherit" }
   ]);
@@ -153,7 +240,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
       ".cm-content": { textAlign: "left", padding: "1rem 1.25rem 4rem", minHeight: "100%", caretColor: gruvbox.cursor, whiteSpace: "pre-wrap", wordBreak: "break-word" },
       ".cm-line": { textAlign: "left" },
       "&.cm-focused .cm-cursor": { borderLeftColor: gruvbox.cursor },
-      "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { backgroundColor: gruvbox.selection, opacity: 0.5 },
+      "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { backgroundColor: `${gruvbox.orange} !important`, color: gruvbox.bg, opacity: '50%' },
       ".cm-gutters": { backgroundColor: gruvbox.bgHard, color: gruvbox.gutterText, borderRight: `1px solid ${gruvbox.border}` },
       ".cm-activeLine": { backgroundColor: gruvbox.activeLine },
       ".cm-activeLineGutter": { backgroundColor: gruvbox.bgAlt, color: gruvbox.yellow },
@@ -168,9 +255,12 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
       ])),
       ".cm-formatting-code": { color: gruvbox.orange },
       ".cm-formatting-code-block": { color: gruvbox.orange },
-      ".cm-formatting": { color: gruvbox.fgMuted }
+      ".cm-formatting": { color: gruvbox.fgMuted },
+      ".cm-blockquote-line": { borderLeft: `3px solid ${gruvbox.orange}`, paddingLeft: "0.75em", backgroundColor: "#4a3520", marginBottom: "2px", fontStyle: "italic", color: gruvbox.yellow },
     }, { dark: true });
   }
+
+  const countWords = (s: string) => s.trim() === "" ? 0 : s.trim().split(/\s+/).length;
 
   function updateStatusFromView(v: EditorView) {
     const sel = v.state.selection.main;
@@ -179,6 +269,8 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     line = lineInfo.number;
     column = pos - lineInfo.from + 1;
     selectionInfo = `${Math.abs(sel.to - sel.from)} selected`;
+    wordCount = countWords(v.state.doc.toString());
+    selWordCount = sel.empty ? 0 : countWords(v.state.sliceDoc(sel.from, sel.to));
   }
 
   // Returns theme bg or fg based on which has better contrast against the annotation color
@@ -523,11 +615,33 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     : `Style: ${currentStyle}/6 (${highlightStyles[currentStyle - 1].name})`;
   $: styleColor = currentStyle === 0 ? gruvbox.fg : highlightStyles[currentStyle - 1].color;
 
+  const blockquoteLinePlugin = ViewPlugin.fromClass(class {
+    decorations: DecorationSet;
+    constructor(v: EditorView) { this.decorations = this.build(v); }
+    update(u: ViewUpdate) { if (u.docChanged || u.viewportChanged) this.decorations = this.build(u.view); }
+    build(v: EditorView): DecorationSet {
+      const builder = new RangeSetBuilder<Decoration>();
+      for (const { from, to } of v.visibleRanges) {
+        let pos = from;
+        while (pos <= to) {
+          const line = v.state.doc.lineAt(pos);
+          if (line.text.startsWith(">")) {
+            builder.add(line.from, line.from, Decoration.line({ class: "cm-blockquote-line" }));
+          }
+          pos = line.to + 1;
+        }
+      }
+      return builder.finish();
+    }
+  }, { decorations: v => v.decorations });
+
   const statusPlugin = ViewPlugin.fromClass(class {
     constructor(v: EditorView) { updateStatusFromView(v); }
     update(u: ViewUpdate) {
       if (u.docChanged || u.selectionSet || u.focusChanged || u.viewportChanged)
         updateStatusFromView(u.view);
+      if (u.docChanged)
+        localStorage.setItem('cm6-buffer', u.state.doc.toString());
     }
   });
 
@@ -555,35 +669,56 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
 
   // Custom keymap — all app-specific bindings
   function buildKeymap() {
+    const normal = (fn: (v: EditorView) => boolean) =>
+      (v: EditorView) => editorMode === "normal" ? fn(v) : false;
+
     return keymap.of([
-      // Navigation
-      { key: "ArrowLeft",  run: v => { cursorCharLeft(v);      return true; } },
-      { key: "ArrowRight", run: v => { cursorCharRight(v);     return true; } },
-      { key: "ArrowUp",    run: v => { cursorLineUp(v);        return true; } },
-      { key: "ArrowDown",  run: v => { cursorLineDown(v);      return true; } },
-      { key: "h", run: v => { cursorCharLeft(v);               return true; } },
-      { key: "l", run: v => { cursorCharRight(v);              return true; } },
-      { key: "j", run: v => { const r = v.state.selection.main; const n = v.moveByGroup(r, true);  v.dispatch({ selection: { anchor: n.head } }); return true; } },
-      { key: "k", run: v => { const r = v.state.selection.main; const n = v.moveByGroup(r, false); v.dispatch({ selection: { anchor: n.head } }); return true; } },
-      { key: "w", run: v => { cursorLineUp(v);                 return true; } },
-      { key: "s", run: v => { cursorLineDown(v);               return true; } },
-      { key: "a", run: v => { cursorLineStart(v);              return true; } },
-      { key: "d", run: v => { cursorLineEnd(v);                return true; } },
-      // Annotation actions
-      { key: "Space",  run: v => wrapSelectionOrWord(v, currentStyle) },
-      { key: "Enter",  run: v => toggleAnnotationEdit(v) },
-      { key: "x",      run: v => removeAnnotation(v) },
-      // Style cycling — on annotation changes its color, otherwise changes currentStyle
-      { key: "q", run: v => { if (!cycleAnnotationColor(v, -1)) cycleStyle(-1); return true; } },
-      { key: "e", run: v => { if (!cycleAnnotationColor(v, +1)) cycleStyle(+1); return true; } },
-      { key: "n", run: v => { if (!cycleAnnotationColor(v, +1)) cycleStyle(+1); return true; } },
-      { key: "N", run: v => { if (!cycleAnnotationColor(v, -1)) cycleStyle(-1); return true; } },
-      // Undo/redo
-      { key: "u",      run: v => undo(v) },
-      { key: "U",      run: v => redo(v) },
+      // Always: Escape returns to normal
+      { key: "Escape", run: v => { if (showHelp) { showHelp = false; return true; } setMode("normal"); return true; } },
+      // Always: i enters insert
+      { key: "i", run: v => { if (editorMode === "normal") { setMode("insert"); return true; } return false; } },
+
+      // Normal-mode only: Navigation
+      { key: "ArrowLeft",        run: normal(v => { cursorCharLeft(v);  return true; }) },
+      { key: "ArrowRight",       run: normal(v => { cursorCharRight(v); return true; }) },
+      { key: "ArrowUp",          run: normal(v => { cursorLineUp(v);    return true; }) },
+      { key: "ArrowDown",        run: normal(v => { cursorLineDown(v);  return true; }) },
+      { key: "Shift-ArrowLeft",  run: normal(v => { selectCharLeft(v);  return true; }) },
+      { key: "Shift-ArrowRight", run: normal(v => { selectCharRight(v); return true; }) },
+      { key: "Shift-ArrowUp",    run: normal(v => { selectLineUp(v);    return true; }) },
+      { key: "Shift-ArrowDown",  run: normal(v => { selectLineDown(v);  return true; }) },
+      { key: "h", run: normal(v => { const r = v.state.selection.main; const n = v.moveByGroup(r, false); v.dispatch({ selection: { anchor: n.head } }); return true; }) },
+      { key: "j", run: normal(v => { cursorCharLeft(v);  return true; }) },
+      { key: "k", run: normal(v => { const r = v.state.selection.main; const n = v.moveByGroup(r, true);  v.dispatch({ selection: { anchor: n.head } }); return true; }) },
+      { key: "l", run: normal(v => { cursorCharRight(v); return true; }) },
+      { key: "w", run: normal(v => { cursorLineUp(v);        return true; }) },
+      { key: "s", run: normal(v => { cursorLineDown(v);      return true; }) },
+      { key: "a", run: normal(v => { cursorSentenceStart(v); return true; }) },
+      { key: "d", run: normal(v => { cursorSentenceEnd(v);   return true; }) },
+      // Shift variants extend selection
+      { key: "H", run: normal(selectGroupBackward) },
+      { key: "J", run: normal(selectCharLeft) },
+      { key: "K", run: normal(selectGroupForward) },
+      { key: "L", run: normal(selectCharRight) },
+      { key: "W", run: normal(selectDocStart) },
+      { key: "S", run: normal(selectDocEnd) },
+      { key: "A", run: normal(selectLineStart) },
+      { key: "D", run: normal(selectLineEnd) },
+      // Normal-mode only: Annotation actions
+      { key: "Space",  run: normal(v => wrapSelectionOrWord(v, currentStyle)) },
+      { key: "Enter",  run: normal(v => toggleAnnotationEdit(v)) },
+      { key: "x",      run: normal(v => removeAnnotation(v)) },
+      { key: "q",      run: normal(v => { if (!cycleAnnotationColor(v, -1)) cycleStyle(-1); return true; }) },
+      { key: "e",      run: normal(v => { if (!cycleAnnotationColor(v, +1)) cycleStyle(+1); return true; }) },
+      { key: "n",      run: normal(v => { if (!cycleAnnotationColor(v, +1)) cycleStyle(+1); return true; }) },
+      { key: "N",      run: normal(v => { if (!cycleAnnotationColor(v, -1)) cycleStyle(-1); return true; }) },
+      // Undo/redo (both modes)
+      { key: "u",      run: normal(v => undo(v)) },
+      { key: "U",      run: normal(v => redo(v)) },
       { key: "Ctrl-z", run: v => undo(v) },
       { key: "Ctrl-y", run: v => redo(v) },
       { key: "Ctrl-Z", run: v => redo(v) },
+      { key: "?",      run: normal(() => { showHelp = !showHelp; return true; }) },
     ]);
   }
 
@@ -600,9 +735,10 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
       highlightActiveLineGutter(),
       syntaxHighlighting(gruvboxHighlight),
       buildKeymap(),
-      keymap.of([...historyKeymap, ...searchKeymap]),
+      keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
       markdown({ base: markdownLanguage }),
       statusPlugin,
+      blockquoteLinePlugin,
       buildHighlightDecorator(),
       annotationTooltipField,
       EditorView.theme({
@@ -616,12 +752,13 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
   onMount(() => {
     view = new EditorView({
       state: EditorState.create({
-        doc: starterDoc(),
+        doc: localStorage.getItem('cm6-buffer') ?? starterDoc(),
         extensions: [...baseExtensions()]
       }),
       parent: editorEl
     });
 
+    view.dom.classList.add("mode-normal");
     view.focus();
     updateStatusFromView(view);
 
@@ -640,16 +777,25 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
 >
   <div class="toolbar">
     <div class="title">Markdown Annotation Tool</div>
+    <span class="subtitle">paste or load .txt, .md, .docx</span>
+    <button class="toolbar-btn help-btn" on:click={() => showHelp = !showHelp} title="Keyboard shortcuts (?)">?</button>
   </div>
 
   <div class="main">
     <div class="sidebar">
+      <div class="sidebar-section">
+        <input type="file" accept=".md,.txt,.docx" style="display:none" bind:this={fileInput} on:change={loadFile} />
+        <button class="sidebar-label load-btn" on:click={() => fileInput.click()}>Load file…</button>
+      </div>
+
       <div class="sidebar-section">
         <div class="sidebar-label">Padding</div>
         <div class="slider-row"><span class="slider-lbl">L</span><input type="range" min="0" max="400" step="4" bind:value={padLeft}   class="slider" /><span class="slider-val">{padLeft}</span></div>
         <div class="slider-row"><span class="slider-lbl">R</span><input type="range" min="0" max="400" step="4" bind:value={padRight}  class="slider" /><span class="slider-val">{padRight}</span></div>
         <div class="slider-row"><span class="slider-lbl">T</span><input type="range" min="0" max="400" step="4" bind:value={padTop}    class="slider" /><span class="slider-val">{padTop}</span></div>
         <div class="slider-row"><span class="slider-lbl">B</span><input type="range" min="0" max="400" step="4" bind:value={padBottom} class="slider" /><span class="slider-val">{padBottom}</span></div>
+        <div class="slider-row"><span class="slider-lbl">LH</span><input type="range" min="1" max="3" step="0.05" bind:value={lineHeight} class="slider" /><span class="slider-val">{lineHeight.toFixed(2)}</span></div>
+        <div class="slider-row"><span class="slider-lbl">FS</span><input type="range" min="10" max="28" step="1" bind:value={fontSize} class="slider" /><span class="slider-val">{fontSize}</span></div>
       </div>
 
       <div class="sidebar-section">
@@ -675,14 +821,64 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
       </div>
 
       <div class="sidebar-section">
-        <div class="sidebar-label">Keys</div>
+        <div class="sidebar-label">Notes</div>
+        <div class="slider-row">
+          <span class="slider-lbl">A</span>
+          <input type="range" min="0" max="2" step="1" class="slider"
+            value={blockquoteAlign === "left" ? 0 : blockquoteAlign === "center" ? 1 : 2}
+            on:input={e => { blockquoteAlign = ["left","center","right"][+(e.target as HTMLInputElement).value] as any; }} />
+        </div>
+        <div class="slider-row">
+          <span class="slider-lbl">BG</span>
+          <input type="range" min="10" max="100" step="5" class="slider" bind:value={blockquoteBgWidth} />
+        </div>
+      </div>
+    </div>
+
+    <svelte:element this="style">{`.cm-blockquote-line { width: ${blockquoteBgWidth}% !important; ${blockquoteAlign === 'center' ? 'margin-left: auto; margin-right: auto;' : blockquoteAlign === 'right' ? 'margin-left: auto; margin-right: 0;' : 'margin-left: 0; margin-right: auto;'} }`}</svelte:element>
+    <div class="editor" bind:this={editorEl}></div>
+  </div>
+
+  <div class="statusbar">
+    <div class="status-left">
+      <span class="segment mode" style="color: {editorMode === 'insert' ? gruvbox.green : gruvbox.orange}">{editorMode.toUpperCase()}</span>
+      <span class="segment">{selectionInfo}</span>
+      <span class="segment style" style="color: {styleColor}">{styleLabel}</span>
+    </div>
+    <div class="status-right">
+      <span class="segment">Ln {line}</span>
+      <span class="segment">Col {column}</span>
+      <span class="segment">{selWordCount > 0 ? `${selWordCount} / ` : ""}{wordCount} words</span>
+      <span class="segment syntax">Markdown</span>
+    </div>
+  </div>
+
+  {#if showHelp}
+    <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
+    <div class="help-overlay" on:click|self={() => showHelp = false}>
+      <div class="help-panel">
+        <div class="help-header">
+          <span class="help-title">Keyboard Shortcuts</span>
+          <button class="help-close" on:click={() => showHelp = false}>✕</button>
+        </div>
         <div class="keybinds">
+          <div class="kb-section-label">Navigation</div>
           <div class="kb-group">
-            <span class="kb-key">h l</span><span class="kb-desc">char left / right</span>
-            <span class="kb-key">j k</span><span class="kb-desc">word forward / back</span>
+            <span class="kb-key">j k</span><span class="kb-desc">char left / word right</span>
+            <span class="kb-key">h l</span><span class="kb-desc">word left / char right</span>
             <span class="kb-key">w s</span><span class="kb-desc">line up / down</span>
-            <span class="kb-key">a d</span><span class="kb-desc">line start / end</span>
+            <span class="kb-key">a d</span><span class="kb-desc">sentence start / end</span>
+            <span class="kb-key">A D</span><span class="kb-desc">line start / end (home / end)</span>
+            <span class="kb-key">W S</span><span class="kb-desc">doc start / end</span>
           </div>
+          <div class="kb-section-label">Selection</div>
+          <div class="kb-group">
+            <span class="kb-key">⇧j ⇧k</span><span class="kb-desc">select char left / word right</span>
+            <span class="kb-key">⇧h ⇧l</span><span class="kb-desc">select word left / char right</span>
+            <span class="kb-key">⇧w ⇧s</span><span class="kb-desc">select to doc start / end</span>
+            <span class="kb-key">⇧a ⇧d</span><span class="kb-desc">select to line start / end</span>
+          </div>
+          <div class="kb-section-label">Annotations</div>
           <div class="kb-group">
             <span class="kb-key">Space</span><span class="kb-desc">wrap word / selection</span>
             <span class="kb-key">q e</span><span class="kb-desc">style prev / next</span>
@@ -690,28 +886,21 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
             <span class="kb-key">Enter</span><span class="kb-desc">edit annotation note</span>
             <span class="kb-key">x</span><span class="kb-desc">remove annotation</span>
           </div>
+          <div class="kb-section-label">History</div>
           <div class="kb-group">
             <span class="kb-key">u U</span><span class="kb-desc">undo / redo</span>
             <span class="kb-key">Ctrl+Z/Y</span><span class="kb-desc">undo / redo</span>
           </div>
+          <div class="kb-section-label">Other</div>
+          <div class="kb-group">
+            <span class="kb-key">i</span><span class="kb-desc">enter insert mode</span>
+            <span class="kb-key">Esc</span><span class="kb-desc">return to normal mode</span>
+            <span class="kb-key">?</span><span class="kb-desc">toggle this help</span>
+          </div>
         </div>
       </div>
     </div>
-
-    <div class="editor" bind:this={editorEl}></div>
-  </div>
-
-  <div class="statusbar">
-    <div class="status-left">
-      <span class="segment">{selectionInfo}</span>
-      <span class="segment style" style="color: {styleColor}">{styleLabel}</span>
-    </div>
-    <div class="status-right">
-      <span class="segment">Ln {line}</span>
-      <span class="segment">Col {column}</span>
-      <span class="segment syntax">Markdown</span>
-    </div>
-  </div>
+  {/if}
 </div>
 
 <style>
@@ -729,6 +918,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
   .toolbar {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     min-height: 36px;
     padding: 0 12px;
     background: var(--bg-hard);
@@ -739,6 +929,13 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     font-size: 14px;
     font-weight: 600;
     color: var(--fg);
+  }
+  .subtitle {
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--fg-muted);
+    margin-left: auto;
+    margin-right: 10px;
   }
 
   .main {
@@ -781,10 +978,17 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     color: var(--fg);
   }
 
-  .sidebar-toggle input[type="checkbox"],
   .sidebar-toggle input[type="radio"] {
     accent-color: var(--orange);
     cursor: pointer;
+  }
+  .load-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    font-family: inherit;
+    cursor: pointer;
+    text-align: left;
   }
 
   .keybinds { display: flex; flex-direction: column; gap: 10px; }
@@ -809,6 +1013,80 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     border-radius: 3px;
     cursor: pointer;
   }
+
+  .help-btn {
+    font-size: 14px;
+    font-weight: 700;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    color: var(--fg-muted);
+    border-color: var(--border);
+  }
+  .help-btn:hover { color: var(--yellow); border-color: var(--yellow); }
+
+  .help-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+  }
+
+  .help-panel {
+    background: var(--bg-hard);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 20px 24px;
+    min-width: 340px;
+    max-width: 480px;
+    width: 100%;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  }
+
+  .help-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+
+  .help-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--fg);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .help-close {
+    background: none;
+    border: none;
+    color: var(--fg-muted);
+    font-size: 14px;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: inherit;
+  }
+  .help-close:hover { color: var(--fg); background: var(--bg-alt); }
+
+  .kb-section-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--fg-muted);
+    font-weight: 600;
+    margin-top: 12px;
+    margin-bottom: 4px;
+  }
+  .kb-section-label:first-child { margin-top: 0; }
   .slider {
     flex: 1;
     accent-color: #7c6f64;
@@ -829,14 +1107,14 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
   .slider-lbl {
     color: var(--fg-muted);
     font-size: 11px;
-    width: 10px;
+    width: 14px;
     flex-shrink: 0;
   }
 
   .slider-val {
     color: var(--fg-muted);
     font-size: 11px;
-    width: 24px;
+    width: 30px;
     text-align: right;
     flex-shrink: 0;
   }
@@ -844,6 +1122,8 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
   .editor { min-height: 0; height: 100%; overflow: hidden; }
   :global(.editor .cm-editor) { width: 100%; height: 100%; }
   :global(.cm-editor.cm-focused) { outline: none; }
+  :global(.mode-normal .cm-cursor) { border-left-width: 8px !important; }
+  :global(.mode-insert .cm-cursor) { border-left-width: 2px !important; }
 
   .statusbar {
     display: flex;
@@ -867,4 +1147,5 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
   .segment:last-child { border-right: none; }
   .status-right .segment:first-child { border-left: 1px solid var(--border); }
   .syntax { color: var(--yellow); }
+  .mode { color: var(--orange); font-weight: 600; }
 </style>
