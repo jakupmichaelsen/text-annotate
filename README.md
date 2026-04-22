@@ -69,26 +69,32 @@ npm run preview  # preview production build
 
 ## Keyboard Shortcuts
 
+Layout A (WASD): `h`/`l` = char, `j`/`k` = word, `w`/`s` = line, `a`/`d` = sentence  
+Layout B (HJKL): `j`/`k` = char, `a`/`d` = word, `w`/`s` = line, `h`/`l` = sentence
+
 | Key | Action |
 |-----|--------|
-| `j` / `k` | Char left / word right |
-| `h` / `l` | Word left / char right |
+| `j` / `k` | Char/word left/right (A/B) |
+| `h` / `l` | Word/char right/left (A/B) |
 | `w` / `s` | Line up / down |
-| `a` / `d` | Sentence start / end |
-| `A` / `D` | Line start / end (Home / End) |
-| `W` / `S` | Doc start / end |
-| `Shift+j/k` | Select char left / word right |
-| `Shift+h/l` | Select word left / char right |
-| `Shift+w/s` | Select to doc start / end |
-| `Shift+a/d` | Select to line start / end |
+| `a` / `d` | Sentence/word start/end (A/B) |
+| `J` / `K` | Select char/word left/right (A/B) |
+| `H` / `L` | Select word/char right/left (A/B) |
+| `W` / `S` | Select line up / down |
+| `A` / `D` | Select sentence/word start/end (A/B) |
 | `Space` | Wrap word or selection with active style |
-| `q` / `e` | Style prev / next (or recolor annotation under cursor) |
-| `n` / `N` | Style next / prev (same as e/q) |
+| `q` / `e` | Color prev/next (or style cycle if not on annotation) |
+| `n` / `N` | Color next/prev (same as e/q) |
 | `Enter` | Toggle inline note editor on annotation under cursor |
 | `x` | Remove annotation (leaves plain word) |
 | `u` / `U` | Undo / redo |
 | `Ctrl+Z` | Undo |
 | `Ctrl+Y` | Redo |
+| `i` | Enter insert mode |
+| `Esc` | Return to normal mode |
+| `?` | Toggle help |
+
+Use sidebar to switch between layouts A and B. |
 
 ## License
 
