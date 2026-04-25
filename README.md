@@ -8,21 +8,19 @@ Designed for ESL teachers giving feedback on student assignments.
 
 ## Features
 
-- **Gruvbox Theme** — Warm, eye-friendly dark theme with syntax highlighting
-- **Markdown** — Full markdown support with syntax highlighting
-- **Color Annotations** — Highlight text with 6 named colors (yellow, green, blue, red, purple, orange), plus plain backtick style
-- **Annotation Format** — Stored as standard markdown: `` `word`<!-- color, timestamp: "note" --> ``
+- **Annotate/Edit Modes** — Compact switch for moving between annotation and editing
+- **Markdown Editor** — Full markdown support with syntax highlighting
+- **Color Annotations** — Highlight text with 6 named colors plus plain backtick style
+- **Annotation Format** — Stored as standard markdown comments with color, timestamp, and note
 - **Tooltip Preview** — Cursor on annotation shows a floating bubble with color, timestamp, and note
 - **Inline Note Editing** — Double-click or press `Enter` on an annotation to edit its note inline
-- **Recolor Annotations** — `q`/`e` or `n`/`N` cycles colors on an annotation when cursor is on it
-- **Display Modes** — Clean (hidden syntax), Raw current (reveal on cursor), Raw all (reveal everything)
-- **Blockquote Comments** — Use `>` blockquotes as teacher comments; styled with background, border, and italic text. Configurable alignment and width via sidebar
-- **File Loading** — Load `.txt`, `.md`, and `.docx` files directly in the browser (DOCX via mammoth.js)
-- **Auto-save** — Editor content persisted to `localStorage` automatically
-- **Padding Controls** — Sidebar sliders for L/R/T/B editor padding, line height, and font size
-- **Notes Controls** — Sidebar sliders for blockquote alignment and background width
-- **Status Bar** — Live line, column, word count (total and selection), and active style
-- **Custom Keymap** — Ergonomic single-hand navigation without vim mode
+- **File Loading** — Load `.txt`, `.md`, `.docx`, and `.pdf` files
+- **PDF Review Modal** — Extract text from PDFs, correct it beside the preview, then load it into the editor
+- **Autosave** — Restores the previous buffer from local storage when available
+- **Layout Controls** — Sidebar sliders for L/R/T/B padding, line height, and font size
+- **Blockquote Controls** — Tune note alignment and background width
+- **Status Bar** — Live line, column, selection count, and active style
+- **Custom Keymap** — Annotate mode navigation, selection, undo/redo, and help shortcuts
 
 ## Annotation Format
 
@@ -38,22 +36,11 @@ The fox was `quick`<!-- green, 6 Apr 2026 10:00:01: "Check spelling" --> nor par
 
 The file remains valid, portable markdown. HTML comments are invisible in rendered output.
 
-## Blockquote Comments
-
-Use standard markdown blockquotes as document-level teacher comments:
-
-```markdown
-> This paragraph needs more detail.
-```
-
-Blockquotes are styled with a warm background, orange left border, and italic text — visually distinct from the student's writing. Alignment and background width are adjustable in the sidebar.
-
 ## Tech Stack
 
 - Svelte 5
 - CodeMirror 6
 - Vite
-- mammoth.js (DOCX → text conversion)
 
 ## Getting Started
 
@@ -69,32 +56,38 @@ npm run preview  # preview production build
 
 ## Keyboard Shortcuts
 
-Layout A (WASD): `h`/`l` = char, `j`/`k` = word, `w`/`s` = line, `a`/`d` = sentence  
-Layout B (HJKL): `j`/`k` = char, `a`/`d` = word, `w`/`s` = line, `h`/`l` = sentence
+Annotate mode uses `h j k l`, arrows, and modifier variants for movement and selection.
 
 | Key | Action |
 |-----|--------|
-| `j` / `k` | Char/word left/right (A/B) |
-| `h` / `l` | Word/char right/left (A/B) |
-| `w` / `s` | Line up / down |
-| `a` / `d` | Sentence/word start/end (A/B) |
-| `J` / `K` | Select char/word left/right (A/B) |
-| `H` / `L` | Select word/char right/left (A/B) |
-| `W` / `S` | Select line up / down |
-| `A` / `D` | Select sentence/word start/end (A/B) |
-| `Space` | Wrap word or selection with active style |
-| `q` / `e` | Color prev/next (or style cycle if not on annotation) |
-| `n` / `N` | Color next/prev (same as e/q) |
-| `Enter` | Toggle inline note editor on annotation under cursor |
-| `x` | Remove annotation (leaves plain word) |
-| `u` / `U` | Undo / redo |
-| `Ctrl+Z` | Undo |
-| `Ctrl+Y` | Redo |
-| `i` | Enter insert mode |
-| `Esc` | Return to normal mode |
-| `?` | Toggle help |
-
-Use sidebar to switch between layouts A and B. |
+| `h j k l` | left / down / up / right |
+| `← ↓ ↑ →` | left / down / up / right |
+| `w s` | line up / down |
+| `a d` | word left / right |
+| `Ctrl+h/l` | word left / right |
+| `Ctrl+k/j` | paragraph start / end |
+| `Ctrl+w/s` | paragraph start / end |
+| `Ctrl+↑/↓` | paragraph start / end |
+| `Ctrl+a/d` | jump 5 words left / right |
+| `⇧hjkl` | select by char / line |
+| `⇧Arrows` | select by char / line |
+| `⇧w/s` | select by line |
+| `⇧a/d` | select by word |
+| `Ctrl+⇧h/l` | select by word |
+| `Ctrl+⇧k/j` | select to paragraph start / end |
+| `Ctrl+⇧w/s` | select to paragraph start / end |
+| `Ctrl+⇧↑/↓` | select to paragraph start / end |
+| `Ctrl+Shift+a/d` | select 5 words left / right |
+| `Space` | wrap word or selection |
+| `q e` | style prev / next |
+| `n N` | style next / prev |
+| `Enter` | edit annotation note |
+| `x` | remove annotation |
+| `u U` | undo / redo |
+| `Ctrl+Z/Y` | undo / redo |
+| `F2` | enter Edit mode |
+| `Esc` | return to Annotate mode |
+| `F1 / ?` | toggle help |
 
 ## License
 

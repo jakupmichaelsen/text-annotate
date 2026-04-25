@@ -11,12 +11,11 @@
   import {
     defaultKeymap, history, historyKeymap, undo, redo,
     cursorLineUp, cursorLineDown, cursorLineStart, cursorLineEnd,
-    cursorCharLeft, cursorCharRight,
-    cursorDocStart, cursorDocEnd,
+    cursorCharLeft, cursorCharRight, cursorGroupForward, cursorGroupBackward,
+    selectAll,
     selectCharLeft, selectCharRight,
     selectLineUp, selectLineDown,
     selectLineStart, selectLineEnd,
-    selectDocStart, selectDocEnd,
     selectGroupForward, selectGroupBackward
   } from "@codemirror/commands";
   import { searchKeymap } from "@codemirror/search";
@@ -27,65 +26,14 @@
   } from "@codemirror/language";
   import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
   import { tags } from "@lezer/highlight";
+  import * as pdfjsLib from "pdfjs-dist";
+  import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
+
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
   let editorEl: HTMLDivElement;
   let view: EditorView;
   let fileInput: HTMLInputElement;
-
-  const SENTENCE_END = /[.!?\n]/;
-
-  function cursorSentenceStart(v: EditorView) {
-    const pos = v.state.selection.main.head;
-    const text = v.state.doc.toString();
-    let i = Math.max(0, pos - 1);
-    while (i > 0 && text[i] === ' ') i--;
-    while (i > 0 && !SENTENCE_END.test(text[i - 1])) i--;
-    while (i < pos && text[i] === ' ') i++;
-    v.dispatch({ selection: { anchor: i } });
-  }
-
-  function cursorSentenceEnd(v: EditorView) {
-    const pos = v.state.selection.main.head;
-    const text = v.state.doc.toString();
-    let i = pos;
-    while (i < text.length && !SENTENCE_END.test(text[i])) i++;
-    if (i < text.length) i++; // include the punctuation
-    v.dispatch({ selection: { anchor: i } });
-  }
-
-  function selectToSentenceStart(v: EditorView) {
-    const { anchor, head } = v.state.selection.main;
-    const text = v.state.doc.toString();
-    let i = Math.max(0, head - 1);
-    while (i > 0 && text[i] === ' ') i--;
-    while (i > 0 && !SENTENCE_END.test(text[i - 1])) i--;
-    while (i < head && text[i] === ' ') i++;
-    v.dispatch({ selection: { anchor, head: i } });
-  }
-
-  function selectToSentenceEnd(v: EditorView) {
-    const { anchor, head } = v.state.selection.main;
-    const text = v.state.doc.toString();
-    let i = head;
-    while (i < text.length && !SENTENCE_END.test(text[i])) i++;
-    if (i < text.length) i++;
-    v.dispatch({ selection: { anchor, head: i } });
-  }
-
-  function loadFile(e: Event) {
-    const file = (e.target as HTMLInputElement).files?.[0];
-    if (!file) return;
-    const insert = (text: string) =>
-      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
-    if (file.name.endsWith(".docx")) {
-      file.arrayBuffer().then(buf =>
-        import("mammoth").then(m => m.extractRawText({ arrayBuffer: buf }))
-      ).then(r => insert(r.value));
-    } else {
-      file.text().then(insert);
-    }
-    (e.target as HTMLInputElement).value = "";
-  }
   let padLeft = 40;
   let padRight = 40;
   let padTop = 16;
@@ -93,6 +41,13 @@
   let lineHeight = 1.6;
   let fontSize = 14;
   let showHelp = false;
+  let pdfModalOpen = false;
+  let pdfDraftText = "";
+  let pdfPreviewUrl = "";
+  let pdfFileName = "";
+  let pdfIsParsing = false;
+  let pdfParseError = "";
+  $: pdfFrameSrc = pdfPreviewUrl ? `${pdfPreviewUrl}#zoom=75` : "";
 
   let currentStyle = 0;
   let annotationMode: "clean" | "raw" | "all" = "clean";
@@ -102,8 +57,216 @@
   let line = 1;
   let column = 1;
   let selectionInfo = "0 selected";
-  let wordCount = 0;
-  let selWordCount = 0;
+  $: editorModeLabel = editorMode === "insert" ? "EDIT" : "ANNOTATE";
+
+  function replaceDocument(text: string) {
+    if (!view) return;
+    const insert = sentenceLineBreaks(text);
+    view.dispatch({
+      changes: { from: 0, to: view.state.doc.length, insert },
+      selection: { anchor: 0 }
+    });
+    view.focus();
+  }
+
+  function sentenceLineBreaks(text: string) {
+    const shouldSkipBlock = (block: string) =>
+      /^(#{1,6}\s|[-*+]\s|\d+[.)]\s|>\s)/.test(block.trim());
+
+    return text
+      .replace(/\r\n?/g, "\n")
+      .split(/\n{2,}/)
+      .map(block => {
+        if (shouldSkipBlock(block)) return block.trim();
+        return block
+          .replace(/\s*\n\s*/g, " ")
+          .replace(/([.!?]["'”’)]?)(\s+)(?=[A-ZÆØÅ0-9"“‘])/g, "$1\n")
+          .trim();
+      })
+      .join("\n\n");
+  }
+
+  async function loadFile(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+
+    if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+      await openPdfModal(file);
+      return;
+    }
+
+    if (file.name.toLowerCase().endsWith(".docx")) {
+      const buffer = await file.arrayBuffer();
+      const mammoth = await import("mammoth");
+      const result = await mammoth.extractRawText({ arrayBuffer: buffer });
+      replaceDocument(result.value);
+      return;
+    }
+
+    replaceDocument(await file.text());
+  }
+
+  async function openPdfModal(file: File) {
+    if (pdfPreviewUrl) URL.revokeObjectURL(pdfPreviewUrl);
+    pdfPreviewUrl = URL.createObjectURL(file);
+    pdfFileName = file.name;
+    pdfDraftText = "";
+    pdfParseError = "";
+    pdfIsParsing = true;
+    pdfModalOpen = true;
+
+    try {
+      pdfDraftText = await extractPdfText(file);
+      if (!pdfDraftText.trim()) {
+        pdfParseError = "No selectable text was found. This PDF may be scanned, so paste or type corrected text here before loading.";
+      }
+    } catch (error) {
+      pdfParseError = error instanceof Error ? error.message : "Could not parse this PDF.";
+      pdfDraftText = "";
+    } finally {
+      pdfIsParsing = false;
+    }
+  }
+
+  async function extractPdfText(file: File) {
+    const data = new Uint8Array(await file.arrayBuffer());
+    const pdf = await pdfjsLib.getDocument({ data }).promise;
+    const pages: string[] = [];
+
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const content = await page.getTextContent();
+      const lines: string[] = [];
+      let currentLine = "";
+      let lastY: number | null = null;
+
+      for (const item of content.items) {
+        if (!("str" in item)) continue;
+        const text = item.str.trim();
+        if (!text) continue;
+        const y = Array.isArray(item.transform) ? item.transform[5] : null;
+        if (lastY !== null && y !== null && Math.abs(y - lastY) > 5) {
+          if (currentLine.trim()) lines.push(currentLine.trim());
+          currentLine = text;
+        } else {
+          currentLine += currentLine ? ` ${text}` : text;
+        }
+        lastY = y;
+      }
+
+      if (currentLine.trim()) lines.push(currentLine.trim());
+      pages.push(fixParagraphs(lines.join("\n")));
+    }
+
+    return pages.join("\n\n").replace(/[ \t]+\n/g, "\n").trim();
+  }
+
+  function fixParagraphs(text: string) {
+    const lines = text
+      .replace(/\r\n?/g, "\n")
+      .split("\n")
+      .map(line => line.replace(/[ \t]+/g, " ").trim());
+
+    const blocks: string[] = [];
+    let paragraph = "";
+
+    const flush = () => {
+      if (paragraph.trim()) blocks.push(paragraph.trim());
+      paragraph = "";
+    };
+
+    const isListItem = (line: string) => /^(\d+[.)]|[-*•])\s+/.test(line);
+    const isSectionHeadingStart = (line: string) =>
+      /^(summary on text|analytical essay|taking your starting point)/i.test(line);
+    const isHeading = (line: string) =>
+      line.length <= 90 &&
+      !/[.!?:;]["'”’)]?$/.test(line) &&
+      (
+        /^assignment\s+\d+/i.test(line) ||
+        /^#+\s+/.test(line) ||
+        /^[A-Z0-9ÆØÅ][A-Za-z0-9ÆØÅæøå ,'"“”‘’()/-]+$/.test(line)
+      );
+    const isHyphenated = (line: string) => /[A-Za-z]-$/.test(line);
+    const endsSentence = (line: string) => /[.!?]["'”’)]?$/.test(line);
+    const startsLowercase = (line: string) => /^[a-zæøå]/.test(line);
+    const startsParagraph = (line: string) =>
+      /^(the writer|later\b|in the text\b|the primary receivers\b|taking my\b|to begin with\b|however\b|above all\b|in conclusion\b)/i.test(line);
+    const nextNonEmpty = (from: number) => {
+      for (let i = from; i < lines.length; i += 1) {
+        if (lines[i]) return lines[i];
+      }
+      return "";
+    };
+
+    for (let index = 0; index < lines.length; index += 1) {
+      let line = lines[index];
+      if (!line) {
+        const next = nextNonEmpty(index + 1);
+        if (paragraph && next && !startsLowercase(next) && endsSentence(paragraph) && startsParagraph(next)) flush();
+        continue;
+      }
+
+      if (isSectionHeadingStart(line)) {
+        flush();
+        const headingParts = [line];
+        while (index + 1 < lines.length) {
+          const next = lines[index + 1];
+          if (!next) break;
+          if (isSectionHeadingStart(next) || isListItem(next)) break;
+          if (headingParts.join(" ").length > 90 && /[.!?]["'”’)]?$/.test(next)) break;
+          if (/^(the|in|to begin|however|above all|in conclusion|later|overall)\b/i.test(next)) break;
+          headingParts.push(next);
+          index += 1;
+          if (/[.!?]["'”’)]?$/.test(next)) break;
+        }
+        blocks.push(headingParts.join(" "));
+        continue;
+      }
+
+      if (isListItem(line) || isHeading(line)) {
+        flush();
+        blocks.push(line);
+        continue;
+      }
+
+      if (!paragraph) {
+        if (startsLowercase(line) && blocks.length) {
+          blocks[blocks.length - 1] += ` ${line}`;
+          continue;
+        }
+        paragraph = line;
+        continue;
+      }
+
+      if (isHyphenated(paragraph)) {
+        paragraph = paragraph.slice(0, -1) + line;
+      } else {
+        paragraph += ` ${line}`;
+      }
+    }
+
+    flush();
+    return blocks.join("\n\n");
+  }
+
+  function loadPdfDraft() {
+    replaceDocument(pdfDraftText);
+    closePdfModal();
+  }
+
+  function closePdfModal() {
+    pdfModalOpen = false;
+    pdfDraftText = "";
+    pdfFileName = "";
+    pdfParseError = "";
+    pdfIsParsing = false;
+    if (pdfPreviewUrl) {
+      URL.revokeObjectURL(pdfPreviewUrl);
+      pdfPreviewUrl = "";
+    }
+  }
 
   function setMode(mode: "normal" | "insert") {
     editorMode = mode;
@@ -116,6 +279,8 @@
   }
 
   $: if (view) {
+    view.dom.classList.toggle("mode-insert", editorMode === "insert");
+    view.dom.classList.toggle("mode-normal", editorMode === "normal");
     const content = view.dom.querySelector<HTMLElement>(".cm-content");
     if (content) {
       content.style.paddingLeft   = `${padLeft}px`;
@@ -128,6 +293,9 @@
       scroller.style.lineHeight = `${lineHeight}`;
       scroller.style.fontSize   = `${fontSize}px`;
     }
+    requestAnimationFrame(() => {
+      view?.scrollDOM.dispatchEvent(new Event("scroll"));
+    });
   }
 
   // Trigger CM6 decoration rebuild when annotationMode changes
@@ -168,8 +336,6 @@
     return `# The Quick Brown Fox
 
 The quick brown fox jumps over the ${bt}lazy${bt}<!-- yellow, ${t0}: "" --> dog. It was an unremarkable morning in the valley, the kind where mist clings to the hedgerows and the air smells faintly of damp earth and pine.
-
-> This is a teacher comment — check the adjective choice in this paragraph.
 
 ## The Fox
 
@@ -218,7 +384,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     { tag: tags.labelName, color: gruvbox.yellow },
     { tag: tags.keyword, color: gruvbox.red },
     { tag: [tags.atom, tags.bool, tags.null], color: gruvbox.purple },
-    { tag: [tags.number, tags.integer, tags.float], color: gruvbox.purple   },
+    { tag: [tags.number, tags.integer, tags.float], color: gruvbox.purple },
     { tag: [tags.string, tags.special(tags.string)], color: gruvbox.green },
     { tag: tags.regexp, color: gruvbox.aqua },
     { tag: tags.escape, color: gruvbox.orange },
@@ -228,7 +394,6 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     { tag: [tags.operator, tags.compareOperator, tags.logicOperator], color: gruvbox.red },
     { tag: [tags.punctuation, tags.separator, tags.bracket], color: gruvbox.fgMuted },
     { tag: tags.comment, color: gruvbox.comment },
-    { tag: tags.quote, color: "inherit" },
     { tag: tags.meta, color: gruvbox.orange },
     { tag: tags.monospace, color: "inherit" }
   ]);
@@ -242,8 +407,8 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
       "&.cm-focused .cm-cursor": { borderLeftColor: gruvbox.cursor },
       "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { backgroundColor: `${gruvbox.orange} !important`, color: gruvbox.bg, opacity: '50%' },
       ".cm-gutters": { backgroundColor: gruvbox.bgHard, color: gruvbox.gutterText, borderRight: `1px solid ${gruvbox.border}` },
-      ".cm-activeLine": { backgroundColor: gruvbox.activeLine },
-      ".cm-activeLineGutter": { backgroundColor: gruvbox.bgAlt, color: gruvbox.yellow },
+      ".cm-activeLine": { backgroundColor: "transparent" },
+      ".cm-activeLineGutter": { color: gruvbox.yellow },
       ".cm-foldGutter .cm-gutterElement": { color: gruvbox.fgMuted },
       ".cm-panels": { backgroundColor: gruvbox.bgSoft, color: gruvbox.fg },
       ".cm-searchMatch": { backgroundColor: "#665c54", outline: `1px solid ${gruvbox.yellow}` },
@@ -256,11 +421,16 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
       ".cm-formatting-code": { color: gruvbox.orange },
       ".cm-formatting-code-block": { color: gruvbox.orange },
       ".cm-formatting": { color: gruvbox.fgMuted },
-      ".cm-blockquote-line": { borderLeft: `3px solid ${gruvbox.orange}`, paddingLeft: "0.75em", backgroundColor: "#4a3520", marginBottom: "2px", fontStyle: "italic", color: gruvbox.yellow },
+      ".cm-blockquote-line": {
+        borderLeft: `3px solid ${gruvbox.orange}`,
+        paddingLeft: "0.75em",
+        backgroundColor: "#4a3520",
+        marginBottom: "2px",
+        fontStyle: "italic",
+        color: gruvbox.yellow
+      }
     }, { dark: true });
   }
-
-  const countWords = (s: string) => s.trim() === "" ? 0 : s.trim().split(/\s+/).length;
 
   function updateStatusFromView(v: EditorView) {
     const sel = v.state.selection.main;
@@ -269,8 +439,6 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     line = lineInfo.number;
     column = pos - lineInfo.from + 1;
     selectionInfo = `${Math.abs(sel.to - sel.from)} selected`;
-    wordCount = countWords(v.state.doc.toString());
-    selWordCount = sel.empty ? 0 : countWords(v.state.sliceDoc(sel.from, sel.to));
   }
 
   // Returns theme bg or fg based on which has better contrast against the annotation color
@@ -615,10 +783,22 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     : `Style: ${currentStyle}/6 (${highlightStyles[currentStyle - 1].name})`;
   $: styleColor = currentStyle === 0 ? gruvbox.fg : highlightStyles[currentStyle - 1].color;
 
+  const statusPlugin = ViewPlugin.fromClass(class {
+    constructor(v: EditorView) { updateStatusFromView(v); }
+    update(u: ViewUpdate) {
+      if (u.docChanged || u.selectionSet || u.focusChanged || u.viewportChanged)
+        updateStatusFromView(u.view);
+      if (u.docChanged)
+        localStorage.setItem("cm6-buffer", u.state.doc.toString());
+    }
+  });
+
   const blockquoteLinePlugin = ViewPlugin.fromClass(class {
     decorations: DecorationSet;
     constructor(v: EditorView) { this.decorations = this.build(v); }
-    update(u: ViewUpdate) { if (u.docChanged || u.viewportChanged) this.decorations = this.build(u.view); }
+    update(u: ViewUpdate) {
+      if (u.docChanged || u.viewportChanged) this.decorations = this.build(u.view);
+    }
     build(v: EditorView): DecorationSet {
       const builder = new RangeSetBuilder<Decoration>();
       for (const { from, to } of v.visibleRanges) {
@@ -635,13 +815,120 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     }
   }, { decorations: v => v.decorations });
 
-  const statusPlugin = ViewPlugin.fromClass(class {
-    constructor(v: EditorView) { updateStatusFromView(v); }
+  const columnGuidePlugin = ViewPlugin.fromClass(class {
+    marker: HTMLDivElement;
+    view: EditorView;
+    scheduled = false;
+
+    constructor(view: EditorView) {
+      this.view = view;
+      this.marker = document.createElement("div");
+      this.marker.className = "cm-column-guide";
+      view.scrollDOM.appendChild(this.marker);
+      this.updateMarker();
+      view.scrollDOM.addEventListener("scroll", this.updateMarker);
+    }
+
     update(u: ViewUpdate) {
-      if (u.docChanged || u.selectionSet || u.focusChanged || u.viewportChanged)
-        updateStatusFromView(u.view);
-      if (u.docChanged)
-        localStorage.setItem('cm6-buffer', u.state.doc.toString());
+      if (u.selectionSet || u.geometryChanged || u.viewportChanged || u.docChanged || u.transactions.length) {
+        this.updateMarker();
+      }
+    }
+
+    updateMarker = () => {
+      if (this.scheduled) return;
+      this.scheduled = true;
+      this.view.requestMeasure({
+        read: view => {
+          if (!view.hasFocus || !view.state.selection.main.empty) return null;
+          const coords = view.coordsAtPos(view.state.selection.main.head);
+          if (!coords) return null;
+          const scroller = view.scrollDOM;
+          const scrollerRect = scroller.getBoundingClientRect();
+          return {
+            left: coords.left - scrollerRect.left + scroller.scrollLeft,
+            top: scroller.scrollTop,
+            height: scroller.clientHeight
+          };
+        },
+        write: data => {
+          this.scheduled = false;
+          if (!data) {
+            this.marker.style.display = "none";
+            return;
+          }
+          this.marker.style.display = "block";
+          this.marker.style.left = `${data.left}px`;
+          this.marker.style.top = `${data.top}px`;
+          this.marker.style.height = `${data.height}px`;
+        }
+      });
+    }
+
+    destroy() {
+      this.view.scrollDOM.removeEventListener("scroll", this.updateMarker);
+      this.marker.remove();
+    }
+  });
+
+  const visualLinePlugin = ViewPlugin.fromClass(class {
+    marker: HTMLDivElement;
+    view: EditorView;
+    scheduled = false;
+
+    constructor(view: EditorView) {
+      this.view = view;
+      this.marker = document.createElement("div");
+      this.marker.className = "cm-visual-line-marker";
+      view.scrollDOM.appendChild(this.marker);
+      this.updateMarker();
+      view.scrollDOM.addEventListener("scroll", this.updateMarker);
+    }
+
+    update(update: ViewUpdate) {
+      if (update.selectionSet || update.geometryChanged || update.viewportChanged || update.docChanged) {
+        this.updateMarker();
+      }
+    }
+
+    updateMarker = () => {
+      if (this.scheduled) return;
+      this.scheduled = true;
+      this.view.requestMeasure({
+        read: view => {
+          if (!view.hasFocus) return null;
+          const coords = view.coordsAtPos(view.state.selection.main.head);
+          if (!coords) return null;
+          const scroller = view.scrollDOM;
+          const scrollerRect = scroller.getBoundingClientRect();
+          const lineHeight = parseFloat(getComputedStyle(view.contentDOM).lineHeight) || 18;
+          return {
+            top: coords.top - scrollerRect.top + scroller.scrollTop,
+            left: scroller.scrollLeft,
+            width: scroller.clientWidth,
+            height: lineHeight,
+            isEdit: editorMode === "insert"
+          };
+        },
+        write: data => {
+          this.scheduled = false;
+          if (!data) {
+            this.marker.style.display = "none";
+            return;
+          }
+          this.marker.classList.toggle("is-edit", data.isEdit);
+          this.marker.style.display = "block";
+          this.marker.style.top = `${data.top}px`;
+          this.marker.style.left = `${data.left}px`;
+          this.marker.style.width = `${data.width}px`;
+          this.marker.style.height = `${data.height}px`;
+        }
+      });
+    };
+
+    destroy() {
+      this.view.scrollDOM.removeEventListener("scroll", this.updateMarker);
+      this.marker.remove();
     }
   });
 
@@ -667,6 +954,48 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     }
   });
 
+  function moveByWordCount(v: EditorView, forward: boolean, count: number, extend = false) {
+    const selection = v.state.selection.main;
+    let range: SelectionRange = EditorSelection.cursor(selection.head);
+
+    for (let i = 0; i < count; i += 1) {
+      range = v.moveByGroup(range, forward);
+    }
+
+    v.dispatch({
+      selection: { anchor: extend ? selection.anchor : range.head, head: range.head }
+    });
+    return true;
+  }
+
+  function paragraphBoundary(v: EditorView, direction: "start" | "end", extend = false) {
+    const { doc, selection } = v.state;
+    const current = selection.main;
+    let line = doc.lineAt(current.head);
+
+    if (direction === "start") {
+      while (line.number > 1 && !line.text.trim()) line = doc.line(line.number - 1);
+      while (line.number > 1 && doc.line(line.number - 1).text.trim()) line = doc.line(line.number - 1);
+      if (current.head === line.from && line.number > 1) {
+        line = doc.line(line.number - 1);
+        while (line.number > 1 && !line.text.trim()) line = doc.line(line.number - 1);
+        while (line.number > 1 && doc.line(line.number - 1).text.trim()) line = doc.line(line.number - 1);
+      }
+      v.dispatch({ selection: { anchor: extend ? current.anchor : line.from, head: line.from } });
+      return true;
+    }
+
+    while (line.number < doc.lines && !line.text.trim()) line = doc.line(line.number + 1);
+    while (line.number < doc.lines && doc.line(line.number + 1).text.trim()) line = doc.line(line.number + 1);
+    if (current.head === line.to && line.number < doc.lines) {
+      line = doc.line(line.number + 1);
+      while (line.number < doc.lines && !line.text.trim()) line = doc.line(line.number + 1);
+      while (line.number < doc.lines && doc.line(line.number + 1).text.trim()) line = doc.line(line.number + 1);
+    }
+    v.dispatch({ selection: { anchor: extend ? current.anchor : line.to, head: line.to } });
+    return true;
+  }
+
   // Custom keymap — all app-specific bindings
   function buildKeymap() {
     const normal = (fn: (v: EditorView) => boolean) =>
@@ -674,9 +1003,10 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
 
     return keymap.of([
       // Always: Escape returns to normal
-      { key: "Escape", run: v => { if (showHelp) { showHelp = false; return true; } setMode("normal"); return true; } },
-      // Always: i enters insert
-      { key: "i", run: v => { if (editorMode === "normal") { setMode("insert"); return true; } return false; } },
+      { key: "Escape", run: v => { setMode("normal"); return true; } },
+      // Always: F2 enters edit
+      { key: "F2", run: v => { setMode("insert"); return true; } },
+      { key: "F1", run: () => { showHelp = !showHelp; return true; } },
 
       // Normal-mode only: Navigation
       { key: "ArrowLeft",        run: normal(v => { cursorCharLeft(v);  return true; }) },
@@ -687,23 +1017,47 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
       { key: "Shift-ArrowRight", run: normal(v => { selectCharRight(v); return true; }) },
       { key: "Shift-ArrowUp",    run: normal(v => { selectLineUp(v);    return true; }) },
       { key: "Shift-ArrowDown",  run: normal(v => { selectLineDown(v);  return true; }) },
-      { key: "h", run: normal(v => { const r = v.state.selection.main; const n = v.moveByGroup(r, false); v.dispatch({ selection: { anchor: n.head } }); return true; }) },
-      { key: "j", run: normal(v => { cursorCharLeft(v);  return true; }) },
-      { key: "k", run: normal(v => { const r = v.state.selection.main; const n = v.moveByGroup(r, true);  v.dispatch({ selection: { anchor: n.head } }); return true; }) },
+      { key: "Ctrl-ArrowLeft",        run: normal(v => { cursorGroupBackward(v); return true; }) },
+      { key: "Ctrl-ArrowRight",       run: normal(v => { cursorGroupForward(v);  return true; }) },
+      { key: "Ctrl-ArrowUp",          run: normal(v => paragraphBoundary(v, "start")) },
+      { key: "Ctrl-ArrowDown",        run: normal(v => paragraphBoundary(v, "end")) },
+      { key: "Shift-Ctrl-ArrowLeft",  run: normal(v => { selectGroupBackward(v); return true; }) },
+      { key: "Shift-Ctrl-ArrowRight", run: normal(v => { selectGroupForward(v);  return true; }) },
+      { key: "Shift-Ctrl-ArrowUp",    run: normal(v => paragraphBoundary(v, "start", true)) },
+      { key: "Shift-Ctrl-ArrowDown",  run: normal(v => paragraphBoundary(v, "end", true)) },
+      { key: "h", run: normal(v => { cursorCharLeft(v);  return true; }) },
+      { key: "j", run: normal(v => { cursorLineDown(v);  return true; }) },
+      { key: "k", run: normal(v => { cursorLineUp(v);    return true; }) },
       { key: "l", run: normal(v => { cursorCharRight(v); return true; }) },
+      { key: "Ctrl-h", run: normal(v => { cursorGroupBackward(v); return true; }) },
+      { key: "Ctrl-j", run: normal(v => paragraphBoundary(v, "end")) },
+      { key: "Ctrl-k", run: normal(v => paragraphBoundary(v, "start")) },
+      { key: "Ctrl-l", run: normal(v => { cursorGroupForward(v);  return true; }) },
       { key: "w", run: normal(v => { cursorLineUp(v);        return true; }) },
       { key: "s", run: normal(v => { cursorLineDown(v);      return true; }) },
-      { key: "a", run: normal(v => { cursorSentenceStart(v); return true; }) },
-      { key: "d", run: normal(v => { cursorSentenceEnd(v);   return true; }) },
+      { key: "a", run: normal(v => { cursorGroupBackward(v); return true; }) },
+      { key: "d", run: normal(v => { cursorGroupForward(v);  return true; }) },
+      { key: "Ctrl-w", run: normal(v => paragraphBoundary(v, "start")) },
+      { key: "Ctrl-s", run: normal(v => paragraphBoundary(v, "end")) },
+      { key: "Ctrl-a", run: normal(v => moveByWordCount(v, false, 5)) },
+      { key: "Ctrl-d", run: normal(v => moveByWordCount(v, true, 5)) },
       // Shift variants extend selection
-      { key: "H", run: normal(selectGroupBackward) },
-      { key: "J", run: normal(selectCharLeft) },
-      { key: "K", run: normal(selectGroupForward) },
-      { key: "L", run: normal(selectCharRight) },
-      { key: "W", run: normal(selectDocStart) },
-      { key: "S", run: normal(selectDocEnd) },
-      { key: "A", run: normal(selectLineStart) },
-      { key: "D", run: normal(selectLineEnd) },
+      { key: "H", run: normal(v => { selectCharLeft(v);  return true; }) },
+      { key: "J", run: normal(v => { selectLineDown(v);  return true; }) },
+      { key: "K", run: normal(v => { selectLineUp(v);    return true; }) },
+      { key: "L", run: normal(v => { selectCharRight(v); return true; }) },
+      { key: "Shift-Ctrl-h", run: normal(v => { selectGroupBackward(v); return true; }) },
+      { key: "Shift-Ctrl-j", run: normal(v => paragraphBoundary(v, "end", true)) },
+      { key: "Shift-Ctrl-k", run: normal(v => paragraphBoundary(v, "start", true)) },
+      { key: "Shift-Ctrl-l", run: normal(v => { selectGroupForward(v); return true; }) },
+      { key: "W", run: normal(v => { selectLineUp(v);        return true; }) },
+      { key: "S", run: normal(v => { selectLineDown(v);      return true; }) },
+      { key: "A", run: normal(v => { selectGroupBackward(v); return true; }) },
+      { key: "D", run: normal(v => { selectGroupForward(v);  return true; }) },
+      { key: "Shift-Ctrl-w", run: normal(v => paragraphBoundary(v, "start", true)) },
+      { key: "Shift-Ctrl-s", run: normal(v => paragraphBoundary(v, "end", true)) },
+      { key: "Shift-Ctrl-a", run: normal(v => moveByWordCount(v, false, 5, true)) },
+      { key: "Shift-Ctrl-d", run: normal(v => moveByWordCount(v, true, 5, true)) },
       // Normal-mode only: Annotation actions
       { key: "Space",  run: normal(v => wrapSelectionOrWord(v, currentStyle)) },
       { key: "Enter",  run: normal(v => toggleAnnotationEdit(v)) },
@@ -719,6 +1073,14 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
       { key: "Ctrl-y", run: v => redo(v) },
       { key: "Ctrl-Z", run: v => redo(v) },
       { key: "?",      run: normal(() => { showHelp = !showHelp; return true; }) },
+      {
+        any: (_view, event) =>
+          editorMode === "normal" &&
+          event.key.length === 1 &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !event.altKey
+      },
     ]);
   }
 
@@ -739,6 +1101,8 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
       markdown({ base: markdownLanguage }),
       statusPlugin,
       blockquoteLinePlugin,
+      columnGuidePlugin,
+      visualLinePlugin,
       buildHighlightDecorator(),
       annotationTooltipField,
       EditorView.theme({
@@ -752,7 +1116,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
   onMount(() => {
     view = new EditorView({
       state: EditorState.create({
-        doc: localStorage.getItem('cm6-buffer') ?? starterDoc(),
+        doc: localStorage.getItem("cm6-buffer") ?? starterDoc(),
         extensions: [...baseExtensions()]
       }),
       parent: editorEl
@@ -773,29 +1137,60 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     --bg-alt: ${gruvbox.bgAlt}; --border: ${gruvbox.border}; --fg: ${gruvbox.fg};
     --fg-muted: ${gruvbox.fgMuted}; --yellow: ${gruvbox.yellow}; --green: ${gruvbox.green};
     --blue: ${gruvbox.blue}; --orange: ${gruvbox.orange}; --selection: ${gruvbox.selection};
+    --active-line-annotate: #4a3520aa;
+    --active-line-edit: #2f4a3aaa;
+    --active-gutter-annotate: #4a3520;
+    --active-gutter-edit: #2f4a3a;
   `}
 >
   <div class="toolbar">
     <div class="title">Markdown Annotation Tool</div>
-    <span class="subtitle">paste or load .txt, .md, .docx</span>
+    <span class="subtitle">paste or load .txt, .md, .docx, .pdf</span>
     <button class="toolbar-btn help-btn" on:click={() => showHelp = !showHelp} title="Keyboard shortcuts (?)">?</button>
   </div>
 
   <div class="main">
     <div class="sidebar">
       <div class="sidebar-section">
-        <input type="file" accept=".md,.txt,.docx" style="display:none" bind:this={fileInput} on:change={loadFile} />
-        <button class="sidebar-label load-btn" on:click={() => fileInput.click()}>Load file…</button>
+        <input type="file" style="display:none" bind:this={fileInput} on:change={loadFile} />
+        <button class="sidebar-label load-btn" on:click={() => fileInput.click()}>Load file...</button>
       </div>
 
       <div class="sidebar-section">
-        <div class="sidebar-label">Padding</div>
+        <label class="mode-switch" aria-label="Switch between Annotate and Edit mode">
+          <span class:active={editorMode === "normal"}>Annotate</span>
+          <input
+            type="checkbox"
+            checked={editorMode === "insert"}
+            on:change={e => setMode((e.target as HTMLInputElement).checked ? "insert" : "normal")}
+          />
+          <span class="mode-track" aria-hidden="true">
+            <span class="mode-thumb"></span>
+          </span>
+          <span class:active={editorMode === "insert"}>Edit</span>
+        </label>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-label">Layout</div>
         <div class="slider-row"><span class="slider-lbl">L</span><input type="range" min="0" max="400" step="4" bind:value={padLeft}   class="slider" /><span class="slider-val">{padLeft}</span></div>
         <div class="slider-row"><span class="slider-lbl">R</span><input type="range" min="0" max="400" step="4" bind:value={padRight}  class="slider" /><span class="slider-val">{padRight}</span></div>
         <div class="slider-row"><span class="slider-lbl">T</span><input type="range" min="0" max="400" step="4" bind:value={padTop}    class="slider" /><span class="slider-val">{padTop}</span></div>
         <div class="slider-row"><span class="slider-lbl">B</span><input type="range" min="0" max="400" step="4" bind:value={padBottom} class="slider" /><span class="slider-val">{padBottom}</span></div>
         <div class="slider-row"><span class="slider-lbl">LH</span><input type="range" min="1" max="3" step="0.05" bind:value={lineHeight} class="slider" /><span class="slider-val">{lineHeight.toFixed(2)}</span></div>
         <div class="slider-row"><span class="slider-lbl">FS</span><input type="range" min="10" max="28" step="1" bind:value={fontSize} class="slider" /><span class="slider-val">{fontSize}</span></div>
+        <div class="slider-row">
+          <span class="slider-lbl">A</span>
+          <input type="range" min="0" max="2" step="1" class="slider"
+            value={blockquoteAlign === "left" ? 0 : blockquoteAlign === "center" ? 1 : 2}
+            on:input={e => { blockquoteAlign = ["left", "center", "right"][+(e.target as HTMLInputElement).value] as any; }} />
+          <span class="slider-val">{blockquoteAlign[0].toUpperCase()}</span>
+        </div>
+        <div class="slider-row">
+          <span class="slider-lbl">BG</span>
+          <input type="range" min="10" max="100" step="5" class="slider" bind:value={blockquoteBgWidth} />
+          <span class="slider-val">{blockquoteBgWidth}</span>
+        </div>
       </div>
 
       <div class="sidebar-section">
@@ -820,35 +1215,21 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
         </label>
       </div>
 
-      <div class="sidebar-section">
-        <div class="sidebar-label">Notes</div>
-        <div class="slider-row">
-          <span class="slider-lbl">A</span>
-          <input type="range" min="0" max="2" step="1" class="slider"
-            value={blockquoteAlign === "left" ? 0 : blockquoteAlign === "center" ? 1 : 2}
-            on:input={e => { blockquoteAlign = ["left","center","right"][+(e.target as HTMLInputElement).value] as any; }} />
-        </div>
-        <div class="slider-row">
-          <span class="slider-lbl">BG</span>
-          <input type="range" min="10" max="100" step="5" class="slider" bind:value={blockquoteBgWidth} />
-        </div>
-      </div>
     </div>
 
-    <svelte:element this="style">{`.cm-blockquote-line { width: ${blockquoteBgWidth}% !important; ${blockquoteAlign === 'center' ? 'margin-left: auto; margin-right: auto;' : blockquoteAlign === 'right' ? 'margin-left: auto; margin-right: 0;' : 'margin-left: 0; margin-right: auto;'} }`}</svelte:element>
+    <svelte:element this={"style"}>{`.cm-blockquote-line { width: ${blockquoteBgWidth}% !important; ${blockquoteAlign === "center" ? "margin-left: auto; margin-right: auto;" : blockquoteAlign === "right" ? "margin-left: auto; margin-right: 0;" : "margin-left: 0; margin-right: auto;"} }`}</svelte:element>
     <div class="editor" bind:this={editorEl}></div>
   </div>
 
   <div class="statusbar">
     <div class="status-left">
-      <span class="segment mode" style="color: {editorMode === 'insert' ? gruvbox.green : gruvbox.orange}">{editorMode.toUpperCase()}</span>
+      <span class="segment mode" style="color: {editorMode === 'insert' ? gruvbox.green : gruvbox.orange}">{editorModeLabel}</span>
       <span class="segment">{selectionInfo}</span>
       <span class="segment style" style="color: {styleColor}">{styleLabel}</span>
     </div>
     <div class="status-right">
       <span class="segment">Ln {line}</span>
       <span class="segment">Col {column}</span>
-      <span class="segment">{selWordCount > 0 ? `${selWordCount} / ` : ""}{wordCount} words</span>
       <span class="segment syntax">Markdown</span>
     </div>
   </div>
@@ -864,19 +1245,27 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
         <div class="keybinds">
           <div class="kb-section-label">Navigation</div>
           <div class="kb-group">
-            <span class="kb-key">j k</span><span class="kb-desc">char left / word right</span>
-            <span class="kb-key">h l</span><span class="kb-desc">word left / char right</span>
+            <span class="kb-key">h j k l</span><span class="kb-desc">left / down / up / right</span>
+            <span class="kb-key">← ↓ ↑ →</span><span class="kb-desc">left / down / up / right</span>
             <span class="kb-key">w s</span><span class="kb-desc">line up / down</span>
-            <span class="kb-key">a d</span><span class="kb-desc">sentence start / end</span>
-            <span class="kb-key">A D</span><span class="kb-desc">line start / end (home / end)</span>
-            <span class="kb-key">W S</span><span class="kb-desc">doc start / end</span>
+            <span class="kb-key">a d</span><span class="kb-desc">word left / right</span>
+            <span class="kb-key">Ctrl+h/l</span><span class="kb-desc">word left / right</span>
+            <span class="kb-key">Ctrl+k/j</span><span class="kb-desc">paragraph start / end</span>
+            <span class="kb-key">Ctrl+w/s</span><span class="kb-desc">paragraph start / end</span>
+            <span class="kb-key">Ctrl+↑/↓</span><span class="kb-desc">paragraph start / end</span>
+            <span class="kb-key">Ctrl+a/d</span><span class="kb-desc">jump 5 words left / right</span>
           </div>
           <div class="kb-section-label">Selection</div>
           <div class="kb-group">
-            <span class="kb-key">⇧j ⇧k</span><span class="kb-desc">select char left / word right</span>
-            <span class="kb-key">⇧h ⇧l</span><span class="kb-desc">select word left / char right</span>
-            <span class="kb-key">⇧w ⇧s</span><span class="kb-desc">select to doc start / end</span>
-            <span class="kb-key">⇧a ⇧d</span><span class="kb-desc">select to line start / end</span>
+            <span class="kb-key">⇧hjkl</span><span class="kb-desc">select by char / line</span>
+            <span class="kb-key">⇧Arrows</span><span class="kb-desc">select by char / line</span>
+            <span class="kb-key">⇧w ⇧s</span><span class="kb-desc">select by line</span>
+            <span class="kb-key">⇧a ⇧d</span><span class="kb-desc">select by word</span>
+            <span class="kb-key">Ctrl+⇧h/l</span><span class="kb-desc">select by word</span>
+            <span class="kb-key">Ctrl+⇧k/j</span><span class="kb-desc">select to paragraph start / end</span>
+            <span class="kb-key">Ctrl+⇧w/s</span><span class="kb-desc">select to paragraph start / end</span>
+            <span class="kb-key">Ctrl+⇧↑/↓</span><span class="kb-desc">select to paragraph start / end</span>
+            <span class="kb-key">Ctrl+Shift+a/d</span><span class="kb-desc">select 5 words left / right</span>
           </div>
           <div class="kb-section-label">Annotations</div>
           <div class="kb-group">
@@ -893,10 +1282,48 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
           </div>
           <div class="kb-section-label">Other</div>
           <div class="kb-group">
-            <span class="kb-key">i</span><span class="kb-desc">enter insert mode</span>
-            <span class="kb-key">Esc</span><span class="kb-desc">return to normal mode</span>
-            <span class="kb-key">?</span><span class="kb-desc">toggle this help</span>
+            <span class="kb-key">F2</span><span class="kb-desc">enter Edit mode</span>
+            <span class="kb-key">Esc</span><span class="kb-desc">return to Annotate mode</span>
+            <span class="kb-key">F1 / ?</span><span class="kb-desc">toggle this help</span>
           </div>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if pdfModalOpen}
+    <div class="pdf-modal-overlay">
+      <div class="pdf-modal" role="dialog" aria-modal="true" aria-label="Review PDF text">
+        <div class="pdf-modal-header">
+          <div>
+            <div class="pdf-modal-title">Review PDF text</div>
+            <div class="pdf-modal-file">{pdfFileName}</div>
+            <div class="pdf-modal-help">Correct the extracted text on the right, then load it into the editor.</div>
+          </div>
+          <button class="toolbar-btn" on:click={closePdfModal}>Close</button>
+        </div>
+
+        {#if pdfParseError}
+          <div class="pdf-error">{pdfParseError}</div>
+        {/if}
+
+        <div class="pdf-modal-body">
+          <div class="pdf-pane">
+            <iframe class="pdf-frame" src={pdfFrameSrc} title="PDF preview"></iframe>
+          </div>
+          <div class="pdf-pane">
+            <textarea
+              class="pdf-textarea"
+              bind:value={pdfDraftText}
+              disabled={pdfIsParsing}
+              aria-label="Extracted PDF text"
+            ></textarea>
+          </div>
+        </div>
+
+        <div class="pdf-modal-footer">
+          <span>{pdfIsParsing ? "Extracting text..." : `${pdfDraftText.length} characters`}</span>
+          <button class="toolbar-btn load-confirm-btn" on:click={loadPdfDraft} disabled={pdfIsParsing}>Load text</button>
         </div>
       </div>
     </div>
@@ -930,6 +1357,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     font-weight: 600;
     color: var(--fg);
   }
+
   .subtitle {
     font-size: 11px;
     font-weight: 400;
@@ -982,6 +1410,56 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     accent-color: var(--orange);
     cursor: pointer;
   }
+
+  .mode-switch {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    cursor: pointer;
+    user-select: none;
+    color: var(--fg-muted);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .mode-switch input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .mode-switch span.active {
+    color: var(--fg);
+  }
+
+  .mode-track {
+    position: relative;
+    width: 42px;
+    height: 22px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--bg-alt);
+    flex: 0 0 auto;
+  }
+
+  .mode-thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--orange);
+    transition: transform 120ms ease;
+  }
+
+  .mode-switch input:checked + .mode-track .mode-thumb {
+    transform: translateX(20px);
+  }
+
   .load-btn {
     background: none;
     border: none;
@@ -989,6 +1467,10 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     font-family: inherit;
     cursor: pointer;
     text-align: left;
+  }
+
+  .load-btn:hover {
+    color: var(--yellow);
   }
 
   .keybinds { display: flex; flex-direction: column; gap: 10px; }
@@ -1077,6 +1559,126 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
   }
   .help-close:hover { color: var(--fg); background: var(--bg-alt); }
 
+  .pdf-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 120;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    box-sizing: border-box;
+    background: rgba(0, 0, 0, 0.65);
+  }
+
+  .pdf-modal {
+    width: min(1180px, 100%);
+    height: min(820px, 94vh);
+    min-height: 420px;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-hard);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 14px 48px rgba(0, 0, 0, 0.55);
+  }
+
+  .pdf-modal-header,
+  .pdf-modal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .pdf-modal-footer {
+    border-top: 1px solid var(--border);
+    border-bottom: none;
+    color: var(--fg-muted);
+    font-size: 11px;
+  }
+
+  .pdf-modal-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--fg);
+  }
+
+  .pdf-modal-file {
+    margin-top: 2px;
+    color: var(--fg-muted);
+    font-size: 11px;
+  }
+
+  .pdf-modal-help {
+    margin-top: 4px;
+    color: var(--fg-muted);
+    font-size: 11px;
+  }
+
+  .pdf-error {
+    padding: 8px 12px;
+    color: var(--yellow);
+    background: #4a3520;
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+  }
+
+  .pdf-modal-body {
+    min-height: 0;
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+  }
+
+  .pdf-pane {
+    min-width: 0;
+    min-height: 0;
+    border-right: 1px solid var(--border);
+    background: var(--bg);
+  }
+
+  .pdf-pane:last-child {
+    border-right: none;
+  }
+
+  .pdf-frame,
+  .pdf-textarea {
+    width: 100%;
+    height: 100%;
+    border: none;
+    display: block;
+    box-sizing: border-box;
+  }
+
+  .pdf-frame {
+    background: #ffffff;
+  }
+
+  .pdf-textarea {
+    resize: none;
+    padding: 12px;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: inherit;
+    font-size: 11px;
+    line-height: 1.45;
+    outline: none;
+  }
+
+  .pdf-textarea:disabled {
+    color: var(--fg-muted);
+  }
+
+  .load-confirm-btn:disabled {
+    opacity: 0.5;
+    cursor: wait;
+  }
+
   .kb-section-label {
     font-size: 10px;
     text-transform: uppercase;
@@ -1122,9 +1724,35 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
   .editor { min-height: 0; height: 100%; overflow: hidden; }
   :global(.editor .cm-editor) { width: 100%; height: 100%; }
   :global(.cm-editor.cm-focused) { outline: none; }
-  :global(.mode-normal .cm-cursor) { border-left-width: 8px !important; }
-  :global(.mode-insert .cm-cursor) { border-left-width: 2px !important; }
-
+  :global(.cm-scroller) { position: relative; }
+  :global(.cm-visual-line-marker) {
+    position: absolute;
+    z-index: 0;
+    pointer-events: none;
+    background: var(--active-line-annotate);
+  }
+  :global(.cm-visual-line-marker.is-edit) {
+    background: var(--active-line-edit);
+  }
+  :global(.cm-column-guide) {
+    position: absolute;
+    z-index: 2;
+    width: 0;
+    border-left: 1px solid var(--border);
+    opacity: 0.8;
+    pointer-events: none;
+  }
+  :global(.mode-normal .cm-activeLineGutter) {
+    background: var(--active-gutter-annotate) !important;
+  }
+  :global(.mode-insert .cm-activeLineGutter) {
+    background: var(--active-gutter-edit) !important;
+  }
+  :global(.cm-content),
+  :global(.cm-gutters) {
+    position: relative;
+    z-index: 1;
+  }
   .statusbar {
     display: flex;
     justify-content: space-between;
@@ -1148,4 +1776,29 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
   .status-right .segment:first-child { border-left: 1px solid var(--border); }
   .syntax { color: var(--yellow); }
   .mode { color: var(--orange); font-weight: 600; }
+
+  @media (max-width: 760px) {
+    .pdf-modal-overlay {
+      padding: 8px;
+    }
+
+    .pdf-modal {
+      height: 96vh;
+      min-height: 0;
+    }
+
+    .pdf-modal-body {
+      grid-template-columns: 1fr;
+      grid-template-rows: minmax(180px, 42%) 1fr;
+    }
+
+    .pdf-pane {
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .pdf-pane:last-child {
+      border-bottom: none;
+    }
+  }
 </style>
