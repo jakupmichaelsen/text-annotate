@@ -53,6 +53,7 @@
   let annotationMode: "clean" | "raw" | "all" = "clean";
   let blockquoteAlign: "left" | "center" | "right" = "left";
   let blockquoteBgWidth = 100;
+  let blockquoteActive = false;
   let editorMode: "normal" | "insert" = "normal";
   let line = 1;
   let column = 1;
@@ -424,6 +425,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
       ".cm-blockquote-line": {
         borderLeft: `3px solid ${gruvbox.orange}`,
         paddingLeft: "0.75em",
+        paddingRight: "0.35em",
         backgroundColor: "#4a3520",
         marginBottom: "2px",
         fontStyle: "italic",
@@ -439,6 +441,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     line = lineInfo.number;
     column = pos - lineInfo.from + 1;
     selectionInfo = `${Math.abs(sel.to - sel.from)} selected`;
+    setCurrentBlockquoteFromView(v);
   }
 
   // Returns theme bg or fg based on which has better contrast against the annotation color
@@ -458,6 +461,73 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
   const annotationPattern = /`([^`]+)`<!--\s*(\w+),\s*(.+?):\s*"([^"]*)"\s*-->/g;
   const styleColorMap: Record<string, string> = Object.fromEntries(highlightStyles.map(s => [s.name, s.color]));
   let editingSpan: number | null = null;
+  type BlockquoteAlign = "left" | "center" | "right";
+  const blockquoteMetaPattern = /<!--\s*align:(left|center|right)\s+width:(\d{1,3})\s*-->/i;
+
+  function clampBlockquoteWidth(width: number) {
+    return Math.max(0, Math.min(100, Math.round(width)));
+  }
+
+  function parseBlockquoteMeta(lineText: string) {
+    const match = blockquoteMetaPattern.exec(lineText);
+    blockquoteMetaPattern.lastIndex = 0;
+    if (!match) return { align: "left" as BlockquoteAlign, width: 100, hasComment: false, commentStart: -1, commentEnd: -1 };
+    return {
+      align: match[1].toLowerCase() as BlockquoteAlign,
+      width: clampBlockquoteWidth(+match[2]),
+      hasComment: true,
+      commentStart: match.index,
+      commentEnd: match.index + match[0].length
+    };
+  }
+
+  function blockquoteComment(align: BlockquoteAlign, width: number) {
+    return `<!-- align:${align} width:${clampBlockquoteWidth(width)} -->`;
+  }
+
+  function blockquoteStyle(meta: { align: BlockquoteAlign; width: number }) {
+    const alignStyles = meta.align === "center"
+      ? "margin-left: auto; margin-right: auto;"
+      : meta.align === "right"
+        ? "margin-left: auto; margin-right: 0;"
+        : "margin-left: 0; margin-right: auto;";
+    return `display: block; box-sizing: border-box; width: ${meta.width}% !important; ${alignStyles}`;
+  }
+
+  function setCurrentBlockquoteFromView(v: EditorView) {
+    const lineInfo = v.state.doc.lineAt(v.state.selection.main.head);
+    if (!lineInfo.text.startsWith(">")) {
+      blockquoteActive = false;
+      return;
+    }
+
+    const meta = parseBlockquoteMeta(lineInfo.text);
+    blockquoteActive = true;
+    blockquoteAlign = meta.align;
+    blockquoteBgWidth = meta.width;
+  }
+
+  function updateCurrentBlockquote(v: EditorView, next: Partial<{ align: BlockquoteAlign; width: number }>) {
+    const line = v.state.doc.lineAt(v.state.selection.main.head);
+    if (!line.text.startsWith(">")) return false;
+
+    const meta = parseBlockquoteMeta(line.text);
+    const align = next.align ?? meta.align;
+    const width = clampBlockquoteWidth(next.width ?? meta.width);
+    const comment = blockquoteComment(align, width);
+    if (meta.hasComment) {
+      v.dispatch({
+        changes: { from: line.from + meta.commentStart, to: line.from + meta.commentEnd, insert: comment }
+      });
+    } else {
+      const insert = line.text.length ? `${line.text} ${comment}` : comment;
+      v.dispatch({ changes: { from: line.from, to: line.to, insert } });
+    }
+    blockquoteAlign = align;
+    blockquoteBgWidth = width;
+    blockquoteActive = true;
+    return true;
+  }
 
   // Annotation tooltip StateField
   const annotationTooltipField = StateField.define<readonly Tooltip[]>({
@@ -797,16 +867,30 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     decorations: DecorationSet;
     constructor(v: EditorView) { this.decorations = this.build(v); }
     update(u: ViewUpdate) {
-      if (u.docChanged || u.viewportChanged) this.decorations = this.build(u.view);
+      if (u.docChanged || u.viewportChanged || u.selectionSet || u.transactions.length > 0)
+        this.decorations = this.build(u.view);
     }
     build(v: EditorView): DecorationSet {
       const builder = new RangeSetBuilder<Decoration>();
+      const currentLineStart = v.state.doc.lineAt(v.state.selection.main.head).from;
       for (const { from, to } of v.visibleRanges) {
         let pos = from;
         while (pos <= to) {
           const line = v.state.doc.lineAt(pos);
           if (line.text.startsWith(">")) {
-            builder.add(line.from, line.from, Decoration.line({ class: "cm-blockquote-line" }));
+            const meta = parseBlockquoteMeta(line.text);
+            builder.add(line.from, line.from, Decoration.line({
+              class: "cm-blockquote-line",
+              attributes: { style: blockquoteStyle(meta) }
+            }));
+            const showMarkup = annotationMode === "all" || (annotationMode === "raw" && line.from === currentLineStart);
+            if (meta.hasComment && !showMarkup) {
+              builder.add(
+                line.from + meta.commentStart,
+                line.from + meta.commentEnd,
+                Decoration.replace({ widget: new EmptyWidget(), inclusive: false })
+              );
+            }
           }
           pos = line.to + 1;
         }
@@ -1182,13 +1266,28 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
         <div class="slider-row">
           <span class="slider-lbl">A</span>
           <input type="range" min="0" max="2" step="1" class="slider"
+            disabled={!blockquoteActive}
             value={blockquoteAlign === "left" ? 0 : blockquoteAlign === "center" ? 1 : 2}
-            on:input={e => { blockquoteAlign = ["left", "center", "right"][+(e.target as HTMLInputElement).value] as any; }} />
+            on:input={e => {
+              const align = ["left", "center", "right"][+(e.target as HTMLInputElement).value] as BlockquoteAlign;
+              if (view) updateCurrentBlockquote(view, { align });
+            }} />
           <span class="slider-val">{blockquoteAlign[0].toUpperCase()}</span>
         </div>
         <div class="slider-row">
           <span class="slider-lbl">BG</span>
-          <input type="range" min="10" max="100" step="5" class="slider" bind:value={blockquoteBgWidth} />
+          <input
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            class="slider"
+            disabled={!blockquoteActive}
+            value={blockquoteBgWidth}
+            on:input={e => {
+              if (view) updateCurrentBlockquote(view, { width: +(e.target as HTMLInputElement).value });
+            }}
+          />
           <span class="slider-val">{blockquoteBgWidth}</span>
         </div>
       </div>
@@ -1198,26 +1297,25 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
         <label class="sidebar-toggle">
           <input type="radio" name="annotationMode" value="clean"
             checked={annotationMode === "clean"}
-            on:change={() => { annotationMode = "clean"; view?.dispatch({}); }} />
+            on:change={() => { annotationMode = "clean"; view?.dispatch({}); view?.focus(); }} />
           Clean
         </label>
         <label class="sidebar-toggle">
           <input type="radio" name="annotationMode" value="raw"
             checked={annotationMode === "raw"}
-            on:change={() => { annotationMode = "raw"; view?.dispatch({}); }} />
+            on:change={() => { annotationMode = "raw"; view?.dispatch({}); view?.focus(); }} />
           Raw (current)
         </label>
         <label class="sidebar-toggle">
           <input type="radio" name="annotationMode" value="all"
             checked={annotationMode === "all"}
-            on:change={() => { annotationMode = "all"; view?.dispatch({}); }} />
+            on:change={() => { annotationMode = "all"; view?.dispatch({}); view?.focus(); }} />
           Raw (all)
         </label>
       </div>
 
     </div>
 
-    <svelte:element this={"style"}>{`.cm-blockquote-line { width: ${blockquoteBgWidth}% !important; ${blockquoteAlign === "center" ? "margin-left: auto; margin-right: auto;" : blockquoteAlign === "right" ? "margin-left: auto; margin-right: 0;" : "margin-left: 0; margin-right: auto;"} }`}</svelte:element>
     <div class="editor" bind:this={editorEl}></div>
   </div>
 
