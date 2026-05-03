@@ -7,7 +7,7 @@
     WidgetType, showTooltip, type Tooltip,
     type DecorationSet, type ViewUpdate
   } from "@codemirror/view";
-  import { EditorSelection, RangeSet, StateField, type Range, type SelectionRange } from "@codemirror/state";
+  import { EditorSelection, RangeSet, StateEffect, StateField, type Range, type SelectionRange, type Text } from "@codemirror/state";
   import {
     defaultKeymap, history, historyKeymap, undo, redo,
     cursorLineUp, cursorLineDown, cursorLineStart, cursorLineEnd,
@@ -21,7 +21,7 @@
   import { searchKeymap } from "@codemirror/search";
   import { RangeSetBuilder } from "@codemirror/state";
   import {
-    indentOnInput, bracketMatching, foldGutter,
+    indentOnInput, bracketMatching,
     syntaxHighlighting, HighlightStyle
   } from "@codemirror/language";
   import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
@@ -47,6 +47,11 @@
   let pdfFileName = "";
   let pdfIsParsing = false;
   let pdfParseError = "";
+  let activeSaveHandle: any = null;
+  let activeSaveName = "";
+  let pendingAutosaveText: string | null = null;
+  let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
+  let autosaveWriting = false;
   $: pdfFrameSrc = pdfPreviewUrl ? `${pdfPreviewUrl}#zoom=75` : "";
 
   let currentStyle = 0;
@@ -58,6 +63,17 @@
   let line = 1;
   let column = 1;
   let selectionInfo = "0 selected";
+  let wordCountInfo = "0 words";
+  type SummaryItem =
+    | { type: "annotation"; id: string; colorName: string; color: string; text: string; comment: string; timestamp: string; line: number; from: number; to: number; spanStart: number }
+    | { type: "blockquote"; id: string; text: string; line: number; from: number; to: number };
+  type SummarySection =
+    | { kind: "item"; id: string; item: SummaryItem }
+    | { kind: "group"; id: string; label: string; count: number; color: string; itemType: SummaryItem["type"]; items: SummaryItem[] };
+  let summaryItems: SummaryItem[] = [];
+  let summarySections: SummarySection[] = [];
+  let expandedSummaryCategories: Record<string, boolean> = {};
+  let summaryCollapsed = false;
   $: editorModeLabel = editorMode === "insert" ? "EDIT" : "ANNOTATE";
 
   function replaceDocument(text: string) {
@@ -92,6 +108,7 @@
     const file = input.files?.[0];
     input.value = "";
     if (!file) return;
+    clearActiveSaveTarget();
 
     if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
       await openPdfModal(file);
@@ -107,6 +124,112 @@
     }
 
     replaceDocument(await file.text());
+  }
+
+  function clearActiveSaveTarget() {
+    activeSaveHandle = null;
+    activeSaveName = "";
+    pendingAutosaveText = null;
+    if (autosaveTimer) {
+      clearTimeout(autosaveTimer);
+      autosaveTimer = null;
+    }
+  }
+
+  async function saveDocument() {
+    if (!view) return;
+    const suggestedName = activeSaveName || "annotations.md";
+    const text = view.state.doc.toString();
+    const picker = (window as any).showSaveFilePicker;
+
+    if (picker) {
+      try {
+        activeSaveHandle = await picker({
+          suggestedName,
+          types: [{ description: "Markdown", accept: { "text/markdown": [".md"] } }]
+        });
+        activeSaveName = activeSaveHandle.name || suggestedName;
+        await writeTextToHandle(activeSaveHandle, text);
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) console.error(error);
+      }
+      return;
+    }
+
+    const fallbackName = prompt("Save filename", suggestedName);
+    if (fallbackName) downloadText(fallbackName, text, "text/markdown;charset=utf-8");
+  }
+
+  function scheduleFileAutosave(text: string) {
+    if (!activeSaveHandle) return;
+    pendingAutosaveText = text;
+    if (autosaveTimer) clearTimeout(autosaveTimer);
+    autosaveTimer = setTimeout(() => {
+      autosaveTimer = null;
+      void flushFileAutosave();
+    }, 800);
+  }
+
+  async function flushFileAutosave() {
+    if (!activeSaveHandle || pendingAutosaveText === null) return;
+    if (autosaveWriting) {
+      scheduleFileAutosave(pendingAutosaveText);
+      return;
+    }
+
+    const text = pendingAutosaveText;
+    pendingAutosaveText = null;
+    autosaveWriting = true;
+    try {
+      await writeTextToHandle(activeSaveHandle, text);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      autosaveWriting = false;
+      if (pendingAutosaveText !== null) void flushFileAutosave();
+    }
+  }
+
+  async function writeTextToHandle(handle: any, text: string) {
+    const writable = await handle.createWritable();
+    await writable.write(text);
+    await writable.close();
+  }
+
+  async function exportCleanHtml() {
+    if (!view) return;
+    const suggestedName = `${stripExtension(activeSaveName || "annotations")}.html`;
+    const html = cleanHtmlDocument(view.state.doc.toString());
+    const picker = (window as any).showSaveFilePicker;
+
+    if (picker) {
+      try {
+        const handle = await picker({
+          suggestedName,
+          types: [{ description: "HTML", accept: { "text/html": [".html"] } }]
+        });
+        await writeTextToHandle(handle, html);
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) console.error(error);
+      }
+      return;
+    }
+
+    const fallbackName = prompt("Export filename", suggestedName);
+    if (fallbackName) downloadText(fallbackName, html, "text/html;charset=utf-8");
+  }
+
+  function stripExtension(name: string) {
+    return name.replace(/\.[^.]+$/, "") || "annotations";
+  }
+
+  function downloadText(filename: string, text: string, type: string) {
+    const url = URL.createObjectURL(new Blob([text], { type }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   async function openPdfModal(file: File) {
@@ -139,29 +262,73 @@
     for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
       const page = await pdf.getPage(pageNumber);
       const content = await page.getTextContent();
-      const lines: string[] = [];
-      let currentLine = "";
-      let lastY: number | null = null;
+      const rows: { y: number; items: { text: string; x: number; width: number }[] }[] = [];
 
       for (const item of content.items) {
         if (!("str" in item)) continue;
-        const text = item.str.trim();
+        const text = item.str.replace(/\s+/g, " ");
         if (!text) continue;
-        const y = Array.isArray(item.transform) ? item.transform[5] : null;
-        if (lastY !== null && y !== null && Math.abs(y - lastY) > 5) {
-          if (currentLine.trim()) lines.push(currentLine.trim());
-          currentLine = text;
+        const x = Array.isArray(item.transform) ? item.transform[4] : 0;
+        const y = Array.isArray(item.transform) ? item.transform[5] : 0;
+        const width = typeof item.width === "number" ? item.width : 0;
+        const row = rows.find(candidate => Math.abs(candidate.y - y) <= 3);
+
+        if (row) {
+          row.items.push({ text, x, width });
         } else {
-          currentLine += currentLine ? ` ${text}` : text;
+          rows.push({ y, items: [{ text, x, width }] });
         }
-        lastY = y;
       }
 
-      if (currentLine.trim()) lines.push(currentLine.trim());
+      const lines = rows
+        .sort((a, b) => b.y - a.y)
+        .map(row => buildPdfLine(row.items.sort((a, b) => a.x - b.x)))
+        .filter(line => line && !/^Side\s+\d+\s+af\s+\d+$/i.test(line));
+
       pages.push(fixParagraphs(lines.join("\n")));
     }
 
     return pages.join("\n\n").replace(/[ \t]+\n/g, "\n").trim();
+  }
+
+  function buildPdfLine(items: { text: string; x: number; width: number }[]) {
+    let line = "";
+    let lastEnd: number | null = null;
+
+    for (const item of items) {
+      const isSpace = !item.text.trim();
+
+      if (isSpace) {
+        if (line && !line.endsWith(" ")) line += " ";
+        lastEnd = item.x + item.width;
+        continue;
+      }
+
+      const text = item.text.trim();
+      if (lastEnd !== null && line && !line.endsWith(" ")) {
+        const gap = item.x - lastEnd;
+        const averageCharWidth = item.width / Math.max(text.length, 1);
+        const spaceThreshold = Math.max(1.5, Math.min(4, averageCharWidth * 0.45));
+
+        if (gap > spaceThreshold) line += " ";
+      }
+
+      line += text;
+      lastEnd = item.x + item.width;
+    }
+
+    return cleanPdfLine(line);
+  }
+
+  function cleanPdfLine(line: string) {
+    return line
+      .replace(/\s+/g, " ")
+      .replace(/\s+([.,;:!?])/g, "$1")
+      .replace(/([([{“‘])\s+/g, "$1")
+      .replace(/\s+([)\]}”’])/g, "$1")
+      .replace(/(\d)\s*([–-])\s*(\d)/g, "$1$2$3")
+      .replace(/([A-Za-zÆØÅæøå])\s+-\s+([A-Za-zÆØÅæøå])/g, "$1-$2")
+      .trim();
   }
 
   function fixParagraphs(text: string) {
@@ -270,12 +437,14 @@
   }
 
   function setMode(mode: "normal" | "insert") {
+    const selection = view?.state.selection;
     editorMode = mode;
     if (view) {
-      view.dispatch({});  // trigger keymap/decoration rebuild
+      view.dispatch(selection ? { selection } : {});  // trigger keymap/decoration rebuild
       // In normal mode, show a block cursor via a theme class on the editor dom
       view.dom.classList.toggle("mode-insert", mode === "insert");
       view.dom.classList.toggle("mode-normal", mode === "normal");
+      requestAnimationFrame(() => view?.focus());
     }
   }
 
@@ -303,16 +472,48 @@
   $: annotationMode, view && view.dispatch({});
 
   const highlightStyles = [
-    { name: "yellow",  color: "#fabd2f" },
     { name: "green",   color: "#b8bb26" },
-    { name: "blue",    color: "#83a598" },
     { name: "red",     color: "#fb4934" },
-    { name: "purple",  color: "#d3869b" },
-    { name: "orange",  color: "#fe8019" }
+    { name: "steel",   color: "#83a598" },
+    { name: "orange",  color: "#fe8019" },
+    { name: "periwinkle", color: "#8370d0" },
+    { name: "sand",    color: "#d8bd7f" },
+    { name: "mint",    color: "#6fc6a4" },
+    { name: "denim",   color: "#3f5f9f" },
+    { name: "yellow",  color: "#fabd2f" },
+    { name: "indigo",  color: "#4f46e5" },
+    { name: "brown",   color: "#8f6f3f" },
+    { name: "slate",   color: "#586e75" },
+    { name: "sky",     color: "#57a0d5" },
+    { name: "rosewood", color: "#8f3f4d" },
+    { name: "purple",  color: "#d3869b" }
   ];
-
   function cycleStyle(delta: number) {
-    currentStyle = ((currentStyle + delta) + 7) % 7;
+    currentStyle = cycleStyleNumber(currentStyle, delta);
+  }
+
+  function cycleStyleNumber(style: number, delta: number, includePlain = true) {
+    if (includePlain) {
+      const styleCount = highlightStyles.length + 1;
+      return ((style + delta) + styleCount) % styleCount;
+    }
+
+    const styleCount = highlightStyles.length;
+    const colorStyle = Math.max(1, style);
+    return (((colorStyle - 1 + delta) + styleCount) % styleCount) + 1;
+  }
+
+  function styleName(style: number) {
+    return style === 0 ? "" : highlightStyles[style - 1]?.name ?? "";
+  }
+
+  function styleColor(style: number) {
+    return style === 0 ? gruvbox.fg : highlightStyles[style - 1]?.color ?? gruvbox.fg;
+  }
+
+  function styleNumberForName(name: string) {
+    const index = highlightStyles.findIndex(s => s.name === name);
+    return index < 0 ? 1 : index + 1;
   }
 
   const gruvbox = {
@@ -348,7 +549,7 @@ The fox was neither ${bt}quick${bt}<!-- green, ${t1}: "Check spelling" --> nor p
 
 ## The Dog
 
-The dog, for his part, was not lazy in any meaningful sense. He was simply ${bt}old${bt}<!-- blue, ${t4}: "Consider 'elderly'" -->. His name was Jasper, and he had been guarding the same gate for eleven years. He watched the fox with one open eye and decided, as he always did, that the effort was not worth it.
+The dog, for his part, was not lazy in any meaningful sense. He was simply ${bt}old${bt}<!-- steel, ${t4}: "Consider 'elderly'" -->. His name was Jasper, and he had been guarding the same gate for eleven years. He watched the fox with one open eye and decided, as he always did, that the effort was not worth it.
 
 > "Some battles," Jasper seemed to say, "are won by not fighting them."
 
@@ -407,10 +608,9 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
       ".cm-line": { textAlign: "left" },
       "&.cm-focused .cm-cursor": { borderLeftColor: gruvbox.cursor },
       "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { backgroundColor: `${gruvbox.orange} !important`, color: gruvbox.bg, opacity: '50%' },
-      ".cm-gutters": { backgroundColor: gruvbox.bgHard, color: gruvbox.gutterText, borderRight: `1px solid ${gruvbox.border}` },
+      ".cm-gutters": { backgroundColor: gruvbox.bgHard, color: gruvbox.gutterText, borderRight: "none" },
       ".cm-activeLine": { backgroundColor: "transparent" },
       ".cm-activeLineGutter": { color: gruvbox.yellow },
-      ".cm-foldGutter .cm-gutterElement": { color: gruvbox.fgMuted },
       ".cm-panels": { backgroundColor: gruvbox.bgSoft, color: gruvbox.fg },
       ".cm-searchMatch": { backgroundColor: "#665c54", outline: `1px solid ${gruvbox.yellow}` },
       ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: "#7c6f64" },
@@ -428,7 +628,6 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
         paddingRight: "0.35em",
         backgroundColor: "#4a3520",
         marginBottom: "2px",
-        fontStyle: "italic",
         color: gruvbox.yellow
       }
     }, { dark: true });
@@ -441,6 +640,10 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     line = lineInfo.number;
     column = pos - lineInfo.from + 1;
     selectionInfo = `${Math.abs(sel.to - sel.from)} selected`;
+    const totalWords = countWords(v.state.doc.toString());
+    const selectedWords = sel.empty ? 0 : countWords(v.state.doc.sliceString(sel.from, sel.to));
+    wordCountInfo = sel.empty ? `${totalWords} words` : `${totalWords} words (${selectedWords} selected)`;
+    updateSummaryFromView(v);
     setCurrentBlockquoteFromView(v);
   }
 
@@ -463,6 +666,301 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
   let editingSpan: number | null = null;
   type BlockquoteAlign = "left" | "center" | "right";
   const blockquoteMetaPattern = /<!--\s*align:(left|center|right)\s+width:(\d{1,3})\s*-->/i;
+
+  function countWords(text: string) {
+    const visibleText = text
+      .replace(/`([^`]+)`<!--\s*\w+,\s*.+?:\s*"[^"]*"\s*-->/g, "$1")
+      .replace(/<!--[\s\S]*?-->/g, " ")
+      .replace(/`([^`\n]+)`/g, "$1");
+    return visibleText.match(/[\p{L}\p{N}]+(?:[’'-][\p{L}\p{N}]+)*/gu)?.length ?? 0;
+  }
+
+  function cleanHtmlDocument(markdownText: string) {
+    const body = renderCleanHtmlBody(markdownText);
+    return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapeHtml(stripExtension(activeSaveName || "Annotated document"))}</title>
+  <style>
+    body {
+      margin: 0;
+      background: ${gruvbox.bg};
+      color: ${gruvbox.fg};
+      font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      line-height: ${lineHeight};
+      font-size: ${fontSize}px;
+    }
+    main {
+      box-sizing: border-box;
+      max-width: 960px;
+      min-height: 100vh;
+      margin: 0 auto;
+      padding: ${padTop}px ${padRight}px ${padBottom}px ${padLeft}px;
+      white-space: normal;
+    }
+    p { margin: 0 0 1rem; }
+    h1, h2, h3, h4, h5, h6 { color: ${gruvbox.yellow}; margin: 1.25rem 0 0.75rem; line-height: 1.25; }
+    code { color: ${gruvbox.yellow}; background: ${gruvbox.bgSoft}; border: 1px solid ${gruvbox.border}; border-radius: 4px; padding: 0 0.25rem; }
+    blockquote {
+      border-left: 3px solid ${gruvbox.orange};
+      padding: 0.25rem 0.35rem 0.25rem 0.75rem;
+      margin-top: 0;
+      margin-bottom: 0.25rem;
+      background: #4a3520;
+      color: ${gruvbox.yellow};
+    }
+  </style>
+</head>
+<body>
+  <main>
+${body}
+  </main>
+</body>
+</html>
+`;
+  }
+
+  function renderCleanHtmlBody(markdownText: string) {
+    const blocks: string[] = [];
+    let paragraph: string[] = [];
+
+    const flushParagraph = () => {
+      if (!paragraph.length) return;
+      blocks.push(`    <p>${renderInlineHtml(paragraph.join(" "))}</p>`);
+      paragraph = [];
+    };
+
+    for (const rawLine of markdownText.replace(/\r\n?/g, "\n").split("\n")) {
+      const lineText = rawLine.trim();
+      if (!lineText) {
+        flushParagraph();
+        continue;
+      }
+
+      const heading = /^(#{1,6})\s+(.+)$/.exec(lineText);
+      if (heading) {
+        flushParagraph();
+        const level = heading[1].length;
+        blocks.push(`    <h${level}>${renderInlineHtml(heading[2])}</h${level}>`);
+        continue;
+      }
+
+      if (lineText.startsWith(">")) {
+        flushParagraph();
+        const meta = parseBlockquoteMeta(lineText);
+        const quoteText = lineText
+          .replace(blockquoteMetaPattern, "")
+          .replace(/^>\s?/, "")
+          .trim();
+        blocks.push(`    <blockquote style="${escapeHtml(blockquoteStyle(meta))}">${renderInlineHtml(quoteText)}</blockquote>`);
+        continue;
+      }
+
+      paragraph.push(lineText);
+    }
+
+    flushParagraph();
+    return blocks.join("\n");
+  }
+
+  function renderInlineHtml(text: string) {
+    const pattern = /`([^`]+)`<!--\s*(\w+),\s*.+?:\s*"[^"]*"\s*-->/g;
+    let html = "";
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+
+    while ((match = pattern.exec(text)) !== null) {
+      html += renderPlainInlineHtml(text.slice(lastIndex, match.index));
+      const color = styleColorMap[match[2]] || gruvbox.yellow;
+      html += `<span style="background:${escapeHtml(color)};color:${escapeHtml(contrastColor(color))};border-radius:3px;padding:0 2px;">${escapeHtml(match[1])}</span>`;
+      lastIndex = match.index + match[0].length;
+    }
+
+    html += renderPlainInlineHtml(text.slice(lastIndex));
+    return html;
+  }
+
+  function renderPlainInlineHtml(text: string) {
+    const withoutComments = text.replace(/<!--[\s\S]*?-->/g, "");
+    const escaped = escapeHtml(withoutComments);
+    return escaped.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+  }
+
+  function updateSummaryFromView(v: EditorView) {
+    const doc = v.state.doc;
+    const docText = doc.toString();
+    const items: SummaryItem[] = [];
+
+    annotationPattern.lastIndex = 0;
+    let annotation: RegExpExecArray | null;
+    while ((annotation = annotationPattern.exec(docText)) !== null) {
+      const spanStart = annotation.index;
+      const wordStart = spanStart + 1;
+      const wordEnd = wordStart + annotation[1].length;
+      const colorName = annotation[2];
+      items.push({
+        type: "annotation",
+        id: `annotation-${spanStart}`,
+        colorName,
+        color: styleColorMap[colorName] ?? gruvbox.fgMuted,
+        text: annotation[1],
+        timestamp: annotation[3],
+        comment: annotation[4],
+        line: doc.lineAt(spanStart).number,
+        from: wordStart,
+        to: wordEnd,
+        spanStart
+      });
+    }
+
+    items.push(...blockquoteSummaryItems(docText, doc));
+    const sortedItems = items.sort((a, b) => {
+      if (a.type !== b.type) return a.type === "blockquote" ? -1 : 1;
+      return a.from - b.from;
+    });
+    summaryItems = sortedItems;
+    summarySections = buildSummarySections(sortedItems);
+  }
+
+  function buildSummarySections(items: SummaryItem[]) {
+    const grouped = new Map<string, { label: string; color: string; itemType: SummaryItem["type"]; items: SummaryItem[] }>();
+    const order: string[] = [];
+
+    for (const item of items) {
+      const key = item.type === "blockquote" ? "blockquote:notes" : `annotation:${item.colorName}`;
+      if (!grouped.has(key)) {
+        order.push(key);
+        grouped.set(key, {
+          label: item.type === "blockquote" ? "Notes" : item.colorName,
+          color: item.type === "blockquote" ? gruvbox.yellow : item.color,
+          itemType: item.type,
+          items: []
+        });
+      }
+      grouped.get(key)!.items.push(item);
+    }
+
+    return order.map((key): SummarySection => {
+      const group = grouped.get(key)!;
+      if (group.items.length === 1) return { kind: "item", id: group.items[0].id, item: group.items[0] };
+      return {
+        kind: "group",
+        id: key,
+        label: group.label,
+        count: group.items.length,
+        color: group.color,
+        itemType: group.itemType,
+        items: group.items
+      };
+    });
+  }
+
+  function toggleSummaryCategory(id: string) {
+    expandedSummaryCategories = {
+      ...expandedSummaryCategories,
+      [id]: !expandedSummaryCategories[id]
+    };
+  }
+
+  function summaryTimestamp(timestamp: string) {
+    return timestamp
+      .replace(/\s+\d{4}(?=\s+\d{2}:\d{2})/, "")
+      .replace(/\s+\d{4}$/, "")
+      .replace(/(\d{2}:\d{2}):\d{2}$/, "$1");
+  }
+
+  function blockquoteSummaryItems(docText: string, doc: Text) {
+    const items: SummaryItem[] = [];
+    const lines = docText.split("\n");
+    let offset = 0;
+    let active: { from: number; to: number; line: number; parts: string[] } | null = null;
+
+    const flush = () => {
+      if (!active) return;
+      const text = active.parts.join(" ").replace(/\s+/g, " ").trim();
+      if (text) {
+        items.push({
+          type: "blockquote",
+          id: `blockquote-${active.from}`,
+          text,
+          line: active.line,
+          from: active.from,
+          to: active.to
+        });
+      }
+      active = null;
+    };
+
+    lines.forEach((rawLine, index) => {
+      const lineStart = offset;
+      const lineEnd = lineStart + rawLine.length;
+      const trimmed = rawLine.trimStart();
+      const isQuote = trimmed.startsWith(">");
+
+      if (isQuote) {
+        const quoteText = trimmed
+          .replace(blockquoteMetaPattern, "")
+          .replace(/^>\s?/, "")
+          .trim();
+        if (!active) active = { from: lineStart, to: lineEnd, line: index + 1, parts: [] };
+        active.to = lineEnd;
+        if (quoteText) active.parts.push(quoteText);
+      } else {
+        flush();
+      }
+
+      offset = lineEnd + 1;
+    });
+
+    flush();
+    return items;
+  }
+
+  function jumpToSummaryItem(item: SummaryItem) {
+    if (!view) return;
+    flashSummaryTarget(item);
+    view.dispatch({
+      selection: { anchor: item.from, head: item.to },
+      effects: EditorView.scrollIntoView(item.from, { y: "center" })
+    });
+    view.focus();
+  }
+
+  function handleSummaryItemKeydown(event: KeyboardEvent, item: SummaryItem) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    jumpToSummaryItem(item);
+  }
+
+  function editSummaryAnnotationComment(event: MouseEvent, item: Extract<SummaryItem, { type: "annotation" }>) {
+    event.stopPropagation();
+    if (!view) return;
+    editingSpan = item.spanStart;
+    flashSummaryTarget(item);
+    view.dispatch({
+      selection: { anchor: item.from, head: item.to },
+      effects: EditorView.scrollIntoView(item.from, { y: "center" })
+    });
+    view.focus();
+  }
+
+  function flashSummaryTarget(item: SummaryItem) {
+    if (!view) return;
+    const from = Math.min(item.from, item.to);
+    const to = Math.max(item.from, item.to);
+    view.dispatch({ effects: summaryJumpFlashEffect.of({ from, to }) });
+    window.setTimeout(() => view?.dispatch({ effects: summaryJumpFlashClearEffect.of(null) }), 850);
+  }
+
+  function escapeHtml(text: string) {
+    return text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
 
   function clampBlockquoteWidth(width: number) {
     return Math.max(0, Math.min(100, Math.round(width)));
@@ -767,7 +1265,8 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
       if (style === 0) return `\`${text}\``;
       const now = new Date();
       const ts = now.toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).replace(/,/g, "");
-      return `\`${text}\`<!-- ${highlightStyles[style - 1].name}, ${ts}: "" -->`;
+      const name = styleName(style);
+      return `\`${text}\`<!-- ${name}, ${ts}: "" -->`;
     };
     if (!range.empty) {
       const insert = makeInsert(state.doc.sliceString(range.from, range.to));
@@ -797,9 +1296,10 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     while ((m = annotationPattern.exec(docText)) !== null) {
       const spanStart = m.index, spanEnd = spanStart + m[0].length;
       if (cursor >= spanStart && cursor <= spanEnd) {
-        const currentIdx = highlightStyles.findIndex(s => s.name === m![2]);
-        const newIdx = ((currentIdx + delta) + highlightStyles.length) % highlightStyles.length;
-        const updated = m[0].replace(/^`([^`]+)`<!--\s*\w+,/, `\`$1\`<!-- ${highlightStyles[newIdx].name},`);
+        const newStyle = cycleStyleNumber(styleNumberForName(m[2]), delta, false);
+        const newName = styleName(newStyle);
+        const updated = m[0].replace(/^`([^`]+)`<!--\s*\w+,/, `\`$1\`<!-- ${newName},`);
+        currentStyle = newStyle;
         v.dispatch({ changes: { from: spanStart, to: spanEnd, insert: updated } });
         return true;
       }
@@ -850,17 +1350,41 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
   // Status bar reactive values
   $: styleLabel = currentStyle === 0
     ? "Style: plain"
-    : `Style: ${currentStyle}/6 (${highlightStyles[currentStyle - 1].name})`;
-  $: styleColor = currentStyle === 0 ? gruvbox.fg : highlightStyles[currentStyle - 1].color;
+    : `Style: ${currentStyle}/${highlightStyles.length} (${styleName(currentStyle)})`;
+  $: currentStyleColor = styleColor(currentStyle);
 
   const statusPlugin = ViewPlugin.fromClass(class {
     constructor(v: EditorView) { updateStatusFromView(v); }
     update(u: ViewUpdate) {
       if (u.docChanged || u.selectionSet || u.focusChanged || u.viewportChanged)
         updateStatusFromView(u.view);
-      if (u.docChanged)
-        localStorage.setItem("cm6-buffer", u.state.doc.toString());
+      if (u.docChanged) {
+        const text = u.state.doc.toString();
+        localStorage.setItem("cm6-buffer", text);
+        scheduleFileAutosave(text);
+      }
     }
+  });
+
+  const summaryJumpFlashEffect = StateEffect.define<{ from: number; to: number }>();
+  const summaryJumpFlashClearEffect = StateEffect.define<null>();
+  const summaryJumpFlashField = StateField.define<DecorationSet>({
+    create: () => Decoration.none,
+    update(value, tr) {
+      let decorations = value.map(tr.changes);
+      for (const effect of tr.effects) {
+        if (effect.is(summaryJumpFlashEffect)) {
+          const { from, to } = effect.value;
+          decorations = Decoration.set([
+            Decoration.mark({ class: "cm-summary-jump-flash" }).range(from, Math.max(from + 1, to))
+          ]);
+        } else if (effect.is(summaryJumpFlashClearEffect)) {
+          decorations = Decoration.none;
+        }
+      }
+      return decorations;
+    },
+    provide: field => EditorView.decorations.from(field)
   });
 
   const blockquoteLinePlugin = ViewPlugin.fromClass(class {
@@ -1173,7 +1697,6 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
       dblClickBehavior,
       EditorView.lineWrapping,
       lineNumbers(),
-      foldGutter(),
       drawSelection(),
       history(),
       indentOnInput(),
@@ -1184,6 +1707,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
       keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
       markdown({ base: markdownLanguage }),
       statusPlugin,
+      summaryJumpFlashField,
       blockquoteLinePlugin,
       columnGuidePlugin,
       visualLinePlugin,
@@ -1219,6 +1743,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
   style={`
     --bg: ${gruvbox.bg}; --bg-soft: ${gruvbox.bgSoft}; --bg-hard: ${gruvbox.bgHard};
     --bg-alt: ${gruvbox.bgAlt}; --border: ${gruvbox.border}; --fg: ${gruvbox.fg};
+    --internal-border: transparent;
     --fg-muted: ${gruvbox.fgMuted}; --yellow: ${gruvbox.yellow}; --green: ${gruvbox.green};
     --blue: ${gruvbox.blue}; --orange: ${gruvbox.orange}; --selection: ${gruvbox.selection};
     --active-line-annotate: #4a3520aa;
@@ -1228,16 +1753,20 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
   `}
 >
   <div class="toolbar">
-    <div class="title">Markdown Annotation Tool</div>
+    <div class="title">textAnnotate</div>
     <span class="subtitle">paste or load .txt, .md, .docx, .pdf</span>
     <button class="toolbar-btn help-btn" on:click={() => showHelp = !showHelp} title="Keyboard shortcuts (?)">?</button>
   </div>
 
-  <div class="main">
+  <div class="main" class:summary-collapsed={summaryCollapsed}>
     <div class="sidebar">
       <div class="sidebar-section">
         <input type="file" style="display:none" bind:this={fileInput} on:change={loadFile} />
         <button class="sidebar-label load-btn" on:click={() => fileInput.click()}>Load file...</button>
+        <div class="file-actions">
+          <button class="sidebar-label load-btn" on:click={saveDocument}>Save</button>
+          <button class="sidebar-label load-btn" on:click={exportCleanHtml}>Export</button>
+        </div>
       </div>
 
       <div class="sidebar-section">
@@ -1257,15 +1786,16 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
 
       <div class="sidebar-section">
         <div class="sidebar-label">Layout</div>
-        <div class="slider-row"><span class="slider-lbl">L</span><input type="range" min="0" max="400" step="4" bind:value={padLeft}   class="slider" /><span class="slider-val">{padLeft}</span></div>
-        <div class="slider-row"><span class="slider-lbl">R</span><input type="range" min="0" max="400" step="4" bind:value={padRight}  class="slider" /><span class="slider-val">{padRight}</span></div>
-        <div class="slider-row"><span class="slider-lbl">T</span><input type="range" min="0" max="400" step="4" bind:value={padTop}    class="slider" /><span class="slider-val">{padTop}</span></div>
-        <div class="slider-row"><span class="slider-lbl">B</span><input type="range" min="0" max="400" step="4" bind:value={padBottom} class="slider" /><span class="slider-val">{padBottom}</span></div>
-        <div class="slider-row"><span class="slider-lbl">LH</span><input type="range" min="1" max="3" step="0.05" bind:value={lineHeight} class="slider" /><span class="slider-val">{lineHeight.toFixed(2)}</span></div>
-        <div class="slider-row"><span class="slider-lbl">FS</span><input type="range" min="10" max="28" step="1" bind:value={fontSize} class="slider" /><span class="slider-val">{fontSize}</span></div>
-        <div class="slider-row">
+        <div class="slider-row" data-tooltip="Left padding"><span class="slider-lbl">L</span><input type="range" min="0" max="400" step="4" bind:value={padLeft}   class="slider" aria-label="Left padding" /><span class="slider-val">{padLeft}</span></div>
+        <div class="slider-row" data-tooltip="Right padding"><span class="slider-lbl">R</span><input type="range" min="0" max="400" step="4" bind:value={padRight}  class="slider" aria-label="Right padding" /><span class="slider-val">{padRight}</span></div>
+        <div class="slider-row" data-tooltip="Top padding"><span class="slider-lbl">T</span><input type="range" min="0" max="400" step="4" bind:value={padTop}    class="slider" aria-label="Top padding" /><span class="slider-val">{padTop}</span></div>
+        <div class="slider-row" data-tooltip="Bottom padding"><span class="slider-lbl">B</span><input type="range" min="0" max="400" step="4" bind:value={padBottom} class="slider" aria-label="Bottom padding" /><span class="slider-val">{padBottom}</span></div>
+        <div class="slider-row" data-tooltip="Line height"><span class="slider-lbl">LH</span><input type="range" min="1" max="3" step="0.05" bind:value={lineHeight} class="slider" aria-label="Line height" /><span class="slider-val">{lineHeight.toFixed(2)}</span></div>
+        <div class="slider-row" data-tooltip="Font size"><span class="slider-lbl">FS</span><input type="range" min="10" max="28" step="1" bind:value={fontSize} class="slider" aria-label="Font size" /><span class="slider-val">{fontSize}</span></div>
+        <div class="slider-row" data-tooltip="Notes alignment">
           <span class="slider-lbl">A</span>
           <input type="range" min="0" max="2" step="1" class="slider"
+            aria-label="Notes alignment"
             disabled={!blockquoteActive}
             value={blockquoteAlign === "left" ? 0 : blockquoteAlign === "center" ? 1 : 2}
             on:input={e => {
@@ -1274,7 +1804,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
             }} />
           <span class="slider-val">{blockquoteAlign[0].toUpperCase()}</span>
         </div>
-        <div class="slider-row">
+        <div class="slider-row" data-tooltip="Notes width">
           <span class="slider-lbl">BG</span>
           <input
             type="range"
@@ -1282,6 +1812,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
             max="100"
             step="1"
             class="slider"
+            aria-label="Notes width"
             disabled={!blockquoteActive}
             value={blockquoteBgWidth}
             on:input={e => {
@@ -1317,13 +1848,138 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     </div>
 
     <div class="editor" bind:this={editorEl}></div>
+
+    <aside class="summary-sidebar" class:collapsed={summaryCollapsed} aria-label="Annotation summary">
+      <div class="summary-header">
+        {#if !summaryCollapsed}
+          <div class="summary-title">Summary</div>
+        {/if}
+        <button
+          class="summary-collapse-btn"
+          type="button"
+          title={summaryCollapsed ? "Show summary" : "Hide summary"}
+          aria-label={summaryCollapsed ? "Show summary" : "Hide summary"}
+          on:click={() => summaryCollapsed = !summaryCollapsed}
+        >
+          {summaryCollapsed ? "‹" : "›"}
+        </button>
+      </div>
+      {#if summaryCollapsed}
+        <div class="summary-collapsed-count">{summaryItems.length}</div>
+      {:else}
+      <div class="summary-list">
+        {#if summaryItems.length === 0}
+          <div class="summary-empty">No annotations</div>
+        {:else}
+          {#each summarySections as section (section.id)}
+            {#if section.kind === "item"}
+              <div
+                class="summary-item"
+                role="button"
+                tabindex="0"
+                on:click={() => jumpToSummaryItem(section.item)}
+                on:keydown={event => handleSummaryItemKeydown(event, section.item)}
+              >
+                {#if section.item.type === "annotation"}
+                  <span class="summary-swatch" style="background: {section.item.color}"></span>
+                  <span class="summary-body">
+                    <span class="summary-meta">
+                      <span>{section.item.colorName}</span>
+                      <span class="summary-heading-timestamp">{summaryTimestamp(section.item.timestamp)}</span>
+                    </span>
+                    <span class="summary-text">{section.item.text}</span>
+                    {#if section.item.comment}
+                      <button class="summary-comment-action has-comment" type="button" on:click={event => editSummaryAnnotationComment(event, section.item)} on:keydown={event => event.stopPropagation()}>
+                        {section.item.comment}
+                      </button>
+                    {:else}
+                      <button class="summary-comment-action" type="button" on:click={event => editSummaryAnnotationComment(event, section.item)} on:keydown={event => event.stopPropagation()}>
+                        Add comment
+                      </button>
+                    {/if}
+                  </span>
+                {:else}
+                  <span class="summary-note-mark">󰎞</span>
+                  <span class="summary-body">
+                    <span class="summary-meta">
+                      <span>Notes</span>
+                      <span>Ln {section.item.line}</span>
+                    </span>
+                    <span class="summary-text">{section.item.text}</span>
+                  </span>
+                {/if}
+              </div>
+            {:else}
+              <button
+                class="summary-group-header"
+                class:open={expandedSummaryCategories[section.id]}
+                type="button"
+                aria-expanded={!!expandedSummaryCategories[section.id]}
+                on:click={() => toggleSummaryCategory(section.id)}
+              >
+                {#if section.itemType === "blockquote"}
+                  <span class="summary-note-mark">󰎞</span>
+                {:else}
+                  <span class="summary-swatch" style="background: {section.color}"></span>
+                {/if}
+                <span class="summary-group-label">{section.label}</span>
+                <span class="summary-group-count">{section.count}</span>
+                <span class="summary-group-chevron">›</span>
+              </button>
+              {#if expandedSummaryCategories[section.id]}
+                {#each section.items as item (item.id)}
+                  <div
+                    class="summary-item summary-item-nested"
+                    role="button"
+                    tabindex="0"
+                    on:click={() => jumpToSummaryItem(item)}
+                    on:keydown={event => handleSummaryItemKeydown(event, item)}
+                  >
+                    {#if item.type === "annotation"}
+                      <span class="summary-swatch" style="background: {item.color}"></span>
+                      <span class="summary-body">
+                        <span class="summary-meta">
+                          <span>{item.colorName}</span>
+                          <span class="summary-heading-timestamp">{summaryTimestamp(item.timestamp)}</span>
+                        </span>
+                        <span class="summary-text">{item.text}</span>
+                        {#if item.comment}
+                          <button class="summary-comment-action has-comment" type="button" on:click={event => editSummaryAnnotationComment(event, item)} on:keydown={event => event.stopPropagation()}>
+                            {item.comment}
+                          </button>
+                        {:else}
+                          <button class="summary-comment-action" type="button" on:click={event => editSummaryAnnotationComment(event, item)} on:keydown={event => event.stopPropagation()}>
+                            Add comment
+                          </button>
+                        {/if}
+                      </span>
+                    {:else}
+                      <span class="summary-note-mark">󰎞</span>
+                      <span class="summary-body">
+                        <span class="summary-meta">
+                          <span>Notes</span>
+                          <span>Ln {item.line}</span>
+                        </span>
+                        <span class="summary-text">{item.text}</span>
+                      </span>
+                    {/if}
+                  </div>
+                {/each}
+              {/if}
+            {/if}
+          {/each}
+        {/if}
+      </div>
+      {/if}
+    </aside>
   </div>
 
   <div class="statusbar">
     <div class="status-left">
       <span class="segment mode" style="color: {editorMode === 'insert' ? gruvbox.green : gruvbox.orange}">{editorModeLabel}</span>
       <span class="segment">{selectionInfo}</span>
-      <span class="segment style" style="color: {styleColor}">{styleLabel}</span>
+      <span class="segment">{wordCountInfo}</span>
+      <span class="segment style" style="color: {currentStyleColor}">{styleLabel}</span>
     </div>
     <div class="status-right">
       <span class="segment">Ln {line}</span>
@@ -1447,7 +2103,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     min-height: 36px;
     padding: 0 12px;
     background: var(--bg-hard);
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--internal-border);
   }
 
   .title {
@@ -1466,22 +2122,277 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
 
   .main {
     display: grid;
-    grid-template-columns: 200px 1fr;
+    grid-template-columns: 200px minmax(0, 1fr) 320px;
     min-height: 0;
+  }
+
+  .main.summary-collapsed {
+    grid-template-columns: 200px minmax(0, 1fr) 42px;
   }
 
   .sidebar {
     background: var(--bg-hard);
-    border-right: 1px solid var(--border);
+    border-right: 1px solid var(--internal-border);
     display: flex;
     flex-direction: column;
     overflow-y: auto;
     font-size: 12px;
   }
 
+  .summary-sidebar {
+    min-width: 0;
+    background: var(--bg-hard);
+    border-left: 1px solid var(--internal-border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    font-size: 12px;
+  }
+
+  .summary-sidebar.collapsed {
+    align-items: stretch;
+  }
+
+  .summary-header {
+    min-height: 38px;
+    padding: 0 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--internal-border);
+  }
+
+  .summary-sidebar.collapsed .summary-header {
+    justify-content: center;
+    padding: 0;
+  }
+
+  .summary-collapse-btn {
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--fg-muted);
+    font: inherit;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .summary-collapse-btn:hover,
+  .summary-collapse-btn:focus-visible {
+    color: var(--yellow);
+    border-color: var(--border);
+    outline: none;
+  }
+
+  .summary-collapsed-count {
+    margin-top: 10px;
+    color: var(--fg-muted);
+    font-size: 11px;
+    text-align: center;
+  }
+
+  .summary-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--fg-muted);
+    font-weight: 600;
+  }
+
+  .summary-list {
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  .summary-empty {
+    padding: 12px;
+    color: var(--fg-muted);
+    font-size: 11px;
+  }
+
+  .summary-item {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: 16px minmax(0, 1fr);
+    gap: 8px;
+    padding: 7px 12px;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--internal-border);
+    color: var(--fg);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .summary-item:hover,
+  .summary-item:focus-visible {
+    background: var(--bg-alt);
+    outline: none;
+  }
+
+  .summary-item-nested {
+    padding-left: 24px;
+    background: var(--bg);
+  }
+
+  .summary-group-header {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: 16px minmax(0, 1fr) auto auto;
+    gap: 8px;
+    align-items: center;
+    padding: 9px 12px;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--internal-border);
+    color: var(--fg);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .summary-group-header:hover,
+  .summary-group-header:focus-visible {
+    background: var(--bg-alt);
+    outline: none;
+  }
+
+  .summary-group-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--fg);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .summary-group-count {
+    color: var(--fg-muted);
+    font-size: 11px;
+  }
+
+  .summary-group-chevron {
+    color: var(--fg-muted);
+    font-size: 18px;
+    line-height: 1;
+    transition: transform 120ms ease;
+  }
+
+  .summary-group-header.open .summary-group-chevron {
+    transform: rotate(90deg);
+  }
+
+  .summary-swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    margin-top: 4px;
+    border: 1px solid rgba(0, 0, 0, 0.25);
+  }
+
+  .summary-note-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--yellow);
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .summary-body {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    line-height: 1.28;
+  }
+
+  .summary-meta {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) max-content;
+    gap: 6px;
+    color: var(--fg-muted);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .summary-meta > :first-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .summary-heading-timestamp {
+    min-width: 0;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: nowrap;
+    justify-self: end;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 9px;
+    font-weight: 400;
+    opacity: 0.55;
+  }
+
+  .summary-text,
+  .summary-comment,
+  .summary-comment-action {
+    display: block;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .summary-text {
+    color: var(--fg);
+  }
+
+  .summary-comment-action {
+    width: fit-content;
+    max-width: 100%;
+    padding: 0;
+    background: transparent;
+    border: none;
+    color: var(--fg-muted);
+    cursor: pointer;
+    font: inherit;
+    font-size: 11px;
+    text-align: left;
+  }
+
+  .summary-comment-action.has-comment {
+    color: var(--yellow);
+  }
+
+  .summary-comment-action:hover,
+  .summary-comment-action:focus-visible {
+    color: var(--fg-muted);
+    outline: none;
+    text-decoration: underline;
+  }
+
   .sidebar-section {
     padding: 12px;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--internal-border);
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -1496,6 +2407,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
   }
 
   .sidebar-toggle {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 6px;
@@ -1569,6 +2481,12 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
 
   .load-btn:hover {
     color: var(--yellow);
+  }
+
+  .file-actions {
+    display: flex;
+    gap: 14px;
+    align-items: center;
   }
 
   .keybinds { display: flex; flex-direction: column; gap: 10px; }
@@ -1799,9 +2717,36 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
   }
 
   .slider-row {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 6px;
+  }
+
+  .slider-row::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 4px);
+    z-index: 20;
+    max-width: 180px;
+    padding: 4px 7px;
+    border: 1px solid color-mix(in srgb, var(--border) 68%, transparent);
+    border-radius: 5px;
+    background: color-mix(in srgb, var(--bg-hard) 92%, transparent);
+    color: var(--fg);
+    font-size: 10px;
+    line-height: 1.25;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(1px);
+  }
+
+  .slider-row:hover::after,
+  .slider-row:focus-within::after {
+    opacity: 1;
+    transform: translateY(0);
   }
 
   .slider-lbl {
@@ -1836,9 +2781,25 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     position: absolute;
     z-index: 2;
     width: 0;
-    border-left: 1px solid var(--border);
-    opacity: 0.8;
+    border-left: 1px solid var(--orange);
+    opacity: 0.45;
     pointer-events: none;
+  }
+  :global(.cm-summary-jump-flash) {
+    animation: summary-jump-flash 850ms ease-out;
+    border-radius: 3px;
+    box-shadow: 0 0 0 2px var(--yellow);
+    background: color-mix(in srgb, var(--yellow) 28%, transparent) !important;
+  }
+  @keyframes summary-jump-flash {
+    0% {
+      box-shadow: 0 0 0 2px var(--yellow), 0 0 0 8px rgba(250, 189, 47, 0.24);
+      background: color-mix(in srgb, var(--yellow) 42%, transparent);
+    }
+    100% {
+      box-shadow: 0 0 0 0 rgba(250, 189, 47, 0);
+      background: transparent;
+    }
   }
   :global(.mode-normal .cm-activeLineGutter) {
     background: var(--active-gutter-annotate) !important;
@@ -1855,10 +2816,10 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     display: flex;
     justify-content: space-between;
     align-items: center;
-    min-height: 24px;
+    min-height: 48px;
     padding: 0 10px;
     background: var(--bg-hard);
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--internal-border);
     color: var(--fg-muted);
     font-size: 12px;
   }
@@ -1867,11 +2828,11 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
 
   .segment {
     padding: 0 8px;
-    border-right: 1px solid var(--border);
+    border-right: 1px solid var(--internal-border);
     white-space: nowrap;
   }
   .segment:last-child { border-right: none; }
-  .status-right .segment:first-child { border-left: 1px solid var(--border); }
+  .status-right .segment:first-child { border-left: 1px solid var(--internal-border); }
   .syntax { color: var(--yellow); }
   .mode { color: var(--orange); font-weight: 600; }
 
