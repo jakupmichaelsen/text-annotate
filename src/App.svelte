@@ -73,7 +73,7 @@
   let summaryItems: SummaryItem[] = [];
   let summarySections: SummarySection[] = [];
   let expandedSummaryCategories: Record<string, boolean> = {};
-  let summaryCollapsed = false;
+  let summaryCollapsed = true;
   $: editorModeLabel = editorMode === "insert" ? "EDIT" : "ANNOTATE";
 
   function replaceDocument(text: string) {
