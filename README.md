@@ -14,7 +14,7 @@ Designed for ESL teachers giving feedback on student assignments.
 - **Annotation Format** — Stored as standard markdown comments with color, timestamp, and note
 - **Tooltip Preview** — Cursor on annotation shows a floating bubble with color, timestamp, and note
 - **Inline Note Editing** — Double-click or press `Enter` on an annotation to edit its note inline
-- **File Loading** — Load `.txt`, `.md`, `.docx`, and `.pdf` files
+- **File Loading** — Load `.srt`, `.txt`, `.md`, `.docx`, and `.pdf` files
 - **PDF Review Modal** — Extract text from PDFs, correct it beside the preview, then load it into the editor
 - **Autosave** — Restores the previous buffer from local storage when available
 - **Layout Controls** — Sidebar sliders for L/R/T/B padding, line height, and font size

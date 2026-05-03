@@ -76,9 +76,9 @@
   let summaryCollapsed = true;
   $: editorModeLabel = editorMode === "insert" ? "EDIT" : "ANNOTATE";
 
-  function replaceDocument(text: string) {
+  function replaceDocument(text: string, preserveLineBreaks = false) {
     if (!view) return;
-    const insert = sentenceLineBreaks(text);
+    const insert = preserveLineBreaks ? text.replace(/\r\n?/g, "\n").trim() : sentenceLineBreaks(text);
     view.dispatch({
       changes: { from: 0, to: view.state.doc.length, insert },
       selection: { anchor: 0 }
@@ -123,7 +123,55 @@
       return;
     }
 
+    if (file.name.toLowerCase().endsWith(".srt")) {
+      replaceDocument(formatSrtTranscript(await file.text()), true);
+      return;
+    }
+
     replaceDocument(await file.text());
+  }
+
+  function formatSrtTranscript(text: string) {
+    const cues = text
+      .replace(/^\uFEFF/, "")
+      .replace(/\r\n?/g, "\n")
+      .split(/\n{2,}/)
+      .map(formatSrtCue)
+      .filter(Boolean);
+
+    return cues.join("\n\n");
+  }
+
+  function formatSrtCue(block: string) {
+    const lines = block
+      .split("\n")
+      .map(line => line.trim())
+      .filter(Boolean);
+    if (!lines.length) return "";
+
+    if (/^\d+$/.test(lines[0])) lines.shift();
+
+    const timeIndex = lines.findIndex(line => /-->/i.test(line));
+    if (timeIndex < 0) return "";
+
+    const timeMatch = /^(\S+)\s*-->\s*(\S+)(?:\s+.*)?$/.exec(lines[timeIndex]);
+    if (!timeMatch) return "";
+
+    const start = normalizeSrtTimestamp(timeMatch[1]);
+    const end = normalizeSrtTimestamp(timeMatch[2]);
+    const cueText = lines
+      .slice(timeIndex + 1)
+      .join(" ")
+      .replace(/<[^>]+>/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (!cueText) return "";
+    return `[${start} --> ${end}]\n${cueText}`;
+  }
+
+  function normalizeSrtTimestamp(timestamp: string) {
+    return timestamp.trim().replace(",", ".");
   }
 
   function clearActiveSaveTarget() {
@@ -1754,14 +1802,14 @@ ${body}
 >
   <div class="toolbar">
     <div class="title">textAnnotate</div>
-    <span class="subtitle">paste or load .txt, .md, .docx, .pdf</span>
+    <span class="subtitle">paste or load .srt, .txt, .md, .docx, .pdf</span>
     <button class="toolbar-btn help-btn" on:click={() => showHelp = !showHelp} title="Keyboard shortcuts (?)">?</button>
   </div>
 
   <div class="main" class:summary-collapsed={summaryCollapsed}>
     <div class="sidebar">
       <div class="sidebar-section">
-        <input type="file" style="display:none" bind:this={fileInput} on:change={loadFile} />
+        <input type="file" accept=".srt,.txt,.md,.docx,.pdf" style="display:none" bind:this={fileInput} on:change={loadFile} />
         <button class="sidebar-label load-btn" on:click={() => fileInput.click()}>Load file...</button>
         <div class="file-actions">
           <button class="sidebar-label load-btn" on:click={saveDocument}>Save</button>
