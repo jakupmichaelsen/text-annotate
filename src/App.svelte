@@ -38,6 +38,7 @@
   let padRight = 40;
   let padTop = 16;
   let padBottom = 64;
+  let editorViewportHeight = 0;
   let lineHeight = 1.6;
   let fontSize = 14;
   let showHelp = false;
@@ -52,7 +53,22 @@
   let pendingAutosaveText: string | null = null;
   let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
   let autosaveWriting = false;
+  let audioUrl = "";
+  let audioFileName = "";
+  let audioElement: HTMLAudioElement | null = null;
+  let audioCurrentTime = 0;
+  let audioDuration = 0;
+  let audioPlaying = false;
+  let audioLoaded = false;
+  let audioRateIndex = 0;
+  const audioRates = [1, 1.5, 2];
+  const audioDbName = "textAnnotate-state";
+  const audioStoreName = "audio";
+  const mediaExtensions = [".mp3", ".wav", ".m4a", ".ogg", ".oga", ".webm", ".aac", ".flac", ".mp4", ".mov", ".mkv"];
+  let loadedFileType = "Markdown";
   $: pdfFrameSrc = pdfPreviewUrl ? `${pdfPreviewUrl}#zoom=75` : "";
+  $: if (audioElement) audioElement.playbackRate = audioRates[audioRateIndex];
+  $: audioRateText = audioRateIndex === 0 ? "x1" : audioRateIndex === 1 ? "x1½" : "x2";
 
   let currentStyle = 0;
   let annotationMode: "clean" | "raw" | "all" = "clean";
@@ -75,6 +91,230 @@
   let expandedSummaryCategories: Record<string, boolean> = {};
   let summaryCollapsed = true;
   $: editorModeLabel = editorMode === "insert" ? "EDIT" : "ANNOTATE";
+  const helpSections = [
+    {
+      title: "Navigation",
+      items: [
+        ["h j k l", "left / down / up / right"],
+        ["← ↓ ↑ →", "left / down / up / right"],
+        ["w s", "line up / down"],
+        ["a d", "word left / right"],
+        ["Ctrl+h/l", "word left / right"],
+        ["Ctrl+k/j", "paragraph start / end"],
+        ["Ctrl+w/s", "paragraph start / end"],
+        ["Ctrl+↑/↓", "paragraph start / end"],
+        ["Ctrl+a/d", "jump 5 words left / right"]
+      ]
+    },
+    {
+      title: "Selection",
+      items: [
+        ["⇧hjkl", "select by char / line"],
+        ["⇧Arrows", "select by char / line"],
+        ["⇧w ⇧s", "select by line"],
+        ["⇧a ⇧d", "select by word"],
+        ["Ctrl+⇧h/l", "select by word"],
+        ["Ctrl+⇧k/j", "select to paragraph start / end"],
+        ["Ctrl+⇧w/s", "select to paragraph start / end"],
+        ["Ctrl+⇧↑/↓", "select to paragraph start / end"],
+        ["Ctrl+Shift+a/d", "select 5 words left / right"]
+      ]
+    },
+    {
+      title: "Annotations",
+      items: [
+        ["Space", "wrap word / selection"],
+        ["q e", "style prev / next"],
+        ["n N", "style next / prev"],
+        ["Enter", "edit note / cue playback"],
+        ["x", "remove annotation"]
+      ]
+    },
+    {
+      title: "History",
+      items: [
+        ["u U", "undo / redo"],
+        ["Ctrl+Z/Y", "undo / redo"]
+      ]
+    },
+    {
+      title: "Other",
+      items: [
+        ["F2", "enter Edit mode"],
+        ["Esc", "return to Annotate mode"],
+        ["Alt+Space", "play / pause audio"],
+        ["Alt+←/→", "seek audio back / forward"],
+        ["F1 / ?", "toggle this help"]
+      ]
+    }
+  ];
+
+  function clearAudioTarget() {
+    if (audioUrl) URL.revokeObjectURL(audioUrl);
+    audioUrl = "";
+    audioFileName = "";
+    audioCurrentTime = 0;
+    audioDuration = 0;
+    audioPlaying = false;
+    audioLoaded = false;
+    if (audioElement) {
+      audioElement.pause();
+      audioElement.removeAttribute("src");
+      audioElement.load();
+    }
+  }
+
+  function helpShortcutGroupTitle(title: string) {
+    return title;
+  }
+
+  function helpShortcutLabel(label: string) {
+    return label;
+  }
+
+  function helpShortcutDescription(description: string) {
+    return description;
+  }
+
+  function openAudioDb() {
+    return new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(audioDbName, 1);
+      request.onupgradeneeded = () => {
+        request.result.createObjectStore(audioStoreName);
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async function persistAudioFile(file: File) {
+    try {
+      const db = await openAudioDb();
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(audioStoreName, "readwrite");
+        tx.objectStore(audioStoreName).put(file, "current");
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+      db.close();
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
+  async function restoreAudioFile() {
+    try {
+      const db = await openAudioDb();
+      const file = await new Promise<File | undefined>((resolve, reject) => {
+        const tx = db.transaction(audioStoreName, "readonly");
+        const request = tx.objectStore(audioStoreName).get("current");
+        request.onsuccess = () => resolve(request.result as File | undefined);
+        request.onerror = () => reject(request.error);
+      });
+      db.close();
+      if (file) await loadAudioFile(file);
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
+  async function loadAudioFile(file: File) {
+    clearAudioTarget();
+    audioUrl = URL.createObjectURL(file);
+    audioFileName = file.name;
+    loadedFileType = file.name.split(".").pop()?.toUpperCase() || "MP3";
+    if (audioElement) {
+      audioElement.src = audioUrl;
+      audioElement.playbackRate = audioRates[audioRateIndex];
+      audioElement.load();
+    }
+    void persistAudioFile(file);
+  }
+
+  function toggleAudioPlayback() {
+    if (!audioElement || !audioLoaded) return;
+    if (audioElement.paused) void audioElement.play();
+    else audioElement.pause();
+  }
+
+  function cycleAudioRate() {
+    audioRateIndex = (audioRateIndex + 1) % audioRates.length;
+    if (!audioElement) return;
+    audioElement.playbackRate = audioRates[audioRateIndex];
+  }
+
+  function audioRateLabel() {
+    return audioRates[audioRateIndex] === 1
+      ? "x1"
+      : audioRates[audioRateIndex] === 1.5
+        ? "x1½"
+        : "x2";
+  }
+
+  function playAudioIfNeeded() {
+    if (!audioElement || !audioLoaded || !audioElement.paused) return;
+    void audioElement.play();
+  }
+
+  function seekAudio(deltaSeconds: number) {
+    if (!audioElement || !audioLoaded) return;
+    const nextTime = Math.min(Math.max(audioElement.currentTime + deltaSeconds, 0), audioDuration || audioElement.duration || Infinity);
+    audioElement.currentTime = nextTime;
+    audioCurrentTime = nextTime;
+  }
+
+  function jumpAudioTo(seconds: number) {
+    if (!audioElement) return;
+    const nextTime = Math.min(Math.max(seconds, 0), audioDuration || audioElement.duration || Infinity);
+    audioElement.currentTime = nextTime;
+    audioCurrentTime = nextTime;
+  }
+
+  function seekAudioAndPlay(deltaSeconds: number) {
+    seekAudio(deltaSeconds);
+    playAudioIfNeeded();
+  }
+
+  function jumpAudioToAndPlay(seconds: number) {
+    jumpAudioTo(seconds);
+    playAudioIfNeeded();
+  }
+
+  function isEditableTarget(target: EventTarget | null) {
+    if (!(target instanceof HTMLElement)) return false;
+    return target.matches("input, textarea, select");
+  }
+
+  function handleAudioKeydown(event: KeyboardEvent) {
+    if (event.defaultPrevented) return;
+    const isPlayPause = event.altKey && !event.ctrlKey && !event.metaKey && event.key === " ";
+    const isSeekBack = event.altKey && !event.ctrlKey && !event.metaKey && (event.key === "ArrowLeft" || event.key === "Left");
+    const isSeekForward = event.altKey && !event.ctrlKey && !event.metaKey && (event.key === "ArrowRight" || event.key === "Right");
+    if (!isPlayPause && !isSeekBack && !isSeekForward) return;
+    if (isEditableTarget(event.target)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!audioElement || !audioLoaded) return;
+    if (isPlayPause) {
+      toggleAudioPlayback();
+      return;
+    }
+    seekAudio(isSeekBack ? -10 : 10);
+  }
+
+  function formatAudioTime(seconds: number) {
+    if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+    const whole = Math.floor(seconds);
+    const mins = Math.floor(whole / 60);
+    const secs = whole % 60;
+    const hours = Math.floor(mins / 60);
+    const remMins = mins % 60;
+    const secText = String(secs).padStart(2, "0");
+    if (hours > 0) return `${hours}:${String(remMins).padStart(2, "0")}:${secText}`;
+    return `${mins}:${secText}`;
+  }
 
   function replaceDocument(text: string, preserveLineBreaks = false) {
     if (!view) return;
@@ -105,30 +345,44 @@
 
   async function loadFile(e: Event) {
     const input = e.target as HTMLInputElement;
-    const file = input.files?.[0];
+    const files = Array.from(input.files ?? []);
     input.value = "";
-    if (!file) return;
+    if (!files.length) return;
     clearActiveSaveTarget();
+    const audioFile = files.find(isMediaFile);
+    const srtFile = files.find(file => file.name.toLowerCase().endsWith(".srt"));
+    if (audioFile) await loadAudioFile(audioFile);
+    if (srtFile) {
+      loadedFileType = "SRT";
+      replaceDocument(formatSrtTranscript(await srtFile.text()), true);
+      return;
+    }
+
+    const file = files.find(file => !isMediaFile(file));
+    if (!file) return;
 
     if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+      loadedFileType = "PDF";
       await openPdfModal(file);
       return;
     }
 
     if (file.name.toLowerCase().endsWith(".docx")) {
+      loadedFileType = "DOCX";
       const buffer = await file.arrayBuffer();
       const mammoth = await import("mammoth");
       const result = await mammoth.extractRawText({ arrayBuffer: buffer });
-      replaceDocument(result.value);
+      replaceDocument(stripEmptyLines(result.value));
       return;
     }
 
-    if (file.name.toLowerCase().endsWith(".srt")) {
-      replaceDocument(formatSrtTranscript(await file.text()), true);
-      return;
-    }
+    loadedFileType = file.name.split(".").pop()?.toUpperCase() || "TEXT";
+    replaceDocument(stripEmptyLines(await file.text()));
+  }
 
-    replaceDocument(await file.text());
+  function isMediaFile(file: File) {
+    const name = file.name.toLowerCase();
+    return mediaExtensions.some(extension => name.endsWith(extension));
   }
 
   function formatSrtTranscript(text: string) {
@@ -139,7 +393,7 @@
       .map(formatSrtCue)
       .filter(Boolean);
 
-    return cues.join("\n\n");
+    return cues.join("\n");
   }
 
   function formatSrtCue(block: string) {
@@ -172,6 +426,19 @@
 
   function normalizeSrtTimestamp(timestamp: string) {
     return timestamp.trim().replace(",", ".");
+  }
+
+  function stripEmptyLines(text: string) {
+    return text
+      .replace(/\r\n?/g, "\n")
+      .split("\n")
+      .map(line => line.trimEnd())
+      .filter(line => line.trim().length > 0)
+      .join("\n");
+  }
+
+  function updateEditorViewportHeight() {
+    editorViewportHeight = editorEl?.clientHeight ?? 0;
   }
 
   function clearActiveSaveTarget() {
@@ -556,7 +823,7 @@
   }
 
   function styleColor(style: number) {
-    return style === 0 ? gruvbox.fg : highlightStyles[style - 1]?.color ?? gruvbox.fg;
+    return style === 0 ? gruvbox.orange : highlightStyles[style - 1]?.color ?? gruvbox.fg;
   }
 
   function styleNumberForName(name: string) {
@@ -651,7 +918,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
   function buildGruvboxTheme(): Extension {
     return EditorView.theme({
       "&": { height: "100%", color: gruvbox.fg, backgroundColor: gruvbox.bg },
-      ".cm-scroller": { overflow: "auto", fontFamily: '"JetBrains Mono", "Fira Code", monospace', lineHeight: "1.6" },
+      ".cm-scroller": { overflow: "auto", fontFamily: '"JetBrains Mono", "Fira Code", monospace', lineHeight: "1.75" },
       ".cm-content": { textAlign: "left", padding: "1rem 1.25rem 4rem", minHeight: "100%", caretColor: gruvbox.cursor, whiteSpace: "pre-wrap", wordBreak: "break-word" },
       ".cm-line": { textAlign: "left" },
       "&.cm-focused .cm-cursor": { borderLeftColor: gruvbox.cursor },
@@ -710,6 +977,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
   }
 
   const annotationPattern = /`([^`]+)`<!--\s*(\w+),\s*(.+?):\s*"([^"]*)"\s*-->/g;
+  const srtPattern = /\[\s*([0-9:.]+)\s*-->\s*([0-9:.]+)\s*\]/g;
   const styleColorMap: Record<string, string> = Object.fromEntries(highlightStyles.map(s => [s.name, s.color]));
   let editingSpan: number | null = null;
   type BlockquoteAlign = "left" | "center" | "right";
@@ -814,7 +1082,7 @@ ${body}
   }
 
   function renderInlineHtml(text: string) {
-    const pattern = /`([^`]+)`<!--\s*(\w+),\s*.+?:\s*"[^"]*"\s*-->/g;
+    const pattern = /`([^`]+)`<!--\s*(\w+),\s*(.+?):\s*"([^"]*)"\s*-->/g;
     let html = "";
     let lastIndex = 0;
     let match: RegExpExecArray | null;
@@ -822,7 +1090,8 @@ ${body}
     while ((match = pattern.exec(text)) !== null) {
       html += renderPlainInlineHtml(text.slice(lastIndex, match.index));
       const color = styleColorMap[match[2]] || gruvbox.yellow;
-      html += `<span style="background:${escapeHtml(color)};color:${escapeHtml(contrastColor(color))};border-radius:3px;padding:0 2px;">${escapeHtml(match[1])}</span>`;
+      html += `<span class="annotation-token" style="background:${escapeHtml(color)};color:${escapeHtml(contrastColor(color))};">${escapeHtml(match[1])}</span>`;
+      html += `<span class="annotation-timestamp" title="${escapeHtml(match[3])}">${escapeHtml(match[3])}</span>`;
       lastIndex = match.index + match[0].length;
     }
 
@@ -1173,6 +1442,117 @@ ${body}
     ignoreEvent() { return false; }
   }
 
+  class SrtTimestampWidget extends WidgetType {
+    label: string;
+    startSeconds: number | null;
+    constructor(label: string, startSeconds: number | null) {
+      super();
+      this.label = label;
+      this.startSeconds = startSeconds;
+    }
+    toDOM() {
+      const span = document.createElement("span");
+      span.className = "cm-srt-timestamp";
+      span.textContent = this.label;
+      span.title = this.label;
+      span.style.cursor = "pointer";
+      const seek = (event: MouseEvent) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (this.startSeconds === null) return;
+        jumpAudioToAndPlay(this.startSeconds);
+      };
+      span.addEventListener("mousedown", seek);
+      return span;
+    }
+    ignoreEvent() { return false; }
+  }
+
+  function formatSrtTimestampLabel(matchText: string) {
+    const parsed = /^\[\s*([0-9:.]+)\s*-->\s*([0-9:.]+)\s*\]$/.exec(matchText.trim());
+    if (!parsed) return matchText;
+    const start = shortenTimestamp(parsed[1]);
+    const end = shortenTimestamp(parsed[2]);
+    return `${start} → ${end}`;
+  }
+
+  function shortenTimestamp(timestamp: string) {
+    const cleaned = timestamp.trim().replace(",", ".");
+    const parts = cleaned.split(":");
+    if (parts.length >= 3) {
+      const minutes = parts[parts.length - 2];
+      const seconds = parts[parts.length - 1].slice(0, 2);
+      return `${minutes}:${seconds}`;
+    }
+    if (parts.length === 2) return `${parts[0]}:${parts[1].slice(0, 2)}`;
+    return cleaned;
+  }
+
+  function parseTimestampToSeconds(timestamp: string) {
+    const cleaned = timestamp.trim().replace(",", ".");
+    const parts = cleaned.split(":");
+    if (parts.length === 3) {
+      const hours = +parts[0];
+      const minutes = +parts[1];
+      const seconds = +parts[2];
+      return hours * 3600 + minutes * 60 + seconds;
+    }
+    if (parts.length === 2) {
+      const minutes = +parts[0];
+      const seconds = +parts[1];
+      return minutes * 60 + seconds;
+    }
+    const numeric = Number(cleaned);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+
+  function isCursorOnSrtTimestampLine(v: EditorView) {
+    const lineText = v.state.doc.lineAt(v.state.selection.main.head).text;
+    srtPattern.lastIndex = 0;
+    return srtPattern.test(lineText);
+  }
+
+  function jumpFromCurrentTimestampLine(v: EditorView) {
+    const lineText = v.state.doc.lineAt(v.state.selection.main.head).text;
+    srtPattern.lastIndex = 0;
+    const match = srtPattern.exec(lineText);
+    if (!match) return false;
+    const startSeconds = parseTimestampToSeconds(match[1]);
+    if (startSeconds === null) return false;
+    jumpAudioToAndPlay(startSeconds);
+    return true;
+  }
+
+  function associatedSrtStartSeconds(v: EditorView) {
+    let line = v.state.doc.lineAt(v.state.selection.main.head);
+
+    for (let i = 0; i < 50; i += 1) {
+      srtPattern.lastIndex = 0;
+      const match = srtPattern.exec(line.text);
+      if (match) return parseTimestampToSeconds(match[1]);
+      if (line.number <= 1) break;
+      line = v.state.doc.line(line.number - 1);
+    }
+
+    return null;
+  }
+
+  function toggleAssociatedSrtPlayback(v: EditorView) {
+    const startSeconds = associatedSrtStartSeconds(v);
+    if (startSeconds === null) return false;
+    if (!audioElement || !audioLoaded) return true;
+
+    jumpAudioTo(startSeconds);
+    if (audioElement.paused) void audioElement.play();
+    return true;
+  }
+
+  function handleEnterInAnnotationMode(v: EditorView) {
+    if (toggleAnnotationEdit(v)) return true;
+    toggleAssociatedSrtPlayback(v);
+    return true;
+  }
+
   function buildHighlightDecorator(): Extension {
     const colorTheme = EditorView.theme(Object.fromEntries(
       highlightStyles.map(s => [`.cm-annotation-${s.name}`, { backgroundColor: s.color, color: contrastColor(s.color), borderRadius: "3px", padding: "0 2px" }])
@@ -1283,6 +1663,30 @@ ${body}
       }
     }, { provide: p => EditorView.atomicRanges.of(v => v.plugin(p)?.ranges ?? RangeSet.empty) });
 
+    const srtPlugin = ViewPlugin.fromClass(class {
+      decorations: DecorationSet;
+      constructor(v: EditorView) { this.decorations = this.build(v); }
+      update(u: ViewUpdate) {
+        if (u.docChanged || u.viewportChanged || u.selectionSet) this.decorations = this.build(u.view);
+      }
+      build(v: EditorView): DecorationSet {
+        const builder = new RangeSetBuilder<Decoration>();
+        for (const { from, to } of v.visibleRanges) {
+          const text = v.state.doc.sliceString(from, to);
+          srtPattern.lastIndex = 0;
+          let match: RegExpExecArray | null;
+          while ((match = srtPattern.exec(text)) !== null) {
+            const start = from + match.index;
+            const end = start + match[0].length;
+            const label = formatSrtTimestampLabel(match[0]);
+            const startSeconds = parseTimestampToSeconds(match[1]);
+            builder.add(start, end, Decoration.replace({ widget: new SrtTimestampWidget(label, startSeconds), inclusive: true }));
+          }
+        }
+        return builder.finish();
+      }
+    }, { decorations: v => v.decorations });
+
     const snapFilter = EditorState.transactionFilter.of(tr => {
       if (!tr.selection || annotationMode !== "clean") return tr;
       const docText = tr.newDoc.toString();
@@ -1303,7 +1707,36 @@ ${body}
       return tr;
     });
 
-    return [colorTheme, plugin, plainTheme, plainPlugin, atomicPlugin, snapFilter];
+    const srtSnapFilter = EditorState.transactionFilter.of(tr => {
+      if (!tr.selection) return tr;
+      const docText = tr.newDoc.toString();
+      const cursor = tr.newSelection.main.head;
+      const prevCursor = tr.startState.selection.main.head;
+      const movingRight = cursor >= prevCursor;
+      const currentLine = tr.newDoc.lineAt(cursor);
+      const prevLine = tr.startState.doc.lineAt(prevCursor);
+      const movingDown = currentLine.number >= prevLine.number;
+      srtPattern.lastIndex = 0;
+      let match: RegExpExecArray | null;
+      while ((match = srtPattern.exec(docText)) !== null) {
+        const spanStart = match.index;
+        const spanEnd = spanStart + match[0].length;
+        const line = tr.newDoc.lineAt(spanStart);
+        if (cursor >= line.from && cursor <= line.to && cursor >= spanStart && cursor <= spanEnd) {
+          return [tr, {
+            selection: {
+              anchor: movingDown || movingRight ? spanEnd : Math.max(0, spanStart - 1)
+            }
+          }];
+        }
+        if (cursor === spanStart) return [tr, { selection: { anchor: movingRight ? spanEnd : Math.max(0, spanStart - 1) } }];
+        if (cursor > spanStart && cursor < spanEnd) return [tr, { selection: { anchor: movingRight ? spanEnd : spanStart } }];
+        if (cursor === spanEnd && !movingRight) return [tr, { selection: { anchor: spanStart } }];
+      }
+      return tr;
+    });
+
+    return [colorTheme, plugin, plainTheme, plainPlugin, atomicPlugin, srtPlugin, snapFilter, srtSnapFilter];
   }
 
   function wrapSelectionOrWord(v: EditorView, style: number = 0) {
@@ -1652,6 +2085,28 @@ ${body}
     return true;
   }
 
+  function isSrtTimestampLine(text: string) {
+    return /^\[\s*[0-9:.]+\s*-->\s*[0-9:.]+\s*\]$/.test(text.trim());
+  }
+
+  function moveLineSkippingSrt(v: EditorView, direction: "up" | "down", extend = false) {
+    const move = direction === "up"
+      ? (extend ? selectLineUp : cursorLineUp)
+      : (extend ? selectLineDown : cursorLineDown);
+
+    let previousHead = v.state.selection.main.head;
+    move(v);
+
+    for (let i = 0; i < 20; i += 1) {
+      const head = v.state.selection.main.head;
+      if (head === previousHead) break;
+      if (!isSrtTimestampLine(v.state.doc.lineAt(head).text)) break;
+      previousHead = head;
+      move(v);
+    }
+    return true;
+  }
+
   // Custom keymap — all app-specific bindings
   function buildKeymap() {
     const normal = (fn: (v: EditorView) => boolean) =>
@@ -1667,12 +2122,12 @@ ${body}
       // Normal-mode only: Navigation
       { key: "ArrowLeft",        run: normal(v => { cursorCharLeft(v);  return true; }) },
       { key: "ArrowRight",       run: normal(v => { cursorCharRight(v); return true; }) },
-      { key: "ArrowUp",          run: normal(v => { cursorLineUp(v);    return true; }) },
-      { key: "ArrowDown",        run: normal(v => { cursorLineDown(v);  return true; }) },
+      { key: "ArrowUp",          run: normal(v => moveLineSkippingSrt(v, "up")) },
+      { key: "ArrowDown",        run: normal(v => moveLineSkippingSrt(v, "down")) },
       { key: "Shift-ArrowLeft",  run: normal(v => { selectCharLeft(v);  return true; }) },
       { key: "Shift-ArrowRight", run: normal(v => { selectCharRight(v); return true; }) },
-      { key: "Shift-ArrowUp",    run: normal(v => { selectLineUp(v);    return true; }) },
-      { key: "Shift-ArrowDown",  run: normal(v => { selectLineDown(v);  return true; }) },
+      { key: "Shift-ArrowUp",    run: normal(v => moveLineSkippingSrt(v, "up", true)) },
+      { key: "Shift-ArrowDown",  run: normal(v => moveLineSkippingSrt(v, "down", true)) },
       { key: "Ctrl-ArrowLeft",        run: normal(v => { cursorGroupBackward(v); return true; }) },
       { key: "Ctrl-ArrowRight",       run: normal(v => { cursorGroupForward(v);  return true; }) },
       { key: "Ctrl-ArrowUp",          run: normal(v => paragraphBoundary(v, "start")) },
@@ -1682,15 +2137,15 @@ ${body}
       { key: "Shift-Ctrl-ArrowUp",    run: normal(v => paragraphBoundary(v, "start", true)) },
       { key: "Shift-Ctrl-ArrowDown",  run: normal(v => paragraphBoundary(v, "end", true)) },
       { key: "h", run: normal(v => { cursorCharLeft(v);  return true; }) },
-      { key: "j", run: normal(v => { cursorLineDown(v);  return true; }) },
-      { key: "k", run: normal(v => { cursorLineUp(v);    return true; }) },
+      { key: "j", run: normal(v => moveLineSkippingSrt(v, "down")) },
+      { key: "k", run: normal(v => moveLineSkippingSrt(v, "up")) },
       { key: "l", run: normal(v => { cursorCharRight(v); return true; }) },
       { key: "Ctrl-h", run: normal(v => { cursorGroupBackward(v); return true; }) },
       { key: "Ctrl-j", run: normal(v => paragraphBoundary(v, "end")) },
       { key: "Ctrl-k", run: normal(v => paragraphBoundary(v, "start")) },
       { key: "Ctrl-l", run: normal(v => { cursorGroupForward(v);  return true; }) },
-      { key: "w", run: normal(v => { cursorLineUp(v);        return true; }) },
-      { key: "s", run: normal(v => { cursorLineDown(v);      return true; }) },
+      { key: "w", run: normal(v => moveLineSkippingSrt(v, "up")) },
+      { key: "s", run: normal(v => moveLineSkippingSrt(v, "down")) },
       { key: "a", run: normal(v => { cursorGroupBackward(v); return true; }) },
       { key: "d", run: normal(v => { cursorGroupForward(v);  return true; }) },
       { key: "Ctrl-w", run: normal(v => paragraphBoundary(v, "start")) },
@@ -1699,15 +2154,15 @@ ${body}
       { key: "Ctrl-d", run: normal(v => moveByWordCount(v, true, 5)) },
       // Shift variants extend selection
       { key: "H", run: normal(v => { selectCharLeft(v);  return true; }) },
-      { key: "J", run: normal(v => { selectLineDown(v);  return true; }) },
-      { key: "K", run: normal(v => { selectLineUp(v);    return true; }) },
+      { key: "J", run: normal(v => moveLineSkippingSrt(v, "down", true)) },
+      { key: "K", run: normal(v => moveLineSkippingSrt(v, "up", true)) },
       { key: "L", run: normal(v => { selectCharRight(v); return true; }) },
       { key: "Shift-Ctrl-h", run: normal(v => { selectGroupBackward(v); return true; }) },
       { key: "Shift-Ctrl-j", run: normal(v => paragraphBoundary(v, "end", true)) },
       { key: "Shift-Ctrl-k", run: normal(v => paragraphBoundary(v, "start", true)) },
       { key: "Shift-Ctrl-l", run: normal(v => { selectGroupForward(v); return true; }) },
-      { key: "W", run: normal(v => { selectLineUp(v);        return true; }) },
-      { key: "S", run: normal(v => { selectLineDown(v);      return true; }) },
+      { key: "W", run: normal(v => moveLineSkippingSrt(v, "up", true)) },
+      { key: "S", run: normal(v => moveLineSkippingSrt(v, "down", true)) },
       { key: "A", run: normal(v => { selectGroupBackward(v); return true; }) },
       { key: "D", run: normal(v => { selectGroupForward(v);  return true; }) },
       { key: "Shift-Ctrl-w", run: normal(v => paragraphBoundary(v, "start", true)) },
@@ -1716,7 +2171,7 @@ ${body}
       { key: "Shift-Ctrl-d", run: normal(v => moveByWordCount(v, true, 5, true)) },
       // Normal-mode only: Annotation actions
       { key: "Space",  run: normal(v => wrapSelectionOrWord(v, currentStyle)) },
-      { key: "Enter",  run: normal(v => toggleAnnotationEdit(v)) },
+      { key: "Enter",  run: normal(v => handleEnterInAnnotationMode(v)) },
       { key: "x",      run: normal(v => removeAnnotation(v)) },
       { key: "q",      run: normal(v => { if (!cycleAnnotationColor(v, -1)) cycleStyle(-1); return true; }) },
       { key: "e",      run: normal(v => { if (!cycleAnnotationColor(v, +1)) cycleStyle(+1); return true; }) },
@@ -1729,6 +2184,10 @@ ${body}
       { key: "Ctrl-y", run: v => redo(v) },
       { key: "Ctrl-Z", run: v => redo(v) },
       { key: "?",      run: normal(() => { showHelp = !showHelp; return true; }) },
+      { key: "Alt-r", run: () => { cycleAudioRate(); return true; } },
+      { key: "Alt-Space",  run: () => { toggleAudioPlayback(); return true; } },
+      { key: "Alt-ArrowLeft",  run: () => { seekAudio(-10); return true; } },
+      { key: "Alt-ArrowRight", run: () => { seekAudio(10); return true; } },
       {
         any: (_view, event) =>
           editorMode === "normal" &&
@@ -1770,6 +2229,10 @@ ${body}
   }
 
   onMount(() => {
+    const onWindowKeydown = (event: KeyboardEvent) => handleAudioKeydown(event);
+    window.addEventListener("keydown", onWindowKeydown);
+    const editorResizeObserver = new ResizeObserver(() => updateEditorViewportHeight());
+
     view = new EditorView({
       state: EditorState.create({
         doc: localStorage.getItem("cm6-buffer") ?? starterDoc(),
@@ -1780,9 +2243,17 @@ ${body}
 
     view.dom.classList.add("mode-normal");
     view.focus();
+    updateEditorViewportHeight();
+    if (editorEl) editorResizeObserver.observe(editorEl);
     updateStatusFromView(view);
+    void restoreAudioFile();
 
-    return () => { view?.destroy(); };
+    return () => {
+      window.removeEventListener("keydown", onWindowKeydown);
+      editorResizeObserver.disconnect();
+      clearAudioTarget();
+      view?.destroy();
+    };
   });
 </script>
 
@@ -1809,8 +2280,8 @@ ${body}
   <div class="main" class:summary-collapsed={summaryCollapsed}>
     <div class="sidebar">
       <div class="sidebar-section">
-        <input type="file" accept=".srt,.txt,.md,.docx,.pdf" style="display:none" bind:this={fileInput} on:change={loadFile} />
-        <button class="sidebar-label load-btn" on:click={() => fileInput.click()}>Load file...</button>
+        <input type="file" accept=".srt,.txt,.md,.docx,.pdf,.mp3,.wav,.m4a,.ogg,.oga,.webm,.aac,.flac,.mp4,.mov,.mkv" multiple style="display:none" bind:this={fileInput} on:change={loadFile} />
+        <button class="sidebar-label load-btn" on:click={() => fileInput.click()}>LOAD FILE(S)...</button>
         <div class="file-actions">
           <button class="sidebar-label load-btn" on:click={saveDocument}>Save</button>
           <button class="sidebar-label load-btn" on:click={exportCleanHtml}>Export</button>
@@ -1837,7 +2308,7 @@ ${body}
         <div class="slider-row" data-tooltip="Left padding"><span class="slider-lbl">L</span><input type="range" min="0" max="400" step="4" bind:value={padLeft}   class="slider" aria-label="Left padding" /><span class="slider-val">{padLeft}</span></div>
         <div class="slider-row" data-tooltip="Right padding"><span class="slider-lbl">R</span><input type="range" min="0" max="400" step="4" bind:value={padRight}  class="slider" aria-label="Right padding" /><span class="slider-val">{padRight}</span></div>
         <div class="slider-row" data-tooltip="Top padding"><span class="slider-lbl">T</span><input type="range" min="0" max="400" step="4" bind:value={padTop}    class="slider" aria-label="Top padding" /><span class="slider-val">{padTop}</span></div>
-        <div class="slider-row" data-tooltip="Bottom padding"><span class="slider-lbl">B</span><input type="range" min="0" max="400" step="4" bind:value={padBottom} class="slider" aria-label="Bottom padding" /><span class="slider-val">{padBottom}</span></div>
+        <div class="slider-row" data-tooltip="Bottom padding"><span class="slider-lbl">B</span><input type="range" min="0" max={Math.max(0, editorViewportHeight - 48)} step="4" bind:value={padBottom} class="slider" aria-label="Bottom padding" /><span class="slider-val">{padBottom}</span></div>
         <div class="slider-row" data-tooltip="Line height"><span class="slider-lbl">LH</span><input type="range" min="1" max="3" step="0.05" bind:value={lineHeight} class="slider" aria-label="Line height" /><span class="slider-val">{lineHeight.toFixed(2)}</span></div>
         <div class="slider-row" data-tooltip="Font size"><span class="slider-lbl">FS</span><input type="range" min="10" max="28" step="1" bind:value={fontSize} class="slider" aria-label="Font size" /><span class="slider-val">{fontSize}</span></div>
         <div class="slider-row" data-tooltip="Notes alignment">
@@ -2029,12 +2500,50 @@ ${body}
       <span class="segment">{wordCountInfo}</span>
       <span class="segment style" style="color: {currentStyleColor}">{styleLabel}</span>
     </div>
+    <div class="status-center">
+      {#if audioUrl}
+        <div class="audio-widget">
+          <span class="audio-name">{audioFileName}</span>
+          <span class="audio-sep">|</span>
+          <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(-10)} title="Back 10 seconds" aria-label="Back 10 seconds">&lt;&lt;</button>
+          <button class="audio-glyph play" type="button" on:click={toggleAudioPlayback} title="Play / pause" aria-label="Play / pause">{audioPlaying ? "⏸" : "▶"}</button>
+          <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(10)} title="Forward 10 seconds" aria-label="Forward 10 seconds">&gt;&gt;</button>
+          <span class="audio-sep">|</span>
+          <button class="audio-rate-text" type="button" on:click={cycleAudioRate} aria-label="Playback speed" title="Playback speed">{audioRateText}</button>
+          <span class="audio-sep">|</span>
+          <span class="audio-time">{formatAudioTime(audioCurrentTime)} / {formatAudioTime(audioDuration)}</span>
+        </div>
+      {/if}
+    </div>
     <div class="status-right">
       <span class="segment">Ln {line}</span>
       <span class="segment">Col {column}</span>
-      <span class="segment syntax">Markdown</span>
+      <span class="segment syntax">{loadedFileType}</span>
     </div>
   </div>
+
+  <audio
+    bind:this={audioElement}
+    src={audioUrl}
+    style="display:none"
+    on:loadedmetadata={() => {
+      audioDuration = audioElement?.duration ?? 0;
+      audioLoaded = true;
+      if (audioElement) audioElement.playbackRate = audioRates[audioRateIndex];
+    }}
+    on:timeupdate={() => {
+      audioCurrentTime = audioElement?.currentTime ?? 0;
+    }}
+    on:play={() => {
+      audioPlaying = true;
+    }}
+    on:pause={() => {
+      audioPlaying = false;
+    }}
+    on:ended={() => {
+      audioPlaying = false;
+    }}
+  ></audio>
 
   {#if showHelp}
     <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
@@ -2045,49 +2554,16 @@ ${body}
           <button class="help-close" on:click={() => showHelp = false}>✕</button>
         </div>
         <div class="keybinds">
-          <div class="kb-section-label">Navigation</div>
-          <div class="kb-group">
-            <span class="kb-key">h j k l</span><span class="kb-desc">left / down / up / right</span>
-            <span class="kb-key">← ↓ ↑ →</span><span class="kb-desc">left / down / up / right</span>
-            <span class="kb-key">w s</span><span class="kb-desc">line up / down</span>
-            <span class="kb-key">a d</span><span class="kb-desc">word left / right</span>
-            <span class="kb-key">Ctrl+h/l</span><span class="kb-desc">word left / right</span>
-            <span class="kb-key">Ctrl+k/j</span><span class="kb-desc">paragraph start / end</span>
-            <span class="kb-key">Ctrl+w/s</span><span class="kb-desc">paragraph start / end</span>
-            <span class="kb-key">Ctrl+↑/↓</span><span class="kb-desc">paragraph start / end</span>
-            <span class="kb-key">Ctrl+a/d</span><span class="kb-desc">jump 5 words left / right</span>
-          </div>
-          <div class="kb-section-label">Selection</div>
-          <div class="kb-group">
-            <span class="kb-key">⇧hjkl</span><span class="kb-desc">select by char / line</span>
-            <span class="kb-key">⇧Arrows</span><span class="kb-desc">select by char / line</span>
-            <span class="kb-key">⇧w ⇧s</span><span class="kb-desc">select by line</span>
-            <span class="kb-key">⇧a ⇧d</span><span class="kb-desc">select by word</span>
-            <span class="kb-key">Ctrl+⇧h/l</span><span class="kb-desc">select by word</span>
-            <span class="kb-key">Ctrl+⇧k/j</span><span class="kb-desc">select to paragraph start / end</span>
-            <span class="kb-key">Ctrl+⇧w/s</span><span class="kb-desc">select to paragraph start / end</span>
-            <span class="kb-key">Ctrl+⇧↑/↓</span><span class="kb-desc">select to paragraph start / end</span>
-            <span class="kb-key">Ctrl+Shift+a/d</span><span class="kb-desc">select 5 words left / right</span>
-          </div>
-          <div class="kb-section-label">Annotations</div>
-          <div class="kb-group">
-            <span class="kb-key">Space</span><span class="kb-desc">wrap word / selection</span>
-            <span class="kb-key">q e</span><span class="kb-desc">style prev / next</span>
-            <span class="kb-key">n N</span><span class="kb-desc">style next / prev</span>
-            <span class="kb-key">Enter</span><span class="kb-desc">edit annotation note</span>
-            <span class="kb-key">x</span><span class="kb-desc">remove annotation</span>
-          </div>
-          <div class="kb-section-label">History</div>
-          <div class="kb-group">
-            <span class="kb-key">u U</span><span class="kb-desc">undo / redo</span>
-            <span class="kb-key">Ctrl+Z/Y</span><span class="kb-desc">undo / redo</span>
-          </div>
-          <div class="kb-section-label">Other</div>
-          <div class="kb-group">
-            <span class="kb-key">F2</span><span class="kb-desc">enter Edit mode</span>
-            <span class="kb-key">Esc</span><span class="kb-desc">return to Annotate mode</span>
-            <span class="kb-key">F1 / ?</span><span class="kb-desc">toggle this help</span>
-          </div>
+          {#each helpSections as section}
+            <section class="kb-section">
+              <div class="kb-section-label">{helpShortcutGroupTitle(section.title)}</div>
+              <div class="kb-group">
+                {#each section.items as [keyLabel, description]}
+                  <span class="kb-key">{helpShortcutLabel(keyLabel)}</span><span class="kb-desc">{helpShortcutDescription(description)}</span>
+                {/each}
+              </div>
+            </section>
+          {/each}
         </div>
       </div>
     </div>
@@ -2139,7 +2615,7 @@ ${body}
   .app {
     height: 100vh;
     display: grid;
-    grid-template-rows: auto 1fr auto;
+    grid-template-rows: auto 1fr auto auto;
     background: var(--bg);
     color: var(--fg);
   }
@@ -2537,7 +3013,18 @@ ${body}
     align-items: center;
   }
 
-  .keybinds { display: flex; flex-direction: column; gap: 10px; }
+  .keybinds {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px 20px;
+    min-height: 0;
+    overflow: auto;
+    padding-right: 4px;
+  }
+
+  .kb-section {
+    min-width: 0;
+  }
 
   .kb-group {
     display: grid;
@@ -2582,18 +3069,24 @@ ${body}
     display: flex;
     align-items: center;
     justify-content: center;
+    padding: 16px;
+    box-sizing: border-box;
     z-index: 100;
   }
 
   .help-panel {
+    display: flex;
+    flex-direction: column;
     background: var(--bg-hard);
     border: 1px solid var(--border);
     border-radius: 6px;
     padding: 20px 24px;
     min-width: 340px;
-    max-width: 480px;
+    max-width: 760px;
     width: 100%;
+    max-height: calc(100vh - 32px);
     box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    overflow: hidden;
   }
 
   .help-header {
@@ -2861,8 +3354,8 @@ ${body}
     z-index: 1;
   }
   .statusbar {
-    display: flex;
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     align-items: center;
     min-height: 48px;
     padding: 0 10px;
@@ -2873,6 +3366,18 @@ ${body}
   }
 
   .status-left, .status-right { display: flex; align-items: center; }
+  .status-left { justify-self: start; }
+  .status-center { justify-self: center; }
+  .status-right {
+    justify-self: end;
+    justify-content: flex-end;
+  }
+  .status-center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+  }
 
   .segment {
     padding: 0 8px;
@@ -2883,8 +3388,174 @@ ${body}
   .status-right .segment:first-child { border-left: 1px solid var(--internal-border); }
   .syntax { color: var(--yellow); }
   .mode { color: var(--orange); font-weight: 600; }
+  .audio-widget {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    min-width: 0;
+    padding: 0 8px;
+    font-family: "JetBrains Mono", "Fira Code", monospace;
+  }
+
+  .audio-name {
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--yellow);
+    font-weight: 500;
+    font-size: 11px;
+  }
+
+  .audio-time {
+    white-space: nowrap;
+    color: var(--fg-muted);
+    font-size: 11px;
+  }
+
+  .audio-sep {
+    color: var(--internal-border);
+    font-size: 11px;
+    user-select: none;
+  }
+
+  .audio-rate-text {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--fg-muted);
+    font-family: inherit;
+    font-size: 11px;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .audio-rate-text:hover,
+  .audio-rate-text:focus-visible {
+    color: var(--yellow);
+    outline: none;
+  }
+
+  .audio-glyph {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--fg-muted);
+    font-family: inherit;
+    font-size: 14px;
+    cursor: pointer;
+  }
+
+  .audio-glyph.play {
+    color: var(--fg-muted);
+  }
+
+  .audio-glyph:hover,
+  .audio-glyph:focus-visible {
+    outline: none;
+    color: var(--yellow);
+  }
+
+  .annotation-token {
+    border-radius: 3px;
+    padding: 0 0.25rem;
+    border: 1px solid rgba(0, 0, 0, 0.18);
+    display: inline-block;
+  }
+
+  .annotation-timestamp {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 0.2rem;
+    padding: 0 0.35rem;
+    border-radius: 999px;
+    background: transparent;
+    border: none;
+    color: var(--fg-muted);
+    font-size: inherit;
+    line-height: 1.4;
+    white-space: nowrap;
+    vertical-align: middle;
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.15);
+    opacity: 0.75;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+
+  :global(.cm-srt-timestamp) {
+    display: inline-flex;
+    align-items: center;
+    margin: 0 0 0.1rem 0;
+    padding: 0 0.3rem;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--fg-muted);
+    font-size: inherit;
+    line-height: 1.4;
+    white-space: nowrap;
+    opacity: 0.75;
+    letter-spacing: 0;
+    text-decoration: none;
+    font-style: normal;
+    text-shadow: none;
+    box-shadow: none;
+    border: none;
+  }
+
+  :global(.cm-srt-timestamp .cm-link),
+  :global(.cm-srt-timestamp .cm-url),
+  :global(.cm-srt-timestamp .cm-formatting-link),
+  :global(.cm-srt-timestamp .cm-formatting-link-start),
+  :global(.cm-srt-timestamp .cm-formatting-link-end) {
+    color: inherit !important;
+    text-decoration: none !important;
+  }
+
+  :global(.cm-srt-timestamp.cm-link),
+  :global(.cm-srt-timestamp.cm-url),
+  :global(.cm-srt-timestamp a) {
+    color: var(--fg-muted) !important;
+    text-decoration: none !important;
+    font-style: normal !important;
+    background: color-mix(in srgb, var(--bg-alt) 78%, transparent) !important;
+  }
+
+  .annotation-token {
+    border-radius: 3px;
+    padding: 0 0.25rem;
+    border: 1px solid rgba(0, 0, 0, 0.18);
+    display: inline-block;
+  }
+
+  .annotation-timestamp {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 0.2rem;
+    padding: 0 0.35rem;
+    border-radius: 999px;
+    background: rgba(80, 73, 69, 0.9);
+    border: 1px solid var(--border);
+    color: var(--fg-muted);
+    font-size: 10px;
+    line-height: 1.4;
+    white-space: nowrap;
+    vertical-align: middle;
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.15);
+  }
 
   @media (max-width: 760px) {
+    .help-panel {
+      max-width: 100%;
+    }
+
+    .keybinds {
+      grid-template-columns: 1fr;
+    }
+
     .pdf-modal-overlay {
       padding: 8px;
     }

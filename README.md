@@ -15,8 +15,9 @@ markdown instead of a proprietary document format.
 1. Paste text or load a `.srt`, `.txt`, `.md`, `.docx`, or `.pdf` file.
 2. Use Annotate mode for fast keyboard navigation and phrase marking.
 3. Switch to Edit mode when you want normal text entry.
-4. Review comments and blockquote notes in the collapsible summary sidebar.
-5. Save the raw markdown or export a clean HTML version for sharing.
+4. Optionally load a matching media file and use timestamp cues for playback.
+5. Review comments and blockquote notes in the collapsible summary sidebar.
+6. Save the raw markdown or export a clean HTML version for sharing.
 
 ## Features
 
@@ -37,6 +38,9 @@ markdown instead of a proprietary document format.
 - **File loading** - supports `.srt`, `.txt`, `.md`, `.docx`, and `.pdf` input.
 - **SRT transcript import** - drops cue IDs, normalizes timestamps, strips simple
   subtitle tags, and keeps cue boundaries readable in the editor.
+- **Transcript media playback** - load a media file beside an SRT transcript,
+  click timestamp cues, or use keyboard shortcuts to play and seek while
+  reviewing.
 - **PDF review modal** - extracts selectable PDF text, shows the PDF beside the
   extracted draft, and lets you correct the text before loading it.
 - **Save and export** - saves the editable markdown and exports clean HTML that
@@ -82,6 +86,7 @@ markdown editors and rendered comments stay hidden in normal markdown output.
 | `.txt` / `.md` | Loads text directly into the editor. |
 | `.docx` | Extracts raw text with `mammoth`. |
 | `.pdf` | Extracts text with `pdfjs-dist` and opens the review modal before loading. |
+| Media | Loads `.mp3`, `.wav`, `.m4a`, `.ogg`, `.oga`, `.webm`, `.aac`, `.flac`, `.mp4`, `.mov`, or `.mkv` for transcript playback. |
 
 ## Keyboard Shortcuts
 
@@ -107,6 +112,9 @@ Annotate mode uses Vim-style movement plus arrow-key equivalents.
 | `Ctrl+Z` / `Ctrl+Y` | Undo / redo |
 | `F2` | Enter Edit mode |
 | `Esc` | Return to Annotate mode |
+| `Alt+Space` | Play / pause loaded media |
+| `Alt+Left` / `Alt+Right` | Seek loaded media backward / forward |
+| `Alt+r` | Cycle playback speed |
 | `F1` / `?` | Toggle keyboard help |
 
 ## Project Structure
