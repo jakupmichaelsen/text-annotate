@@ -1,93 +1,141 @@
 # textAnnotate
 
-A markdown annotation editor built with [Svelte](https://svelte.dev/) and [CodeMirror 6](https://codemirror.net/).
+textAnnotate is a focused markdown annotation editor built with
+[Svelte](https://svelte.dev/), [CodeMirror 6](https://codemirror.net/), and
+[Vite](https://vite.dev/).
 
-**Live at: https://text-annotate.vercel.app/**
+Live app: <https://text-annotate.vercel.app/>
 
-Designed for ESL teachers giving feedback on student assignments.
+The app is designed for ESL teacher feedback workflows: mark phrases, attach
+short notes, review the feedback by category, and keep the result as portable
+markdown instead of a proprietary document format.
+
+## Core Workflow
+
+1. Paste text or load a `.srt`, `.txt`, `.md`, `.docx`, or `.pdf` file.
+2. Use Annotate mode for fast keyboard navigation and phrase marking.
+3. Switch to Edit mode when you want normal text entry.
+4. Review comments and blockquote notes in the collapsible summary sidebar.
+5. Save the raw markdown or export a clean HTML version for sharing.
 
 ## Features
 
-- **Annotate/Edit Modes** — Compact switch for moving between annotation and editing
-- **Markdown Editor** — Full markdown support with syntax highlighting
-- **Color Annotations** — Highlight text with named palette colors plus plain backtick style
-- **Annotation Format** — Stored as standard markdown comments with color, timestamp, and note
-- **Tooltip Preview** — Cursor on annotation shows a floating bubble with color, timestamp, and note
-- **Inline Note Editing** — Double-click or press `Enter` on an annotation to edit its note inline
-- **File Loading** — Load `.srt`, `.txt`, `.md`, `.docx`, and `.pdf` files
-- **PDF Review Modal** — Extract text from PDFs, correct it beside the preview, then load it into the editor
-- **Autosave** — Restores the previous buffer from local storage when available
-- **Layout Controls** — Sidebar sliders for L/R/T/B padding, line height, and font size
-- **Blockquote Controls** — Tune note alignment and background width
-- **Status Bar** — Live line, column, selection count, word count, and active style
-- **Custom Keymap** — Annotate mode navigation, selection, undo/redo, and help shortcuts
+- **Portable annotation format** - highlighted text is stored as markdown inline
+  code plus an HTML comment containing the color, timestamp, and note.
+- **Clean/raw display modes** - Clean hides annotation metadata, Raw shows the
+  current annotation markup, and Raw (all) shows every stored comment.
+- **Named highlight palette** - includes plain backtick style plus named colors
+  such as `green`, `red`, `steel`, `orange`, `periwinkle`, `sand`, `mint`,
+  `denim`, `yellow`, `indigo`, `brown`, `slate`, `sky`, `rosewood`, and
+  `purple`.
+- **Inline note editing** - double-click or press `Enter` on an annotation to
+  edit its stored comment.
+- **Summary sidebar** - groups annotations and blockquote notes, jumps back to
+  the source text, and opens annotation comments for editing.
+- **Blockquote note controls** - adjust feedback-note alignment and background
+  width while preserving those settings in markdown comments.
+- **File loading** - supports `.srt`, `.txt`, `.md`, `.docx`, and `.pdf` input.
+- **SRT transcript import** - drops cue IDs, normalizes timestamps, strips simple
+  subtitle tags, and keeps cue boundaries readable in the editor.
+- **PDF review modal** - extracts selectable PDF text, shows the PDF beside the
+  extracted draft, and lets you correct the text before loading it.
+- **Save and export** - saves the editable markdown and exports clean HTML that
+  preserves the editor's clean-mode annotation styling.
+- **Local restore and autosave** - restores the browser buffer from local
+  storage and autosaves to an active file handle after Save when supported by
+  the browser.
+- **Status bar** - shows editor mode, line/column, selection size, visible word
+  count, and active annotation style.
+- **Layout controls** - tune editor padding, line height, font size, and
+  blockquote note presentation from the sidebar.
 
 ## Annotation Format
 
-Annotations are stored directly in the markdown as invisible HTML comments:
+Annotations remain valid markdown. The visible phrase is wrapped in backticks,
+and the feedback metadata is stored in the following HTML comment:
 
 ```markdown
-The fox was `quick`<!-- green, 6 Apr 2026 10:00:01: "Check spelling" --> nor particularly brown.
+The fox was `quick`<!-- green, 6 Apr 2026 10:00:01: "Check spelling" -->.
 ```
 
-- **color** — one of the configured palette names, such as `green`, `red`, `steel`, `orange`, `yellow`, or `purple`
-- **timestamp** — local datetime, auto-generated on wrap
-- **note** — optional free-text comment, editable inline
+The comment fields are:
 
-The file remains valid, portable markdown. HTML comments are invisible in rendered output.
+- `green` - the annotation color name.
+- `6 Apr 2026 10:00:01` - the local timestamp generated when the annotation is
+  created.
+- `"Check spelling"` - the optional feedback note.
 
-## Tech Stack
+Blockquote display settings are stored the same way:
 
-- Svelte 5
-- CodeMirror 6
-- Vite
+```markdown
+> Good overall point, but connect it more clearly to the text. <!-- align:left width:100 -->
+```
 
-## Getting Started
+Because the metadata is plain HTML comments, the file remains readable in other
+markdown editors and rendered comments stay hidden in normal markdown output.
+
+## Supported Inputs
+
+| Input | Behavior |
+| --- | --- |
+| `.srt` | Converts cues to timestamp lines plus transcript text. |
+| `.txt` / `.md` | Loads text directly into the editor. |
+| `.docx` | Extracts raw text with `mammoth`. |
+| `.pdf` | Extracts text with `pdfjs-dist` and opens the review modal before loading. |
+
+## Keyboard Shortcuts
+
+Annotate mode uses Vim-style movement plus arrow-key equivalents.
+
+| Key | Action |
+| --- | --- |
+| `h` / `j` / `k` / `l` | Move left / down / up / right |
+| Arrow keys | Move left / down / up / right |
+| `w` / `s` | Move one visual line up / down |
+| `a` / `d` | Move one word left / right |
+| `Ctrl+h` / `Ctrl+l` | Move one word left / right |
+| `Ctrl+k` / `Ctrl+j` | Move to paragraph start / end |
+| `Ctrl+w` / `Ctrl+s` | Move to paragraph start / end |
+| `Ctrl+a` / `Ctrl+d` | Jump five words left / right |
+| `Shift` movement variants | Extend the current selection |
+| `Space` | Wrap selection or current word as an annotation |
+| `q` / `e` | Previous / next annotation style |
+| `n` / `N` | Next / previous annotation style |
+| `Enter` | Edit annotation note |
+| `x` | Remove annotation |
+| `u` / `U` | Undo / redo |
+| `Ctrl+Z` / `Ctrl+Y` | Undo / redo |
+| `F2` | Enter Edit mode |
+| `Esc` | Return to Annotate mode |
+| `F1` / `?` | Toggle keyboard help |
+
+## Project Structure
+
+- `src/App.svelte` contains the CodeMirror setup, annotation parsing,
+  decorations, import/export behavior, toolbar, sidebar, summary panel, and
+  component-scoped styles.
+- `src/main.js` mounts the Svelte app into `index.html`.
+- `src/app.css` contains global app styles.
+- `public/` stores static files served by Vite.
+- `dist/` is generated by production builds and should not be edited by hand.
+
+## Development
+
+Install dependencies and start the Vite dev server:
 
 ```bash
 npm install
 npm run dev
 ```
 
+Create and preview a production build when needed:
+
 ```bash
-npm run build    # production build
-npm run preview  # preview production build
+npm run build
+npm run preview
 ```
 
-## Keyboard Shortcuts
-
-Annotate mode uses `h j k l`, arrows, and modifier variants for movement and selection.
-
-| Key | Action |
-|-----|--------|
-| `h j k l` | left / down / up / right |
-| `← ↓ ↑ →` | left / down / up / right |
-| `w s` | line up / down |
-| `a d` | word left / right |
-| `Ctrl+h/l` | word left / right |
-| `Ctrl+k/j` | paragraph start / end |
-| `Ctrl+w/s` | paragraph start / end |
-| `Ctrl+↑/↓` | paragraph start / end |
-| `Ctrl+a/d` | jump 5 words left / right |
-| `⇧hjkl` | select by char / line |
-| `⇧Arrows` | select by char / line |
-| `⇧w/s` | select by line |
-| `⇧a/d` | select by word |
-| `Ctrl+⇧h/l` | select by word |
-| `Ctrl+⇧k/j` | select to paragraph start / end |
-| `Ctrl+⇧w/s` | select to paragraph start / end |
-| `Ctrl+⇧↑/↓` | select to paragraph start / end |
-| `Ctrl+Shift+a/d` | select 5 words left / right |
-| `Space` | wrap word or selection |
-| `q e` | style prev / next |
-| `n N` | style next / prev |
-| `Enter` | edit annotation note |
-| `x` | remove annotation |
-| `u U` | undo / redo |
-| `Ctrl+Z/Y` | undo / redo |
-| `F2` | enter Edit mode |
-| `Esc` | return to Annotate mode |
-| `F1 / ?` | toggle help |
+There is currently no configured `npm test`, lint, or format script.
 
 ## License
 
