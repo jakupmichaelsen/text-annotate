@@ -4,10 +4,11 @@
   import {
     EditorView, keymap, lineNumbers, drawSelection,
     highlightActiveLineGutter, ViewPlugin, Decoration,
+    GutterMarker, lineNumberMarkers,
     WidgetType, showTooltip, type Tooltip,
     type DecorationSet, type ViewUpdate
   } from "@codemirror/view";
-  import { EditorSelection, RangeSet, StateEffect, StateField, type Range, type SelectionRange, type Text } from "@codemirror/state";
+  import { EditorSelection, RangeSet, StateEffect, StateField, type Range, type SelectionRange, type Text, type Transaction, type TransactionSpec } from "@codemirror/state";
   import {
     defaultKeymap, history, historyKeymap, undo, redo,
     cursorLineUp, cursorLineDown, cursorLineStart, cursorLineEnd,
@@ -918,7 +919,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
   function buildGruvboxTheme(): Extension {
     return EditorView.theme({
       "&": { height: "100%", color: gruvbox.fg, backgroundColor: gruvbox.bg },
-      ".cm-scroller": { overflow: "auto", fontFamily: '"JetBrains Mono", "Fira Code", monospace', lineHeight: "1.75" },
+      ".cm-scroller": { overflow: "auto", fontFamily: '"Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, monospace', lineHeight: "1.75" },
       ".cm-content": { textAlign: "left", padding: "1rem 1.25rem 4rem", minHeight: "100%", caretColor: gruvbox.cursor, whiteSpace: "pre-wrap", wordBreak: "break-word" },
       ".cm-line": { textAlign: "left" },
       "&.cm-focused .cm-cursor": { borderLeftColor: gruvbox.cursor },
@@ -1004,7 +1005,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
       margin: 0;
       background: ${gruvbox.bg};
       color: ${gruvbox.fg};
-      font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-family: "Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       line-height: ${lineHeight};
       font-size: ${fontSize}px;
     }
@@ -1019,6 +1020,27 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     p { margin: 0 0 1rem; }
     h1, h2, h3, h4, h5, h6 { color: ${gruvbox.yellow}; margin: 1.25rem 0 0.75rem; line-height: 1.25; }
     code { color: ${gruvbox.yellow}; background: ${gruvbox.bgSoft}; border: 1px solid ${gruvbox.border}; border-radius: 4px; padding: 0 0.25rem; }
+    .annotation-token {
+      border-radius: 3px;
+      padding: 0 0.25rem;
+      border: 1px solid rgba(0, 0, 0, 0.18);
+      display: inline-block;
+    }
+    .annotation-timestamp {
+      display: inline-flex;
+      align-items: center;
+      margin-left: 0.2rem;
+      padding: 0 0.35rem;
+      border-radius: 999px;
+      background: rgba(80, 73, 69, 0.9);
+      border: 1px solid ${gruvbox.border};
+      color: ${gruvbox.fgMuted};
+      font-size: 10px;
+      line-height: 1.4;
+      white-space: nowrap;
+      vertical-align: middle;
+      box-shadow: 0 1px 0 rgba(0, 0, 0, 0.15);
+    }
     blockquote {
       border-left: 3px solid ${gruvbox.orange};
       padding: 0.25rem 0.35rem 0.25rem 0.75rem;
@@ -1468,6 +1490,65 @@ ${body}
     ignoreEvent() { return false; }
   }
 
+  class SrtGutterMarker extends GutterMarker {
+    elementClass: string;
+    label: string;
+    startSeconds: number | null;
+    constructor(elementClass: string, label = "", startSeconds: number | null = null) {
+      super();
+      this.elementClass = elementClass;
+      this.label = label;
+      this.startSeconds = startSeconds;
+    }
+    eq(other: GutterMarker) {
+      return other instanceof SrtGutterMarker &&
+        other.elementClass === this.elementClass &&
+        other.label === this.label &&
+        other.startSeconds === this.startSeconds;
+    }
+    toDOM() {
+      const span = document.createElement("span");
+      span.className = "cm-srt-gutter-label";
+      span.textContent = this.label;
+      if (this.startSeconds !== null) {
+        span.title = this.label;
+        span.addEventListener("mousedown", event => {
+          event.preventDefault();
+          event.stopPropagation();
+          jumpAudioToAndPlay(this.startSeconds!);
+        });
+      }
+      return span;
+    }
+  }
+
+  const srtSourceGutterMarker = new SrtGutterMarker("cm-srt-gutter-source");
+
+  function buildSrtGutterMarkers(state: EditorState) {
+    const builder = new RangeSetBuilder<GutterMarker>();
+
+    for (let lineNumber = 1; lineNumber <= state.doc.lines; lineNumber += 1) {
+      const line = state.doc.line(lineNumber);
+      if (isSrtTimestampLine(line.text)) {
+        builder.add(line.from, line.from, srtSourceGutterMarker);
+        continue;
+      }
+
+      const timestamp = srtTimestampForTranscriptLine(state, lineNumber);
+      if (timestamp && line.text.trim()) {
+        builder.add(line.from, line.from, new SrtGutterMarker("cm-srt-gutter-transcript", timestamp.label, timestamp.startSeconds));
+      }
+    }
+
+    return builder.finish();
+  }
+
+  const srtGutterMarkerField = StateField.define<RangeSet<GutterMarker>>({
+    create: state => buildSrtGutterMarkers(state),
+    update: (markers, tr) => tr.docChanged ? buildSrtGutterMarkers(tr.state) : markers,
+    provide: field => lineNumberMarkers.from(field)
+  });
+
   function formatSrtTimestampLabel(matchText: string) {
     const parsed = /^\[\s*([0-9:.]+)\s*-->\s*([0-9:.]+)\s*\]$/.exec(matchText.trim());
     if (!parsed) return matchText;
@@ -1504,6 +1585,70 @@ ${body}
     }
     const numeric = Number(cleaned);
     return Number.isFinite(numeric) ? numeric : null;
+  }
+
+  function isSrtTimestampLine(text: string) {
+    return /^\[\s*[0-9:.]+\s*-->\s*[0-9:.]+\s*\]$/.test(text.trim());
+  }
+
+  function documentHasSrtTimestamps(state: EditorState) {
+    return /^\[\s*[0-9:.]+\s*-->\s*[0-9:.]+\s*\]$/m.test(state.doc.toString());
+  }
+
+  function srtTimestampForTranscriptLine(state: EditorState, lineNumber: number) {
+    if (lineNumber <= 1 || lineNumber > state.doc.lines) return null;
+    const previousLine = state.doc.line(lineNumber - 1);
+    if (!isSrtTimestampLine(previousLine.text)) return null;
+    srtPattern.lastIndex = 0;
+    const match = srtPattern.exec(previousLine.text);
+    if (!match) return null;
+    return {
+      label: formatSrtTimestampLabel(match[0]),
+      startSeconds: parseTimestampToSeconds(match[1])
+    };
+  }
+
+  function formatEditorLineNumber(lineNumber: number, state: EditorState) {
+    const hasSrt = documentHasSrtTimestamps(state);
+    if (lineNumber > state.doc.lines) return hasSrt ? "00:00 → 00:00" : String(lineNumber);
+    const line = state.doc.line(lineNumber);
+    if (isSrtTimestampLine(line.text)) return "";
+    const timestamp = srtTimestampForTranscriptLine(state, lineNumber);
+    if (timestamp) return timestamp.label;
+    return String(lineNumber);
+  }
+
+  function srtLineExitPosition(doc: Text, lineNumber: number, direction: "left" | "right") {
+    if (direction === "right") {
+      for (let number = lineNumber + 1; number <= doc.lines; number += 1) {
+        const line = doc.line(number);
+        if (line.text.trim() && !isSrtTimestampLine(line.text)) return line.from;
+      }
+      return doc.length;
+    }
+
+    for (let number = lineNumber - 1; number >= 1; number -= 1) {
+      const line = doc.line(number);
+      if (line.text.trim() && !isSrtTimestampLine(line.text)) return line.to;
+    }
+    return 0;
+  }
+
+  function snapSelectionAroundProtectedRange(
+    tr: Transaction,
+    range: { from: number; to: number; leftExit: number; rightExit: number }
+  ): readonly TransactionSpec[] | null {
+    const selection = tr.newSelection.main;
+    const cursor = selection.head;
+    if (cursor < range.from || cursor > range.to) return null;
+
+    const movingRight = cursor >= tr.startState.selection.main.head;
+    const target = movingRight ? range.rightExit : range.leftExit;
+    if (target === cursor) return null;
+
+    return [tr, {
+      selection: selection.empty ? EditorSelection.cursor(target) : EditorSelection.range(selection.anchor, target)
+    }];
   }
 
   function isCursorOnSrtTimestampLine(v: EditorView) {
@@ -1671,16 +1816,36 @@ ${body}
       }
       build(v: EditorView): DecorationSet {
         const builder = new RangeSetBuilder<Decoration>();
+        let lastLineNumber = 0;
         for (const { from, to } of v.visibleRanges) {
-          const text = v.state.doc.sliceString(from, to);
-          srtPattern.lastIndex = 0;
-          let match: RegExpExecArray | null;
-          while ((match = srtPattern.exec(text)) !== null) {
-            const start = from + match.index;
-            const end = start + match[0].length;
-            const label = formatSrtTimestampLabel(match[0]);
-            const startSeconds = parseTimestampToSeconds(match[1]);
-            builder.add(start, end, Decoration.replace({ widget: new SrtTimestampWidget(label, startSeconds), inclusive: true }));
+          let line = v.state.doc.lineAt(from);
+          if (line.number <= lastLineNumber && lastLineNumber < v.state.doc.lines) line = v.state.doc.line(lastLineNumber + 1);
+
+          while (line.from <= to && line.number <= v.state.doc.lines) {
+            const timestampLine = isSrtTimestampLine(line.text);
+            if (timestampLine) {
+              builder.add(line.from, line.from, Decoration.line({ class: "cm-srt-timestamp-line" }));
+            } else {
+              const timestamp = srtTimestampForTranscriptLine(v.state, line.number);
+              if (timestamp && line.text.trim()) {
+                builder.add(line.from, line.from, Decoration.line({ class: "cm-srt-transcript-line" }));
+              }
+            }
+
+            srtPattern.lastIndex = 0;
+            let match: RegExpExecArray | null;
+            while ((match = srtPattern.exec(line.text)) !== null) {
+              const start = line.from + match.index;
+              const end = start + match[0].length;
+              const label = formatSrtTimestampLabel(match[0]);
+              const startSeconds = parseTimestampToSeconds(match[1]);
+              if (timestampLine) continue;
+              builder.add(start, end, Decoration.replace({ widget: new SrtTimestampWidget(label, startSeconds), inclusive: true }));
+            }
+
+            lastLineNumber = line.number;
+            if (line.number >= v.state.doc.lines) break;
+            line = v.state.doc.line(line.number + 1);
           }
         }
         return builder.finish();
@@ -1690,9 +1855,6 @@ ${body}
     const snapFilter = EditorState.transactionFilter.of(tr => {
       if (!tr.selection || annotationMode !== "clean") return tr;
       const docText = tr.newDoc.toString();
-      const cursor = tr.newSelection.main.head;
-      const prevCursor = tr.startState.selection.main.head;
-      const movingRight = cursor >= prevCursor;
       annotationPattern.lastIndex = 0;
       let m: RegExpExecArray | null;
       while ((m = annotationPattern.exec(docText)) !== null) {
@@ -1700,9 +1862,21 @@ ${body}
         const wordStart = spanStart + 1;
         const wordEnd   = wordStart + m[1].length;
         const spanEnd   = spanStart + m[0].length;
-        if (cursor === spanStart) return [tr, { selection: { anchor: movingRight ? wordStart : Math.max(0, spanStart - 1) } }];
-        if (cursor > wordEnd && cursor < spanEnd) return [tr, { selection: { anchor: movingRight ? spanEnd : wordEnd } }];
-        if (cursor === wordEnd && movingRight) return [tr, { selection: { anchor: spanEnd } }];
+        const beforeWord = snapSelectionAroundProtectedRange(tr, {
+          from: spanStart,
+          to: wordStart - 1,
+          leftExit: Math.max(0, spanStart - 1),
+          rightExit: wordStart
+        });
+        if (beforeWord) return beforeWord;
+
+        const afterWord = snapSelectionAroundProtectedRange(tr, {
+          from: wordEnd,
+          to: spanEnd,
+          leftExit: wordEnd,
+          rightExit: spanEnd
+        });
+        if (afterWord) return afterWord;
       }
       return tr;
     });
@@ -1710,28 +1884,20 @@ ${body}
     const srtSnapFilter = EditorState.transactionFilter.of(tr => {
       if (!tr.selection) return tr;
       const docText = tr.newDoc.toString();
-      const cursor = tr.newSelection.main.head;
-      const prevCursor = tr.startState.selection.main.head;
-      const movingRight = cursor >= prevCursor;
-      const currentLine = tr.newDoc.lineAt(cursor);
-      const prevLine = tr.startState.doc.lineAt(prevCursor);
-      const movingDown = currentLine.number >= prevLine.number;
       srtPattern.lastIndex = 0;
       let match: RegExpExecArray | null;
       while ((match = srtPattern.exec(docText)) !== null) {
         const spanStart = match.index;
         const spanEnd = spanStart + match[0].length;
         const line = tr.newDoc.lineAt(spanStart);
-        if (cursor >= line.from && cursor <= line.to && cursor >= spanStart && cursor <= spanEnd) {
-          return [tr, {
-            selection: {
-              anchor: movingDown || movingRight ? spanEnd : Math.max(0, spanStart - 1)
-            }
-          }];
-        }
-        if (cursor === spanStart) return [tr, { selection: { anchor: movingRight ? spanEnd : Math.max(0, spanStart - 1) } }];
-        if (cursor > spanStart && cursor < spanEnd) return [tr, { selection: { anchor: movingRight ? spanEnd : spanStart } }];
-        if (cursor === spanEnd && !movingRight) return [tr, { selection: { anchor: spanStart } }];
+        const timestampLine = isSrtTimestampLine(line.text);
+        const snapped = snapSelectionAroundProtectedRange(tr, {
+          from: timestampLine ? line.from : spanStart,
+          to: timestampLine ? line.to : spanEnd,
+          leftExit: timestampLine ? srtLineExitPosition(tr.newDoc, line.number, "left") : Math.max(0, spanStart - 1),
+          rightExit: timestampLine ? srtLineExitPosition(tr.newDoc, line.number, "right") : spanEnd
+        });
+        if (snapped) return snapped;
       }
       return tr;
     });
@@ -2085,25 +2251,38 @@ ${body}
     return true;
   }
 
-  function isSrtTimestampLine(text: string) {
-    return /^\[\s*[0-9:.]+\s*-->\s*[0-9:.]+\s*\]$/.test(text.trim());
-  }
-
   function moveLineSkippingSrt(v: EditorView, direction: "up" | "down", extend = false) {
     const move = direction === "up"
       ? (extend ? selectLineUp : cursorLineUp)
       : (extend ? selectLineDown : cursorLineDown);
+    const selection = v.state.selection.main;
+    const doc = v.state.doc;
+    const currentLine = doc.lineAt(selection.head);
+    const step = direction === "up" ? -1 : 1;
+    const adjacentNumber = currentLine.number + step;
 
-    let previousHead = v.state.selection.main.head;
-    move(v);
-
-    for (let i = 0; i < 20; i += 1) {
-      const head = v.state.selection.main.head;
-      if (head === previousHead) break;
-      if (!isSrtTimestampLine(v.state.doc.lineAt(head).text)) break;
-      previousHead = head;
+    if (adjacentNumber < 1 || adjacentNumber > doc.lines) {
       move(v);
+      return true;
     }
+
+    const adjacentLine = doc.line(adjacentNumber);
+    if (!isSrtTimestampLine(adjacentLine.text)) {
+      move(v);
+      return true;
+    }
+
+    const column = selection.head - currentLine.from;
+    for (let lineNumber = adjacentNumber + step; lineNumber >= 1 && lineNumber <= doc.lines; lineNumber += step) {
+      const line = doc.line(lineNumber);
+      if (isSrtTimestampLine(line.text) || !line.text.trim()) continue;
+      const head = line.from + Math.min(column, line.length);
+      v.dispatch({
+        selection: { anchor: extend ? selection.anchor : head, head }
+      });
+      return true;
+    }
+
     return true;
   }
 
@@ -2203,7 +2382,20 @@ ${body}
     return [
       dblClickBehavior,
       EditorView.lineWrapping,
-      lineNumbers(),
+      lineNumbers({
+        formatNumber: formatEditorLineNumber,
+        domEventHandlers: {
+          mousedown: (v, line, event) => {
+            const docLine = v.state.doc.lineAt(line.from);
+            const timestamp = srtTimestampForTranscriptLine(v.state, docLine.number);
+            if (!timestamp || timestamp.startSeconds === null) return false;
+            event.preventDefault();
+            event.stopPropagation();
+            jumpAudioToAndPlay(timestamp.startSeconds);
+            return true;
+          }
+        }
+      }),
       drawSelection(),
       history(),
       indentOnInput(),
@@ -2215,6 +2407,7 @@ ${body}
       markdown({ base: markdownLanguage }),
       statusPlugin,
       summaryJumpFlashField,
+      srtGutterMarkerField,
       blockquoteLinePlugin,
       columnGuidePlugin,
       visualLinePlugin,
@@ -2610,7 +2803,7 @@ ${body}
 
 <style>
   :global(html, body, #app) { margin: 0; height: 100%; }
-  :global(body) { background: var(--bg); font-family: "JetBrains Mono", "Fira Code", monospace; }
+  :global(body) { background: var(--bg); font-family: "Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, monospace; }
 
   .app {
     height: 100vh;
@@ -2879,7 +3072,6 @@ ${body}
   }
 
   .summary-text,
-  .summary-comment,
   .summary-comment-action {
     display: block;
     overflow-wrap: anywhere;
@@ -3395,7 +3587,7 @@ ${body}
     max-width: 100%;
     min-width: 0;
     padding: 0 8px;
-    font-family: "JetBrains Mono", "Fira Code", monospace;
+    font-family: "Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, monospace;
   }
 
   .audio-name {
@@ -3460,44 +3652,53 @@ ${body}
     color: var(--yellow);
   }
 
-  .annotation-token {
-    border-radius: 3px;
-    padding: 0 0.25rem;
-    border: 1px solid rgba(0, 0, 0, 0.18);
-    display: inline-block;
+  :global(.cm-srt-timestamp-line) {
+    height: 0;
+    min-height: 0;
+    overflow: hidden;
+    line-height: 0;
   }
 
-  .annotation-timestamp {
-    display: inline-flex;
-    align-items: center;
-    margin-left: 0.2rem;
-    padding: 0 0.35rem;
-    border-radius: 999px;
-    background: transparent;
-    border: none;
+  :global(.cm-line.cm-srt-transcript-line) {
+    box-sizing: border-box;
+    position: relative;
+  }
+
+  :global(.cm-lineNumbers .cm-gutterElement.cm-srt-gutter-source) {
+    height: 0;
+    min-height: 0;
+    overflow: hidden;
+    line-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  :global(.cm-lineNumbers .cm-gutterElement.cm-srt-gutter-transcript) {
+    min-width: 6.4rem;
+    padding-right: 0.75rem;
     color: var(--fg-muted);
-    font-size: inherit;
-    line-height: 1.4;
-    white-space: nowrap;
-    vertical-align: middle;
-    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.15);
-    opacity: 0.75;
-    text-transform: none;
-    letter-spacing: 0;
+    font-size: 0.86em;
+    opacity: 0.76;
+    cursor: pointer;
+  }
+
+  :global(.cm-lineNumbers .cm-gutterElement.cm-srt-gutter-transcript:hover) {
+    color: var(--yellow);
+    opacity: 1;
   }
 
   :global(.cm-srt-timestamp) {
     display: inline-flex;
     align-items: center;
-    margin: 0 0 0.1rem 0;
-    padding: 0 0.3rem;
+    margin: 0 0.4rem 0 0;
+    padding: 0 0.25rem;
     border-radius: 999px;
     background: transparent;
     color: var(--fg-muted);
-    font-size: inherit;
-    line-height: 1.4;
+    font-size: 0.86em;
+    line-height: 1.25;
     white-space: nowrap;
-    opacity: 0.75;
+    opacity: 0.68;
     letter-spacing: 0;
     text-decoration: none;
     font-style: normal;
@@ -3522,29 +3723,6 @@ ${body}
     text-decoration: none !important;
     font-style: normal !important;
     background: color-mix(in srgb, var(--bg-alt) 78%, transparent) !important;
-  }
-
-  .annotation-token {
-    border-radius: 3px;
-    padding: 0 0.25rem;
-    border: 1px solid rgba(0, 0, 0, 0.18);
-    display: inline-block;
-  }
-
-  .annotation-timestamp {
-    display: inline-flex;
-    align-items: center;
-    margin-left: 0.2rem;
-    padding: 0 0.35rem;
-    border-radius: 999px;
-    background: rgba(80, 73, 69, 0.9);
-    border: 1px solid var(--border);
-    color: var(--fg-muted);
-    font-size: 10px;
-    line-height: 1.4;
-    white-space: nowrap;
-    vertical-align: middle;
-    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.15);
   }
 
   @media (max-width: 760px) {
