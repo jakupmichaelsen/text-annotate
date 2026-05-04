@@ -15,7 +15,7 @@ markdown instead of a proprietary document format.
 1. Paste text or load a `.srt`, `.txt`, `.md`, `.docx`, or `.pdf` file.
 2. Use Annotate mode for fast keyboard navigation and phrase marking.
 3. Switch to Edit mode when you want normal text entry.
-4. Optionally load a matching media file and use timestamp cues for playback.
+4. Optionally load a matching media file and use gutter timestamps for playback.
 5. Review comments and blockquote notes in the collapsible summary sidebar.
 6. Save the raw markdown or export a clean HTML version for sharing.
 
@@ -36,11 +36,12 @@ markdown instead of a proprietary document format.
 - **Blockquote note controls** - adjust feedback-note alignment and background
   width while preserving those settings in markdown comments.
 - **File loading** - supports `.srt`, `.txt`, `.md`, `.docx`, and `.pdf` input.
-- **SRT transcript import** - drops cue IDs, normalizes timestamps, strips simple
-  subtitle tags, and keeps cue boundaries readable in the editor.
+- **SRT transcript view** - drops cue IDs, normalizes timestamps, strips simple
+  subtitle tags, collapses raw timestamp source lines, and shows clickable cue
+  timestamps in the line-number gutter beside transcript lines.
 - **Transcript media playback** - load a media file beside an SRT transcript,
-  click timestamp cues, or use keyboard shortcuts to play and seek while
-  reviewing.
+  click gutter timestamps, press `Enter` on transcript text, or use keyboard
+  shortcuts to play and seek while reviewing.
 - **PDF review modal** - extracts selectable PDF text, shows the PDF beside the
   extracted draft, and lets you correct the text before loading it.
 - **Save and export** - saves the editable markdown and exports clean HTML that
@@ -52,6 +53,8 @@ markdown instead of a proprietary document format.
   count, and active annotation style.
 - **Layout controls** - tune editor padding, line height, font size, and
   blockquote note presentation from the sidebar.
+- **Readable monospace typography** - uses `Noto Sans Mono` first, with the
+  previous editor fonts kept as fallbacks.
 
 ## Annotation Format
 
@@ -82,7 +85,7 @@ markdown editors and rendered comments stay hidden in normal markdown output.
 
 | Input | Behavior |
 | --- | --- |
-| `.srt` | Converts cues to timestamp lines plus transcript text. |
+| `.srt` | Converts cues to hidden timestamp source lines plus transcript text, with cue labels shown in the gutter. |
 | `.txt` / `.md` | Loads text directly into the editor. |
 | `.docx` | Extracts raw text with `mammoth`. |
 | `.pdf` | Extracts text with `pdfjs-dist` and opens the review modal before loading. |
@@ -106,7 +109,7 @@ Annotate mode uses Vim-style movement plus arrow-key equivalents.
 | `Space` | Wrap selection or current word as an annotation |
 | `q` / `e` | Previous / next annotation style |
 | `n` / `N` | Next / previous annotation style |
-| `Enter` | Edit annotation note |
+| `Enter` | Edit annotation note, or play the current SRT cue when no annotation is active |
 | `x` | Remove annotation |
 | `u` / `U` | Undo / redo |
 | `Ctrl+Z` / `Ctrl+Y` | Undo / redo |
