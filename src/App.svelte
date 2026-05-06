@@ -1,23 +1,22 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { EditorState, type Extension } from "@codemirror/state";
+  import { EditorState, Prec, type Extension } from "@codemirror/state";
   import {
-    EditorView, keymap, lineNumbers, drawSelection,
+    EditorView, keymap, lineNumbers, drawSelection, runScopeHandlers,
     highlightActiveLineGutter, ViewPlugin, Decoration,
     GutterMarker, lineNumberMarkers,
     WidgetType, showTooltip, type Tooltip,
     type DecorationSet, type ViewUpdate
   } from "@codemirror/view";
-  import { EditorSelection, RangeSet, StateEffect, StateField, type Range, type SelectionRange, type Text, type Transaction, type TransactionSpec } from "@codemirror/state";
+  import { EditorSelection, RangeSet, StateEffect, StateField, type Range, type Text, type Transaction, type TransactionSpec } from "@codemirror/state";
   import {
     defaultKeymap, history, historyKeymap, undo, redo,
     cursorLineUp, cursorLineDown, cursorLineStart, cursorLineEnd,
-    cursorCharLeft, cursorCharRight, cursorGroupForward, cursorGroupBackward,
+    cursorCharLeft, cursorCharRight,
     selectAll,
     selectCharLeft, selectCharRight,
     selectLineUp, selectLineDown,
-    selectLineStart, selectLineEnd,
-    selectGroupForward, selectGroupBackward
+    selectLineStart, selectLineEnd
   } from "@codemirror/commands";
   import { searchKeymap } from "@codemirror/search";
   import { RangeSetBuilder } from "@codemirror/state";
@@ -42,6 +41,7 @@
   let editorViewportHeight = 0;
   let lineHeight = 1.6;
   let fontSize = 14;
+  let paragraphSpacing = 0;
   let showHelp = false;
   let pdfModalOpen = false;
   let pdfDraftText = "";
@@ -81,8 +81,10 @@
   let column = 1;
   let selectionInfo = "0 selected";
   let wordCountInfo = "0 words";
+  type SummaryAnnotationContext = { before: string; text: string; after: string };
+  type SummaryAnnotationItem = { type: "annotation"; id: string; colorName: string; title: string; color: string; text: string; context: SummaryAnnotationContext; comment: string; timestamp: string; line: number; from: number; to: number; spanStart: number };
   type SummaryItem =
-    | { type: "annotation"; id: string; colorName: string; color: string; text: string; comment: string; timestamp: string; line: number; from: number; to: number; spanStart: number }
+    | SummaryAnnotationItem
     | { type: "blockquote"; id: string; text: string; line: number; from: number; to: number };
   type SummarySection =
     | { kind: "item"; id: string; item: SummaryItem }
@@ -91,7 +93,22 @@
   let summarySections: SummarySection[] = [];
   let expandedSummaryCategories: Record<string, boolean> = {};
   let summaryCollapsed = true;
+  let summaryFullscreen = false;
+  let summarySidebarWidth = 320;
+  let editingSummaryTitleKey: string | null = null;
+  let summaryTitleDraft = "";
+  let resizingSummarySidebar = false;
+  let finishSummaryResize: (() => void) | null = null;
+  const summarySidebarMinWidth = 240;
+  const summarySidebarMaxWidth = 720;
   $: editorModeLabel = editorMode === "insert" ? "EDIT" : "ANNOTATE";
+  $: summaryFontSize = Math.round((11 + ((summarySidebarWidth - summarySidebarMinWidth) / 110)) * 10) / 10;
+  $: clampedSummaryFontSize = Math.max(11, Math.min(15, summaryFontSize));
+  $: summaryMetaFontSize = Math.max(9, clampedSummaryFontSize - 2);
+  $: summaryTimestampFontSize = Math.max(8, clampedSummaryFontSize - 3);
+  $: activeSummaryFontSize = summaryFullscreen ? fontSize : clampedSummaryFontSize;
+  $: activeSummaryMetaFontSize = summaryFullscreen ? Math.max(9, fontSize - 4) : summaryMetaFontSize;
+  $: activeSummaryTimestampFontSize = summaryFullscreen ? Math.max(8, fontSize - 5) : summaryTimestampFontSize;
   const helpSections = [
     {
       title: "Navigation",
@@ -281,28 +298,88 @@
     playAudioIfNeeded();
   }
 
-  function isEditableTarget(target: EventTarget | null) {
+  function isTextEntryTarget(target: EventTarget | null) {
     if (!(target instanceof HTMLElement)) return false;
-    return target.matches("input, textarea, select");
+    if (target.isContentEditable) return true;
+    if (target instanceof HTMLTextAreaElement) return true;
+    if (!(target instanceof HTMLInputElement)) return false;
+    return !["button", "checkbox", "color", "file", "hidden", "image", "radio", "range", "reset", "submit"].includes(target.type);
+  }
+
+  function isFormControlTarget(target: EventTarget | null) {
+    return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
+  }
+
+  function isEditorEventTarget(target: EventTarget | null) {
+    return target instanceof Node && !!view?.dom.contains(target);
+  }
+
+  function isModeShortcut(event: KeyboardEvent) {
+    return !event.ctrlKey && !event.metaKey && !event.altKey && (event.key === "Escape" || event.key === "F1" || event.key === "F2");
+  }
+
+  function isAudioShortcut(event: KeyboardEvent) {
+    return event.altKey && !event.ctrlKey && !event.metaKey &&
+      (event.key === " " || event.key === "ArrowLeft" || event.key === "Left" || event.key === "ArrowRight" || event.key === "Right");
+  }
+
+  function isAudioRateShortcut(event: KeyboardEvent) {
+    return event.altKey && !event.ctrlKey && !event.metaKey && event.key.toLowerCase() === "r";
+  }
+
+  function isAppShortcutCandidate(event: KeyboardEvent) {
+    if (event.metaKey) return false;
+    if (isModeShortcut(event) || isAudioShortcut(event) || isAudioRateShortcut(event)) return true;
+    if (event.ctrlKey && !event.altKey && (event.key === "z" || event.key === "y" || event.key === "Z")) return true;
+    if (editorMode !== "normal" || event.altKey) return false;
+
+    if (event.ctrlKey) {
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight" || event.key === "ArrowUp" || event.key === "ArrowDown") return true;
+      return ["h", "j", "k", "l", "w", "s", "a", "d"].includes(event.key.toLowerCase());
+    }
+
+    return event.key === " " ||
+      event.key === "Enter" ||
+      event.key === "?" ||
+      event.key === "ArrowLeft" ||
+      event.key === "ArrowRight" ||
+      event.key === "ArrowUp" ||
+      event.key === "ArrowDown" ||
+      "hjklwasdHJKLWASDxeqnNuU".includes(event.key);
+  }
+
+  function shouldDeferWindowShortcut(event: KeyboardEvent) {
+    if (isTextEntryTarget(event.target)) return true;
+    if (isFormControlTarget(event.target) && !isModeShortcut(event) && !isAudioShortcut(event) && !isAudioRateShortcut(event)) return true;
+    return (event.key === " " || event.key === "Enter") &&
+      event.target instanceof HTMLElement &&
+      !!event.target.closest("button, a[href], [role='button']");
   }
 
   function handleAudioKeydown(event: KeyboardEvent) {
     if (event.defaultPrevented) return;
-    const isPlayPause = event.altKey && !event.ctrlKey && !event.metaKey && event.key === " ";
-    const isSeekBack = event.altKey && !event.ctrlKey && !event.metaKey && (event.key === "ArrowLeft" || event.key === "Left");
-    const isSeekForward = event.altKey && !event.ctrlKey && !event.metaKey && (event.key === "ArrowRight" || event.key === "Right");
-    if (!isPlayPause && !isSeekBack && !isSeekForward) return;
-    if (isEditableTarget(event.target)) return;
+    if (!isAudioShortcut(event)) return;
+    if (isTextEntryTarget(event.target)) return;
 
     event.preventDefault();
     event.stopPropagation();
 
     if (!audioElement || !audioLoaded) return;
-    if (isPlayPause) {
+    if (event.key === " ") {
       toggleAudioPlayback();
       return;
     }
-    seekAudio(isSeekBack ? -10 : 10);
+    seekAudio(event.key === "ArrowLeft" || event.key === "Left" ? -10 : 10);
+  }
+
+  function handleWindowKeydown(event: KeyboardEvent) {
+    if (event.defaultPrevented || isEditorEventTarget(event.target) || shouldDeferWindowShortcut(event)) return;
+    handleAudioKeydown(event);
+    if (event.defaultPrevented || !view || !isAppShortcutCandidate(event)) return;
+    if (!runScopeHandlers(view, event, "editor")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    requestAnimationFrame(() => view?.focus());
   }
 
   function formatAudioTime(seconds: number) {
@@ -320,11 +397,23 @@
   function replaceDocument(text: string, preserveLineBreaks = false) {
     if (!view) return;
     const insert = preserveLineBreaks ? text.replace(/\r\n?/g, "\n").trim() : sentenceLineBreaks(text);
+    const initialCursor = firstVisibleDocumentPosition(insert);
     view.dispatch({
       changes: { from: 0, to: view.state.doc.length, insert },
-      selection: { anchor: 0 }
+      selection: { anchor: initialCursor },
+      effects: EditorView.scrollIntoView(initialCursor, { y: "start", yMargin: 0 })
     });
     view.focus();
+  }
+
+  function firstVisibleDocumentPosition(text: string) {
+    const lines = text.split("\n");
+    let offset = 0;
+    for (const line of lines) {
+      if (line.trim() && !isSrtTimestampLine(line)) return offset;
+      offset += line.length + 1;
+    }
+    return 0;
   }
 
   function sentenceLineBreaks(text: string) {
@@ -767,6 +856,7 @@
   $: if (view) {
     view.dom.classList.toggle("mode-insert", editorMode === "insert");
     view.dom.classList.toggle("mode-normal", editorMode === "normal");
+    view.dom.style.setProperty("--paragraph-spacing", `${paragraphSpacing}em`);
     const content = view.dom.querySelector<HTMLElement>(".cm-content");
     if (content) {
       content.style.paddingLeft   = `${padLeft}px`;
@@ -780,6 +870,7 @@
       scroller.style.fontSize   = `${fontSize}px`;
     }
     requestAnimationFrame(() => {
+      view?.requestMeasure();
       view?.scrollDOM.dispatchEvent(new Event("scroll"));
     });
   }
@@ -977,7 +1068,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     return contrast(Lann, luminance(gruvbox.bg)) >= contrast(Lann, luminance(gruvbox.fg)) ? gruvbox.bg : gruvbox.fg;
   }
 
-  const annotationPattern = /`([^`]+)`<!--\s*(\w+),\s*(.+?):\s*"([^"]*)"\s*-->/g;
+  const annotationPattern = /`([^`]+)`<!--\s*(\w+),\s*(.+?):\s*"([^"]*)"(?:,\s*title:\s*"([^"]*)")?\s*-->/g;
   const srtPattern = /\[\s*([0-9:.]+)\s*-->\s*([0-9:.]+)\s*\]/g;
   const styleColorMap: Record<string, string> = Object.fromEntries(highlightStyles.map(s => [s.name, s.color]));
   let editingSpan: number | null = null;
@@ -990,6 +1081,52 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
       .replace(/<!--[\s\S]*?-->/g, " ")
       .replace(/`([^`\n]+)`/g, "$1");
     return visibleText.match(/[\p{L}\p{N}]+(?:[’'-][\p{L}\p{N}]+)*/gu)?.length ?? 0;
+  }
+
+  type WordRange = { from: number; to: number };
+  const wordCorePattern = /[\p{L}\p{N}_-]/u;
+
+  function isWordCoreChar(ch: string | undefined): boolean {
+    return !!ch && wordCorePattern.test(ch);
+  }
+
+  function isWordApostrophe(ch: string | undefined): boolean {
+    return ch === "'" || ch === "\u2019";
+  }
+
+  function isSelectableWordChar(text: string, index: number): boolean {
+    const ch = text[index];
+    if (isWordCoreChar(ch)) return true;
+    return isWordApostrophe(ch) && isWordCoreChar(text[index - 1]) && isWordCoreChar(text[index + 1]);
+  }
+
+  function wordRangeAt(text: string, pos: number): WordRange | null {
+    const safePos = Math.max(0, Math.min(pos, text.length));
+    let start = safePos;
+    let end = safePos;
+    while (start > 0 && isSelectableWordChar(text, start - 1)) start -= 1;
+    while (end < text.length && isSelectableWordChar(text, end)) end += 1;
+    return start === end ? null : { from: start, to: end };
+  }
+
+  function wordBoundary(text: string, pos: number, forward: boolean): number {
+    let next = Math.max(0, Math.min(pos, text.length));
+
+    if (forward) {
+      if (next < text.length && isSelectableWordChar(text, next)) {
+        while (next < text.length && isSelectableWordChar(text, next)) next += 1;
+      }
+      while (next < text.length && !isSelectableWordChar(text, next)) next += 1;
+      return next;
+    }
+
+    if (next > 0 && isSelectableWordChar(text, next - 1)) {
+      while (next > 0 && isSelectableWordChar(text, next - 1)) next -= 1;
+      return next;
+    }
+    while (next > 0 && !isSelectableWordChar(text, next - 1)) next -= 1;
+    while (next > 0 && isSelectableWordChar(text, next - 1)) next -= 1;
+    return next;
   }
 
   function cleanHtmlDocument(markdownText: string) {
@@ -1017,7 +1154,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
       padding: ${padTop}px ${padRight}px ${padBottom}px ${padLeft}px;
       white-space: normal;
     }
-    p { margin: 0 0 1rem; }
+    p { margin: 0 0 ${1 + paragraphSpacing}em; }
     h1, h2, h3, h4, h5, h6 { color: ${gruvbox.yellow}; margin: 1.25rem 0 0.75rem; line-height: 1.25; }
     code { color: ${gruvbox.yellow}; background: ${gruvbox.bgSoft}; border: 1px solid ${gruvbox.border}; border-radius: 4px; padding: 0 0.25rem; }
     .annotation-token {
@@ -1104,7 +1241,7 @@ ${body}
   }
 
   function renderInlineHtml(text: string) {
-    const pattern = /`([^`]+)`<!--\s*(\w+),\s*(.+?):\s*"([^"]*)"\s*-->/g;
+    const pattern = /`([^`]+)`<!--\s*(\w+),\s*(.+?):\s*"([^"]*)"(?:,\s*title:\s*"([^"]*)")?\s*-->/g;
     let html = "";
     let lastIndex = 0;
     let match: RegExpExecArray | null;
@@ -1127,6 +1264,90 @@ ${body}
     return escaped.replace(/`([^`\n]+)`/g, "<code>$1</code>");
   }
 
+  function summaryVisibleText(text: string) {
+    return text
+      .replace(/`([^`]+)`<!--\s*\w+,\s*.+?:\s*"[^"]*"(?:,\s*title:\s*"[^"]*")?\s*-->/g, "$1")
+      .replace(/<!--\s*align:(left|center|right)\s+width:\d{1,3}\s*-->/gi, " ")
+      .replace(/<!--[\s\S]*?-->/g, " ")
+      .replace(/^\s*\[\s*[0-9:.]+\s*-->\s*[0-9:.]+\s*\]\s*$/gm, " ")
+      .replace(/^>\s?/gm, "")
+      .replace(/`([^`\n]+)`/g, "$1")
+      .replace(/[ \t\r\n]+/g, " ");
+  }
+
+  function summaryAnnotationTitle(item: SummaryAnnotationItem) {
+    return item.title || item.colorName.toUpperCase();
+  }
+
+  function annotationTitleKey(item: SummaryAnnotationItem) {
+    return item.title.trim() || item.colorName;
+  }
+
+  function isSummaryAnnotationItem(item: SummaryItem): item is SummaryAnnotationItem {
+    return item.type === "annotation";
+  }
+
+  function sentenceBoundaryStart(text: string, pos: number) {
+    for (let index = Math.max(0, pos - 1); index >= 0; index -= 1) {
+      if (!/[.!?]/.test(text[index])) continue;
+      if (index + 1 < text.length && !/\s/.test(text[index + 1])) continue;
+      let start = index + 1;
+      while (start < text.length && /\s/.test(text[start])) start += 1;
+      return start;
+    }
+    return 0;
+  }
+
+  function sentenceBoundaryEnd(text: string, pos: number) {
+    for (let index = Math.max(0, pos); index < text.length; index += 1) {
+      if (!/[.!?]/.test(text[index])) continue;
+      if (index + 1 < text.length && !/\s/.test(text[index + 1])) continue;
+      return index + 1;
+    }
+    return text.length;
+  }
+
+  function annotationSentenceContext(docText: string, spanStart: number, spanEnd: number): SummaryAnnotationContext {
+    const startMarker = "[[TEXTANNOTATE_SUMMARY_START]]";
+    const endMarker = "[[TEXTANNOTATE_SUMMARY_END]]";
+    const windowStart = Math.max(0, spanStart - 1200);
+    const windowEnd = Math.min(docText.length, spanEnd + 1200);
+    const relativeStart = spanStart - windowStart;
+    const relativeEnd = spanEnd - windowStart;
+    const windowText = docText.slice(windowStart, windowEnd);
+    const withMarkers =
+      summaryVisibleText(windowText.slice(0, relativeStart)) +
+      startMarker +
+      summaryVisibleText(windowText.slice(relativeStart, relativeEnd)) +
+      endMarker +
+      summaryVisibleText(windowText.slice(relativeEnd));
+    const markerStart = withMarkers.indexOf(startMarker);
+    const markerEnd = withMarkers.indexOf(endMarker);
+    if (markerStart < 0 || markerEnd < markerStart) {
+      const fallback = summaryVisibleText(docText.slice(spanStart, spanEnd)).trim();
+      return { before: "", text: fallback, after: "" };
+    }
+
+    const cleanText = withMarkers.replace(startMarker, "").replace(endMarker, "");
+    const annotationStart = markerStart;
+    const annotationEnd = markerEnd - startMarker.length;
+    const sentenceStart = sentenceBoundaryStart(cleanText, annotationStart);
+    const sentenceEnd = sentenceBoundaryEnd(cleanText, annotationEnd);
+    const rawSentence = cleanText.slice(sentenceStart, sentenceEnd);
+    const leadingSpaces = rawSentence.match(/^\s*/)?.[0].length ?? 0;
+    const sentence = rawSentence.trim();
+    const contextStart = Math.max(0, annotationStart - sentenceStart - leadingSpaces);
+    const contextEnd = Math.max(contextStart, Math.min(sentence.length, annotationEnd - sentenceStart - leadingSpaces));
+    const text = sentence.slice(contextStart, contextEnd).trim() || summaryVisibleText(docText.slice(spanStart, spanEnd)).trim();
+
+    if (!sentence) return { before: "", text, after: "" };
+    return {
+      before: sentence.slice(0, contextStart),
+      text,
+      after: sentence.slice(contextEnd)
+    };
+  }
+
   function updateSummaryFromView(v: EditorView) {
     const doc = v.state.doc;
     const docText = doc.toString();
@@ -1143,8 +1364,10 @@ ${body}
         type: "annotation",
         id: `annotation-${spanStart}`,
         colorName,
+        title: annotation[5]?.trim() ?? "",
         color: styleColorMap[colorName] ?? gruvbox.fgMuted,
         text: annotation[1],
+        context: annotationSentenceContext(docText, spanStart, spanStart + annotation[0].length),
         timestamp: annotation[3],
         comment: annotation[4],
         line: doc.lineAt(spanStart).number,
@@ -1168,11 +1391,11 @@ ${body}
     const order: string[] = [];
 
     for (const item of items) {
-      const key = item.type === "blockquote" ? "blockquote:notes" : `annotation:${item.colorName}`;
+      const key = item.type === "blockquote" ? "blockquote:notes" : `annotation:${annotationTitleKey(item)}`;
       if (!grouped.has(key)) {
         order.push(key);
         grouped.set(key, {
-          label: item.type === "blockquote" ? "Notes" : item.colorName,
+          label: item.type === "blockquote" ? "Notes" : summaryAnnotationTitle(item),
           color: item.type === "blockquote" ? gruvbox.yellow : item.color,
           itemType: item.type,
           items: []
@@ -1201,6 +1424,69 @@ ${body}
       ...expandedSummaryCategories,
       [id]: !expandedSummaryCategories[id]
     };
+  }
+
+  function clampSummarySidebarWidth(width: number) {
+    return Math.max(summarySidebarMinWidth, Math.min(summarySidebarMaxWidth, Math.round(width)));
+  }
+
+  function toggleSummaryCollapsed() {
+    if (!summaryCollapsed && summaryFullscreen) {
+      summaryFullscreen = false;
+    }
+    summaryCollapsed = !summaryCollapsed;
+  }
+
+  function toggleSummaryFullscreen() {
+    finishSummaryResize?.();
+    summaryFullscreen = !summaryFullscreen;
+    if (summaryFullscreen) {
+      summaryCollapsed = false;
+    }
+  }
+
+  function startSummaryResize(event: PointerEvent) {
+    if (summaryCollapsed || summaryFullscreen) return;
+    event.preventDefault();
+    event.stopPropagation();
+    finishSummaryResize?.();
+
+    resizingSummarySidebar = true;
+    const startX = event.clientX;
+    const startWidth = summarySidebarWidth;
+    const move = (moveEvent: PointerEvent) => {
+      summarySidebarWidth = clampSummarySidebarWidth(startWidth + (startX - moveEvent.clientX));
+    };
+    const finish = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+      resizingSummarySidebar = false;
+      finishSummaryResize = null;
+    };
+
+    finishSummaryResize = finish;
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
+  }
+
+  function handleSummaryResizeKeydown(event: KeyboardEvent) {
+    if (summaryCollapsed || summaryFullscreen) return;
+    const step = event.shiftKey ? 40 : 16;
+    if (event.key === "ArrowLeft") {
+      summarySidebarWidth = clampSummarySidebarWidth(summarySidebarWidth + step);
+    } else if (event.key === "ArrowRight") {
+      summarySidebarWidth = clampSummarySidebarWidth(summarySidebarWidth - step);
+    } else if (event.key === "Home") {
+      summarySidebarWidth = summarySidebarMinWidth;
+    } else if (event.key === "End") {
+      summarySidebarWidth = summarySidebarMaxWidth;
+    } else {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
   }
 
   function summaryTimestamp(timestamp: string) {
@@ -1273,7 +1559,94 @@ ${body}
     jumpToSummaryItem(item);
   }
 
-  function editSummaryAnnotationComment(event: MouseEvent, item: Extract<SummaryItem, { type: "annotation" }>) {
+  function handleSummaryGroupKeydown(event: KeyboardEvent, section: Extract<SummarySection, { kind: "group" }>) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    toggleSummaryCategory(section.id);
+  }
+
+  function summaryAnnotationItems(items: SummaryItem[]) {
+    return items.filter(isSummaryAnnotationItem);
+  }
+
+  function startSummaryTitleEdit(event: MouseEvent, key: string, item: SummaryAnnotationItem) {
+    event.preventDefault();
+    event.stopPropagation();
+    editingSummaryTitleKey = key;
+    summaryTitleDraft = item.title || item.colorName;
+  }
+
+  function startSummaryGroupTitleEdit(event: MouseEvent, section: Extract<SummarySection, { kind: "group" }>) {
+    event.preventDefault();
+    event.stopPropagation();
+    const firstAnnotation = summaryAnnotationItems(section.items)[0];
+    if (!firstAnnotation) return;
+    editingSummaryTitleKey = section.id;
+    summaryTitleDraft = firstAnnotation.title || firstAnnotation.colorName;
+  }
+
+  function normalizeSummaryTitle(title: string, colorName: string) {
+    const normalized = title.trim().replace(/\s+/g, " ").replace(/"/g, "'").replace(/[<>]/g, "").replace(/--+/g, "-");
+    return normalized.toLowerCase() === colorName.toLowerCase() ? "" : normalized;
+  }
+
+  function annotationMatchAt(docText: string, spanStart: number) {
+    annotationPattern.lastIndex = spanStart;
+    const match = annotationPattern.exec(docText);
+    annotationPattern.lastIndex = 0;
+    return match?.index === spanStart ? match : null;
+  }
+
+  function annotationWithTitle(match: RegExpExecArray, title: string) {
+    const colorName = match[2];
+    const normalizedTitle = normalizeSummaryTitle(title, colorName);
+    const titlePart = normalizedTitle ? `, title: "${normalizedTitle}"` : "";
+    return `\`${match[1]}\`<!-- ${colorName}, ${match[3]}: "${match[4]}"${titlePart} -->`;
+  }
+
+  function saveSummaryTitle(items: SummaryAnnotationItem[]) {
+    if (!editingSummaryTitleKey) return;
+    if (!view || items.length === 0) {
+      editingSummaryTitleKey = null;
+      return;
+    }
+
+    const docText = view.state.doc.toString();
+    const changes = items
+      .map(item => {
+        const match = annotationMatchAt(docText, item.spanStart);
+        if (!match) return null;
+        return {
+          from: item.spanStart,
+          to: item.spanStart + match[0].length,
+          insert: annotationWithTitle(match, summaryTitleDraft)
+        };
+      })
+      .filter((change): change is { from: number; to: number; insert: string } => !!change)
+      .sort((a, b) => a.from - b.from);
+
+    editingSummaryTitleKey = null;
+    if (changes.length) {
+      view.dispatch({ changes });
+    }
+  }
+
+  function cancelSummaryTitleEdit() {
+    editingSummaryTitleKey = null;
+  }
+
+  function handleSummaryTitleKeydown(event: KeyboardEvent, items: SummaryAnnotationItem[]) {
+    event.stopPropagation();
+    if (event.key === "Enter") {
+      event.preventDefault();
+      saveSummaryTitle(items);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      cancelSummaryTitleEdit();
+    }
+  }
+
+  function editSummaryAnnotationComment(event: MouseEvent, item: SummaryAnnotationItem) {
     event.stopPropagation();
     if (!view) return;
     editingSpan = item.spanStart;
@@ -1920,16 +2293,10 @@ ${body}
       v.dispatch({ changes: { from: range.from, to: range.to, insert }, selection: { anchor: Math.min(range.from + insert.length + (style > 0 ? 1 : 0), v.state.doc.length) } });
       return true;
     }
-    const pos = range.from;
-    const lineInfo = state.doc.lineAt(pos);
-    const lineText = lineInfo.text;
-    const offset = pos - lineInfo.from;
-    const isWordChar = (ch: string) => /[A-Za-z0-9_-]/.test(ch);
-    let start = offset, end = offset;
-    while (start > 0 && isWordChar(lineText[start - 1])) start--;
-    while (end < lineText.length && isWordChar(lineText[end])) end++;
-    if (start === end) return true;
-    const from = lineInfo.from + start, to = lineInfo.from + end;
+    const docText = state.doc.toString();
+    const wordRange = wordRangeAt(docText, range.from);
+    if (!wordRange) return true;
+    const { from, to } = wordRange;
     const insert = makeInsert(state.doc.sliceString(from, to));
     v.dispatch({ changes: { from, to, insert }, selection: { anchor: Math.min(from + insert.length + (style > 0 ? 1 : 0), v.state.doc.length) } });
     return true;
@@ -2141,7 +2508,7 @@ ${body}
     }
 
     update(update: ViewUpdate) {
-      if (update.selectionSet || update.geometryChanged || update.viewportChanged || update.docChanged) {
+      if (update.selectionSet || update.geometryChanged || update.viewportChanged || update.docChanged || update.focusChanged || update.transactions.length) {
         this.updateMarker();
       }
     }
@@ -2151,14 +2518,14 @@ ${body}
       this.scheduled = true;
       this.view.requestMeasure({
         read: view => {
-          if (!view.hasFocus) return null;
           const coords = view.coordsAtPos(view.state.selection.main.head);
           if (!coords) return null;
           const scroller = view.scrollDOM;
           const scrollerRect = scroller.getBoundingClientRect();
           const lineHeight = parseFloat(getComputedStyle(view.contentDOM).lineHeight) || 18;
+          const cursorHeight = Math.max(1, coords.bottom - coords.top);
           return {
-            top: coords.top - scrollerRect.top + scroller.scrollTop,
+            top: coords.top - scrollerRect.top + scroller.scrollTop - ((lineHeight - cursorHeight) / 2),
             left: scroller.scrollLeft,
             width: scroller.clientWidth,
             height: lineHeight,
@@ -2187,38 +2554,68 @@ ${body}
     }
   });
 
+  function cursorScrollMargin(v: EditorView) {
+    const linePx = parseFloat(getComputedStyle(v.contentDOM).lineHeight) || fontSize * lineHeight;
+    const viewportHeight = v.scrollDOM.clientHeight;
+    if (viewportHeight <= 1) return 0;
+    const preferred = Math.max(linePx * 4, Math.min(viewportHeight * 0.24, 140));
+    return Math.min(Math.max(0, viewportHeight - 1), preferred);
+  }
+
+  function cursorScrollEffect(v: EditorView, head = v.state.selection.main.head) {
+    return EditorView.scrollIntoView(head, { y: "nearest", yMargin: cursorScrollMargin(v) });
+  }
+
+  function scrollCursorIntoView(v: EditorView) {
+    v.dispatch({ effects: cursorScrollEffect(v) });
+  }
+
+  function runWithCursorScroll(v: EditorView, command: (view: EditorView) => boolean) {
+    const handled = command(v);
+    if (handled) scrollCursorIntoView(v);
+    return handled;
+  }
+
   const dblClickBehavior = EditorView.domEventHandlers({
     dblclick(event, v) {
-      if (annotationMode !== "clean") return false;
       const pos = v.posAtCoords({ x: event.clientX, y: event.clientY });
       if (pos === null) return false;
       const docText = v.state.doc.toString();
-      annotationPattern.lastIndex = 0;
-      let m: RegExpExecArray | null;
-      while ((m = annotationPattern.exec(docText)) !== null) {
-        const spanStart = m.index;
-        const wordStart = spanStart + 1;
-        const wordEnd   = wordStart + m[1].length;
-        if (pos >= wordStart && pos <= wordEnd) {
-          editingSpan = editingSpan === spanStart ? null : spanStart;
-          v.dispatch({});
-          return true;
+      if (annotationMode === "clean") {
+        annotationPattern.lastIndex = 0;
+        let m: RegExpExecArray | null;
+        while ((m = annotationPattern.exec(docText)) !== null) {
+          const spanStart = m.index;
+          const wordStart = spanStart + 1;
+          const wordEnd   = wordStart + m[1].length;
+          if (pos >= wordStart && pos <= wordEnd) {
+            editingSpan = editingSpan === spanStart ? null : spanStart;
+            v.dispatch({});
+            return true;
+          }
         }
       }
-      return false;
+      const wordRange = wordRangeAt(docText, pos);
+      if (!wordRange) return false;
+      v.dispatch({ selection: EditorSelection.range(wordRange.from, wordRange.to) });
+      return true;
     }
   });
 
   function moveByWordCount(v: EditorView, forward: boolean, count: number, extend = false) {
     const selection = v.state.selection.main;
-    let range: SelectionRange = EditorSelection.cursor(selection.head);
+    const docText = v.state.doc.toString();
+    let head = selection.head;
 
     for (let i = 0; i < count; i += 1) {
-      range = v.moveByGroup(range, forward);
+      const next = wordBoundary(docText, head, forward);
+      if (next === head) break;
+      head = next;
     }
 
     v.dispatch({
-      selection: { anchor: extend ? selection.anchor : range.head, head: range.head }
+      selection: { anchor: extend ? selection.anchor : head, head },
+      effects: cursorScrollEffect(v, head)
     });
     return true;
   }
@@ -2236,7 +2633,10 @@ ${body}
         while (line.number > 1 && !line.text.trim()) line = doc.line(line.number - 1);
         while (line.number > 1 && doc.line(line.number - 1).text.trim()) line = doc.line(line.number - 1);
       }
-      v.dispatch({ selection: { anchor: extend ? current.anchor : line.from, head: line.from } });
+      v.dispatch({
+        selection: { anchor: extend ? current.anchor : line.from, head: line.from },
+        effects: cursorScrollEffect(v, line.from)
+      });
       return true;
     }
 
@@ -2247,7 +2647,10 @@ ${body}
       while (line.number < doc.lines && !line.text.trim()) line = doc.line(line.number + 1);
       while (line.number < doc.lines && doc.line(line.number + 1).text.trim()) line = doc.line(line.number + 1);
     }
-    v.dispatch({ selection: { anchor: extend ? current.anchor : line.to, head: line.to } });
+    v.dispatch({
+      selection: { anchor: extend ? current.anchor : line.to, head: line.to },
+      effects: cursorScrollEffect(v, line.to)
+    });
     return true;
   }
 
@@ -2262,13 +2665,13 @@ ${body}
     const adjacentNumber = currentLine.number + step;
 
     if (adjacentNumber < 1 || adjacentNumber > doc.lines) {
-      move(v);
+      runWithCursorScroll(v, move);
       return true;
     }
 
     const adjacentLine = doc.line(adjacentNumber);
     if (!isSrtTimestampLine(adjacentLine.text)) {
-      move(v);
+      runWithCursorScroll(v, move);
       return true;
     }
 
@@ -2278,7 +2681,8 @@ ${body}
       if (isSrtTimestampLine(line.text) || !line.text.trim()) continue;
       const head = line.from + Math.min(column, line.length);
       v.dispatch({
-        selection: { anchor: extend ? selection.anchor : head, head }
+        selection: { anchor: extend ? selection.anchor : head, head },
+        effects: cursorScrollEffect(v, head)
       });
       return true;
     }
@@ -2291,7 +2695,7 @@ ${body}
     const normal = (fn: (v: EditorView) => boolean) =>
       (v: EditorView) => editorMode === "normal" ? fn(v) : false;
 
-    return keymap.of([
+    return Prec.high(keymap.of([
       // Always: Escape returns to normal
       { key: "Escape", run: v => { setMode("normal"); return true; } },
       // Always: F2 enters edit
@@ -2307,26 +2711,26 @@ ${body}
       { key: "Shift-ArrowRight", run: normal(v => { selectCharRight(v); return true; }) },
       { key: "Shift-ArrowUp",    run: normal(v => moveLineSkippingSrt(v, "up", true)) },
       { key: "Shift-ArrowDown",  run: normal(v => moveLineSkippingSrt(v, "down", true)) },
-      { key: "Ctrl-ArrowLeft",        run: normal(v => { cursorGroupBackward(v); return true; }) },
-      { key: "Ctrl-ArrowRight",       run: normal(v => { cursorGroupForward(v);  return true; }) },
+      { key: "Ctrl-ArrowLeft",        run: normal(v => moveByWordCount(v, false, 1)) },
+      { key: "Ctrl-ArrowRight",       run: normal(v => moveByWordCount(v, true, 1)) },
       { key: "Ctrl-ArrowUp",          run: normal(v => paragraphBoundary(v, "start")) },
       { key: "Ctrl-ArrowDown",        run: normal(v => paragraphBoundary(v, "end")) },
-      { key: "Shift-Ctrl-ArrowLeft",  run: normal(v => { selectGroupBackward(v); return true; }) },
-      { key: "Shift-Ctrl-ArrowRight", run: normal(v => { selectGroupForward(v);  return true; }) },
+      { key: "Shift-Ctrl-ArrowLeft",  run: normal(v => moveByWordCount(v, false, 1, true)) },
+      { key: "Shift-Ctrl-ArrowRight", run: normal(v => moveByWordCount(v, true, 1, true)) },
       { key: "Shift-Ctrl-ArrowUp",    run: normal(v => paragraphBoundary(v, "start", true)) },
       { key: "Shift-Ctrl-ArrowDown",  run: normal(v => paragraphBoundary(v, "end", true)) },
       { key: "h", run: normal(v => { cursorCharLeft(v);  return true; }) },
       { key: "j", run: normal(v => moveLineSkippingSrt(v, "down")) },
       { key: "k", run: normal(v => moveLineSkippingSrt(v, "up")) },
       { key: "l", run: normal(v => { cursorCharRight(v); return true; }) },
-      { key: "Ctrl-h", run: normal(v => { cursorGroupBackward(v); return true; }) },
+      { key: "Ctrl-h", run: normal(v => moveByWordCount(v, false, 1)) },
       { key: "Ctrl-j", run: normal(v => paragraphBoundary(v, "end")) },
       { key: "Ctrl-k", run: normal(v => paragraphBoundary(v, "start")) },
-      { key: "Ctrl-l", run: normal(v => { cursorGroupForward(v);  return true; }) },
+      { key: "Ctrl-l", run: normal(v => moveByWordCount(v, true, 1)) },
       { key: "w", run: normal(v => moveLineSkippingSrt(v, "up")) },
       { key: "s", run: normal(v => moveLineSkippingSrt(v, "down")) },
-      { key: "a", run: normal(v => { cursorGroupBackward(v); return true; }) },
-      { key: "d", run: normal(v => { cursorGroupForward(v);  return true; }) },
+      { key: "a", run: normal(v => moveByWordCount(v, false, 1)) },
+      { key: "d", run: normal(v => moveByWordCount(v, true, 1)) },
       { key: "Ctrl-w", run: normal(v => paragraphBoundary(v, "start")) },
       { key: "Ctrl-s", run: normal(v => paragraphBoundary(v, "end")) },
       { key: "Ctrl-a", run: normal(v => moveByWordCount(v, false, 5)) },
@@ -2336,14 +2740,14 @@ ${body}
       { key: "J", run: normal(v => moveLineSkippingSrt(v, "down", true)) },
       { key: "K", run: normal(v => moveLineSkippingSrt(v, "up", true)) },
       { key: "L", run: normal(v => { selectCharRight(v); return true; }) },
-      { key: "Shift-Ctrl-h", run: normal(v => { selectGroupBackward(v); return true; }) },
+      { key: "Shift-Ctrl-h", run: normal(v => moveByWordCount(v, false, 1, true)) },
       { key: "Shift-Ctrl-j", run: normal(v => paragraphBoundary(v, "end", true)) },
       { key: "Shift-Ctrl-k", run: normal(v => paragraphBoundary(v, "start", true)) },
-      { key: "Shift-Ctrl-l", run: normal(v => { selectGroupForward(v); return true; }) },
+      { key: "Shift-Ctrl-l", run: normal(v => moveByWordCount(v, true, 1, true)) },
       { key: "W", run: normal(v => moveLineSkippingSrt(v, "up", true)) },
       { key: "S", run: normal(v => moveLineSkippingSrt(v, "down", true)) },
-      { key: "A", run: normal(v => { selectGroupBackward(v); return true; }) },
-      { key: "D", run: normal(v => { selectGroupForward(v);  return true; }) },
+      { key: "A", run: normal(v => moveByWordCount(v, false, 1, true)) },
+      { key: "D", run: normal(v => moveByWordCount(v, true, 1, true)) },
       { key: "Shift-Ctrl-w", run: normal(v => paragraphBoundary(v, "start", true)) },
       { key: "Shift-Ctrl-s", run: normal(v => paragraphBoundary(v, "end", true)) },
       { key: "Shift-Ctrl-a", run: normal(v => moveByWordCount(v, false, 5, true)) },
@@ -2375,7 +2779,7 @@ ${body}
           !event.metaKey &&
           !event.altKey
       },
-    ]);
+    ]));
   }
 
   function baseExtensions(): Extension[] {
@@ -2422,7 +2826,7 @@ ${body}
   }
 
   onMount(() => {
-    const onWindowKeydown = (event: KeyboardEvent) => handleAudioKeydown(event);
+    const onWindowKeydown = (event: KeyboardEvent) => handleWindowKeydown(event);
     window.addEventListener("keydown", onWindowKeydown);
     const editorResizeObserver = new ResizeObserver(() => updateEditorViewportHeight());
 
@@ -2443,6 +2847,7 @@ ${body}
 
     return () => {
       window.removeEventListener("keydown", onWindowKeydown);
+      finishSummaryResize?.();
       editorResizeObserver.disconnect();
       clearAudioTarget();
       view?.destroy();
@@ -2458,9 +2863,10 @@ ${body}
     --internal-border: transparent;
     --fg-muted: ${gruvbox.fgMuted}; --yellow: ${gruvbox.yellow}; --green: ${gruvbox.green};
     --blue: ${gruvbox.blue}; --orange: ${gruvbox.orange}; --selection: ${gruvbox.selection};
-    --active-line-annotate: #4a3520aa;
+    --active-style-color: ${currentStyleColor};
+    --active-line-annotate: color-mix(in srgb, var(--active-style-color) 34%, transparent);
     --active-line-edit: #2f4a3aaa;
-    --active-gutter-annotate: #4a3520;
+    --active-gutter-annotate: color-mix(in srgb, var(--active-style-color) 58%, var(--bg-hard));
     --active-gutter-edit: #2f4a3a;
   `}
 >
@@ -2470,7 +2876,23 @@ ${body}
     <button class="toolbar-btn help-btn" on:click={() => showHelp = !showHelp} title="Keyboard shortcuts (?)">?</button>
   </div>
 
-  <div class="main" class:summary-collapsed={summaryCollapsed}>
+  <div
+    class="main"
+    class:summary-collapsed={summaryCollapsed}
+    class:summary-fullscreen={summaryFullscreen}
+    style={`
+      --summary-sidebar-width: ${summarySidebarWidth}px;
+      --summary-font-size: ${activeSummaryFontSize}px;
+      --summary-meta-font-size: ${activeSummaryMetaFontSize}px;
+      --summary-timestamp-font-size: ${activeSummaryTimestampFontSize}px;
+      --summary-content-pad-left: ${summaryFullscreen ? padLeft : 0}px;
+      --summary-content-pad-right: ${summaryFullscreen ? padRight : 0}px;
+      --summary-content-pad-top: ${summaryFullscreen ? padTop : 0}px;
+      --summary-content-pad-bottom: ${summaryFullscreen ? padBottom : 0}px;
+      --summary-line-height: ${summaryFullscreen ? lineHeight : 1.28};
+      --summary-paragraph-spacing: ${summaryFullscreen ? paragraphSpacing : 0}em;
+    `}
+  >
     <div class="sidebar">
       <div class="sidebar-section">
         <input type="file" accept=".srt,.txt,.md,.docx,.pdf,.mp3,.wav,.m4a,.ogg,.oga,.webm,.aac,.flac,.mp4,.mov,.mkv" multiple style="display:none" bind:this={fileInput} on:change={loadFile} />
@@ -2503,6 +2925,7 @@ ${body}
         <div class="slider-row" data-tooltip="Top padding"><span class="slider-lbl">T</span><input type="range" min="0" max="400" step="4" bind:value={padTop}    class="slider" aria-label="Top padding" /><span class="slider-val">{padTop}</span></div>
         <div class="slider-row" data-tooltip="Bottom padding"><span class="slider-lbl">B</span><input type="range" min="0" max={Math.max(0, editorViewportHeight - 48)} step="4" bind:value={padBottom} class="slider" aria-label="Bottom padding" /><span class="slider-val">{padBottom}</span></div>
         <div class="slider-row" data-tooltip="Line height"><span class="slider-lbl">LH</span><input type="range" min="1" max="3" step="0.05" bind:value={lineHeight} class="slider" aria-label="Line height" /><span class="slider-val">{lineHeight.toFixed(2)}</span></div>
+        <div class="slider-row" data-tooltip="Spacing after each line"><span class="slider-lbl">PS</span><input type="range" min="0" max="2" step="0.05" bind:value={paragraphSpacing} class="slider" aria-label="Paragraph spacing" /><span class="slider-val">{paragraphSpacing.toFixed(2)}</span></div>
         <div class="slider-row" data-tooltip="Font size"><span class="slider-lbl">FS</span><input type="range" min="10" max="28" step="1" bind:value={fontSize} class="slider" aria-label="Font size" /><span class="slider-val">{fontSize}</span></div>
         <div class="slider-row" data-tooltip="Notes alignment">
           <span class="slider-lbl">A</span>
@@ -2561,20 +2984,44 @@ ${body}
 
     <div class="editor" bind:this={editorEl}></div>
 
-    <aside class="summary-sidebar" class:collapsed={summaryCollapsed} aria-label="Annotation summary">
+    <aside class="summary-sidebar" class:collapsed={summaryCollapsed} class:fullscreen={summaryFullscreen} class:resizing={resizingSummarySidebar} aria-label="Annotation summary">
+      {#if !summaryCollapsed && !summaryFullscreen}
+        <button
+          class="summary-resize-handle"
+          type="button"
+          aria-label="Resize summary sidebar"
+          title="Drag to resize summary"
+          on:pointerdown={startSummaryResize}
+          on:keydown={handleSummaryResizeKeydown}
+        ></button>
+      {/if}
       <div class="summary-header">
         {#if !summaryCollapsed}
           <div class="summary-title">Summary</div>
         {/if}
-        <button
-          class="summary-collapse-btn"
-          type="button"
-          title={summaryCollapsed ? "Show summary" : "Hide summary"}
-          aria-label={summaryCollapsed ? "Show summary" : "Hide summary"}
-          on:click={() => summaryCollapsed = !summaryCollapsed}
-        >
-          {summaryCollapsed ? "‹" : "›"}
-        </button>
+        <div class="summary-header-actions">
+          {#if !summaryCollapsed}
+            <button
+              class="summary-icon-btn"
+              type="button"
+              title={summaryFullscreen ? "Exit summary fullscreen" : "Summary fullscreen"}
+              aria-label={summaryFullscreen ? "Exit summary fullscreen" : "Summary fullscreen"}
+              aria-pressed={summaryFullscreen}
+              on:click={toggleSummaryFullscreen}
+            >
+              {summaryFullscreen ? "×" : "⛶"}
+            </button>
+          {/if}
+          <button
+            class="summary-icon-btn summary-collapse-btn"
+            type="button"
+            title={summaryCollapsed ? "Show summary" : "Hide summary"}
+            aria-label={summaryCollapsed ? "Show summary" : "Hide summary"}
+            on:click={toggleSummaryCollapsed}
+          >
+            {summaryCollapsed ? "‹" : "›"}
+          </button>
+        </div>
       </div>
       {#if summaryCollapsed}
         <div class="summary-collapsed-count">{summaryItems.length}</div>
@@ -2594,12 +3041,34 @@ ${body}
               >
                 {#if section.item.type === "annotation"}
                   <span class="summary-swatch" style="background: {section.item.color}"></span>
-                  <span class="summary-body">
-                    <span class="summary-meta">
-                      <span>{section.item.colorName}</span>
+                    <span class="summary-body">
+                      <span class="summary-meta">
+                      {#if editingSummaryTitleKey === section.item.id}
+                        <input
+                          class="summary-title-input"
+                          bind:value={summaryTitleDraft}
+                          aria-label="Annotation title"
+                          autofocus
+                          on:click={event => event.stopPropagation()}
+                          on:focus={event => (event.target as HTMLInputElement).select()}
+                          on:blur={() => saveSummaryTitle([section.item])}
+                          on:keydown={event => handleSummaryTitleKeydown(event, [section.item])}
+                        />
+                      {:else}
+                        <button
+                          class="summary-title-action"
+                          type="button"
+                          on:click={event => startSummaryTitleEdit(event, section.item.id, section.item)}
+                          on:keydown={event => event.stopPropagation()}
+                        >
+                          {summaryAnnotationTitle(section.item)}
+                        </button>
+                      {/if}
                       <span class="summary-heading-timestamp">{summaryTimestamp(section.item.timestamp)}</span>
                     </span>
-                    <span class="summary-text">{section.item.text}</span>
+                    <span class="summary-text summary-sentence">
+                      <span>{section.item.context.before}</span><mark class="summary-context-hit" style="background: {section.item.color}; color: {contrastColor(section.item.color)}">{section.item.context.text}</mark><span>{section.item.context.after}</span>
+                    </span>
                     {#if section.item.comment}
                       <button class="summary-comment-action has-comment" type="button" on:click={event => editSummaryAnnotationComment(event, section.item)} on:keydown={event => event.stopPropagation()}>
                         {section.item.comment}
@@ -2622,22 +3091,46 @@ ${body}
                 {/if}
               </div>
             {:else}
-              <button
+              <div
                 class="summary-group-header"
                 class:open={expandedSummaryCategories[section.id]}
-                type="button"
+                role="button"
+                tabindex="0"
                 aria-expanded={!!expandedSummaryCategories[section.id]}
                 on:click={() => toggleSummaryCategory(section.id)}
+                on:keydown={event => handleSummaryGroupKeydown(event, section)}
               >
                 {#if section.itemType === "blockquote"}
                   <span class="summary-note-mark">󰎞</span>
                 {:else}
                   <span class="summary-swatch" style="background: {section.color}"></span>
                 {/if}
-                <span class="summary-group-label">{section.label}</span>
+                {#if section.itemType === "annotation" && editingSummaryTitleKey === section.id}
+                  <input
+                    class="summary-title-input summary-group-title-input"
+                    bind:value={summaryTitleDraft}
+                    aria-label="Annotation group title"
+                    autofocus
+                    on:click={event => event.stopPropagation()}
+                    on:focus={event => (event.target as HTMLInputElement).select()}
+                    on:blur={() => saveSummaryTitle(summaryAnnotationItems(section.items))}
+                    on:keydown={event => handleSummaryTitleKeydown(event, summaryAnnotationItems(section.items))}
+                  />
+                {:else if section.itemType === "annotation"}
+                  <button
+                    class="summary-group-label summary-title-action"
+                    type="button"
+                    on:click={event => startSummaryGroupTitleEdit(event, section)}
+                    on:keydown={event => event.stopPropagation()}
+                  >
+                    {section.label}
+                  </button>
+                {:else}
+                  <span class="summary-group-label">{section.label}</span>
+                {/if}
                 <span class="summary-group-count">{section.count}</span>
                 <span class="summary-group-chevron">›</span>
-              </button>
+              </div>
               {#if expandedSummaryCategories[section.id]}
                 {#each section.items as item (item.id)}
                   <div
@@ -2651,10 +3144,32 @@ ${body}
                       <span class="summary-swatch" style="background: {item.color}"></span>
                       <span class="summary-body">
                         <span class="summary-meta">
-                          <span>{item.colorName}</span>
+                          {#if editingSummaryTitleKey === item.id}
+                            <input
+                              class="summary-title-input"
+                              bind:value={summaryTitleDraft}
+                              aria-label="Annotation title"
+                              autofocus
+                              on:click={event => event.stopPropagation()}
+                              on:focus={event => (event.target as HTMLInputElement).select()}
+                              on:blur={() => saveSummaryTitle([item])}
+                              on:keydown={event => handleSummaryTitleKeydown(event, [item])}
+                            />
+                          {:else}
+                            <button
+                              class="summary-title-action"
+                              type="button"
+                              on:click={event => startSummaryTitleEdit(event, item.id, item)}
+                              on:keydown={event => event.stopPropagation()}
+                            >
+                              {summaryAnnotationTitle(item)}
+                            </button>
+                          {/if}
                           <span class="summary-heading-timestamp">{summaryTimestamp(item.timestamp)}</span>
                         </span>
-                        <span class="summary-text">{item.text}</span>
+                        <span class="summary-text summary-sentence">
+                          <span>{item.context.before}</span><mark class="summary-context-hit" style="background: {item.color}; color: {contrastColor(item.color)}">{item.context.text}</mark><span>{item.context.after}</span>
+                        </span>
                         {#if item.comment}
                           <button class="summary-comment-action has-comment" type="button" on:click={event => editSummaryAnnotationComment(event, item)} on:keydown={event => event.stopPropagation()}>
                             {item.comment}
@@ -2686,34 +3201,36 @@ ${body}
     </aside>
   </div>
 
-  <div class="statusbar">
-    <div class="status-left">
-      <span class="segment mode" style="color: {editorMode === 'insert' ? gruvbox.green : gruvbox.orange}">{editorModeLabel}</span>
-      <span class="segment">{selectionInfo}</span>
-      <span class="segment">{wordCountInfo}</span>
-      <span class="segment style" style="color: {currentStyleColor}">{styleLabel}</span>
+  {#if !summaryFullscreen}
+    <div class="statusbar">
+      <div class="status-left">
+        <span class="segment mode" style="color: {editorMode === 'insert' ? gruvbox.green : gruvbox.orange}">{editorModeLabel}</span>
+        <span class="segment">{selectionInfo}</span>
+        <span class="segment">{wordCountInfo}</span>
+        <span class="segment style" style="color: {currentStyleColor}">{styleLabel}</span>
+      </div>
+      <div class="status-center">
+        {#if audioUrl}
+          <div class="audio-widget">
+            <span class="audio-name">{audioFileName}</span>
+            <span class="audio-sep">|</span>
+            <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(-10)} title="Back 10 seconds" aria-label="Back 10 seconds">&lt;&lt;</button>
+            <button class="audio-glyph play" type="button" on:click={toggleAudioPlayback} title="Play / pause" aria-label="Play / pause">{audioPlaying ? "⏸" : "▶"}</button>
+            <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(10)} title="Forward 10 seconds" aria-label="Forward 10 seconds">&gt;&gt;</button>
+            <span class="audio-sep">|</span>
+            <button class="audio-rate-text" type="button" on:click={cycleAudioRate} aria-label="Playback speed" title="Playback speed">{audioRateText}</button>
+            <span class="audio-sep">|</span>
+            <span class="audio-time">{formatAudioTime(audioCurrentTime)} / {formatAudioTime(audioDuration)}</span>
+          </div>
+        {/if}
+      </div>
+      <div class="status-right">
+        <span class="segment">Ln {line}</span>
+        <span class="segment">Col {column}</span>
+        <span class="segment syntax">{loadedFileType}</span>
+      </div>
     </div>
-    <div class="status-center">
-      {#if audioUrl}
-        <div class="audio-widget">
-          <span class="audio-name">{audioFileName}</span>
-          <span class="audio-sep">|</span>
-          <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(-10)} title="Back 10 seconds" aria-label="Back 10 seconds">&lt;&lt;</button>
-          <button class="audio-glyph play" type="button" on:click={toggleAudioPlayback} title="Play / pause" aria-label="Play / pause">{audioPlaying ? "⏸" : "▶"}</button>
-          <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(10)} title="Forward 10 seconds" aria-label="Forward 10 seconds">&gt;&gt;</button>
-          <span class="audio-sep">|</span>
-          <button class="audio-rate-text" type="button" on:click={cycleAudioRate} aria-label="Playback speed" title="Playback speed">{audioRateText}</button>
-          <span class="audio-sep">|</span>
-          <span class="audio-time">{formatAudioTime(audioCurrentTime)} / {formatAudioTime(audioDuration)}</span>
-        </div>
-      {/if}
-    </div>
-    <div class="status-right">
-      <span class="segment">Ln {line}</span>
-      <span class="segment">Col {column}</span>
-      <span class="segment syntax">{loadedFileType}</span>
-    </div>
-  </div>
+  {/if}
 
   <audio
     bind:this={audioElement}
@@ -2839,12 +3356,25 @@ ${body}
 
   .main {
     display: grid;
-    grid-template-columns: 200px minmax(0, 1fr) 320px;
+    grid-template-columns: 200px minmax(0, 1fr) var(--summary-sidebar-width, 320px);
     min-height: 0;
   }
 
   .main.summary-collapsed {
     grid-template-columns: 200px minmax(0, 1fr) 42px;
+  }
+
+  .main.summary-fullscreen {
+    grid-template-columns: 200px minmax(0, 1fr);
+  }
+
+  .main.summary-fullscreen .editor {
+    display: none;
+  }
+
+  .main.summary-fullscreen .summary-sidebar {
+    grid-column: 2;
+    border-left: none;
   }
 
   .sidebar {
@@ -2857,17 +3387,56 @@ ${body}
   }
 
   .summary-sidebar {
+    position: relative;
     min-width: 0;
     background: var(--bg-hard);
     border-left: 1px solid var(--internal-border);
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    font-size: 12px;
+    font-size: var(--summary-font-size, 12px);
+    user-select: auto;
+  }
+
+  .summary-sidebar.resizing {
+    user-select: none;
   }
 
   .summary-sidebar.collapsed {
     align-items: stretch;
+  }
+
+  .summary-resize-handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -5px;
+    z-index: 8;
+    width: 10px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    cursor: col-resize;
+  }
+
+  .summary-resize-handle::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 4px;
+    width: 1px;
+    background: transparent;
+  }
+
+  .summary-resize-handle:hover::after,
+  .summary-resize-handle:focus-visible::after,
+  .summary-sidebar.resizing .summary-resize-handle::after {
+    background: var(--yellow);
+  }
+
+  .summary-resize-handle:focus-visible {
+    outline: none;
   }
 
   .summary-header {
@@ -2884,7 +3453,13 @@ ${body}
     padding: 0;
   }
 
-  .summary-collapse-btn {
+  .summary-header-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .summary-icon-btn {
     width: 24px;
     height: 24px;
     display: inline-flex;
@@ -2900,8 +3475,13 @@ ${body}
     cursor: pointer;
   }
 
-  .summary-collapse-btn:hover,
-  .summary-collapse-btn:focus-visible {
+  .summary-icon-btn[aria-pressed="true"] {
+    color: var(--yellow);
+    border-color: var(--border);
+  }
+
+  .summary-icon-btn:hover,
+  .summary-icon-btn:focus-visible {
     color: var(--yellow);
     border-color: var(--border);
     outline: none;
@@ -2915,7 +3495,7 @@ ${body}
   }
 
   .summary-title {
-    font-size: 10px;
+    font-size: var(--summary-meta-font-size, 10px);
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: var(--fg-muted);
@@ -2926,12 +3506,13 @@ ${body}
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
+    padding: var(--summary-content-pad-top, 0) var(--summary-content-pad-right, 0) var(--summary-content-pad-bottom, 0) var(--summary-content-pad-left, 0);
   }
 
   .summary-empty {
     padding: 12px;
     color: var(--fg-muted);
-    font-size: 11px;
+    font-size: calc(var(--summary-font-size, 12px) - 1px);
   }
 
   .summary-item {
@@ -2949,6 +3530,10 @@ ${body}
     font: inherit;
     text-align: left;
     cursor: pointer;
+  }
+
+  .summary-sidebar.fullscreen .summary-item {
+    padding-bottom: calc(7px + var(--summary-paragraph-spacing, 0em));
   }
 
   .summary-item:hover,
@@ -2994,13 +3579,61 @@ ${body}
     color: var(--fg);
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    font-size: 10px;
+    font-size: var(--summary-meta-font-size, 10px);
     font-weight: 600;
+  }
+
+  .summary-title-action {
+    display: block;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 0;
+    background: transparent;
+    border: none;
+    color: inherit;
+    cursor: text;
+    font: inherit;
+    letter-spacing: 0;
+    text-align: left;
+    text-transform: none;
+  }
+
+  .summary-title-action:hover,
+  .summary-title-action:focus-visible {
+    color: var(--yellow);
+    outline: none;
+    text-decoration: underline;
+  }
+
+  .summary-title-input {
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 1px 3px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--fg);
+    font: inherit;
+    font-size: inherit;
+    line-height: 1.2;
+    text-transform: none;
+    outline: none;
+  }
+
+  .summary-title-input:focus {
+    border-color: var(--yellow);
+  }
+
+  .summary-group-title-input {
+    align-self: center;
   }
 
   .summary-group-count {
     color: var(--fg-muted);
-    font-size: 11px;
+    font-size: calc(var(--summary-font-size, 12px) - 1px);
   }
 
   .summary-group-chevron {
@@ -3037,7 +3670,7 @@ ${body}
     display: flex;
     flex-direction: column;
     gap: 2px;
-    line-height: 1.28;
+    line-height: var(--summary-line-height, 1.28);
   }
 
   .summary-meta {
@@ -3046,7 +3679,7 @@ ${body}
     grid-template-columns: minmax(0, 1fr) max-content;
     gap: 6px;
     color: var(--fg-muted);
-    font-size: 10px;
+    font-size: var(--summary-meta-font-size, 10px);
     text-transform: uppercase;
     letter-spacing: 0.06em;
   }
@@ -3066,7 +3699,7 @@ ${body}
     justify-self: end;
     text-transform: none;
     letter-spacing: 0;
-    font-size: 9px;
+    font-size: var(--summary-timestamp-font-size, 9px);
     font-weight: 400;
     opacity: 0.55;
   }
@@ -3082,6 +3715,17 @@ ${body}
     color: var(--fg);
   }
 
+  .summary-sentence {
+    color: var(--fg-muted);
+  }
+
+  .summary-context-hit {
+    display: inline;
+    border-radius: 3px;
+    padding: 0 2px;
+    font: inherit;
+  }
+
   .summary-comment-action {
     width: fit-content;
     max-width: 100%;
@@ -3091,7 +3735,7 @@ ${body}
     color: var(--fg-muted);
     cursor: pointer;
     font: inherit;
-    font-size: 11px;
+    font-size: calc(var(--summary-font-size, 12px) - 1px);
     text-align: left;
   }
 
@@ -3501,6 +4145,9 @@ ${body}
   :global(.editor .cm-editor) { width: 100%; height: 100%; }
   :global(.cm-editor.cm-focused) { outline: none; }
   :global(.cm-scroller) { position: relative; }
+  :global(.cm-line:not(.cm-srt-timestamp-line)) {
+    padding-bottom: var(--paragraph-spacing, 0em);
+  }
   :global(.cm-visual-line-marker) {
     position: absolute;
     z-index: 0;
