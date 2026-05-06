@@ -162,6 +162,7 @@
         ["Esc", "return to Annotate mode"],
         ["Alt+Space", "play / pause audio"],
         ["Alt+←/→", "seek audio back / forward"],
+        ["Alt+r", "cycle playback speed"],
         ["F1 / ?", "toggle this help"]
       ]
     }

@@ -32,7 +32,9 @@ markdown instead of a proprietary document format.
 - **Inline note editing** - double-click or press `Enter` on an annotation to
   edit its stored comment.
 - **Summary sidebar** - groups annotations and blockquote notes, jumps back to
-  the source text, and opens annotation comments for editing.
+  the source text, opens annotation comments for editing, and lets you rename
+  annotation titles inline. The sidebar can also be resized or expanded
+  fullscreen.
 - **Blockquote note controls** - adjust feedback-note alignment and background
   width while preserving those settings in markdown comments.
 - **File loading** - supports `.srt`, `.txt`, `.md`, `.docx`, and `.pdf` input.
@@ -71,6 +73,8 @@ The comment fields are:
 - `6 Apr 2026 10:00:01` - the local timestamp generated when the annotation is
   created.
 - `"Check spelling"` - the optional feedback note.
+- `title: "Grammar"` - an optional annotation title used in the summary
+  sidebar.
 
 Blockquote display settings are stored the same way:
 
@@ -119,6 +123,9 @@ Annotate mode uses Vim-style movement plus arrow-key equivalents.
 | `Alt+Left` / `Alt+Right` | Seek loaded media backward / forward |
 | `Alt+r` | Cycle playback speed |
 | `F1` / `?` | Toggle keyboard help |
+
+The in-app help modal also lists the full movement and selection variants,
+including Ctrl-based word and paragraph jumps.
 
 ## Project Structure
 
