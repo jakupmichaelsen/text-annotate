@@ -28,7 +28,7 @@ markdown instead of a proprietary document format.
 - **Named highlight palette** - includes plain backtick style plus named colors
   such as `green`, `red`, `steel`, `orange`, `periwinkle`, `sand`, `mint`,
   `denim`, `yellow`, `indigo`, `brown`, `slate`, `sky`, `rosewood`, and
-  `purple`.
+  `purple`, with sidebar controls for reordering styles.
 - **Inline note editing** - double-click or press `Enter` on an annotation to
   edit its stored comment.
 - **Summary sidebar** - groups annotations and blockquote notes, jumps back to
@@ -53,8 +53,11 @@ markdown instead of a proprietary document format.
   the browser.
 - **Status bar** - shows editor mode, line/column, selection size, visible word
   count, and active annotation style.
-- **Layout controls** - tune editor padding, line height, font size, and
-  blockquote note presentation from the sidebar.
+- **Focused editor cues** - the active line and cursor column follow the active
+  annotation style, while the main editor caret stays hidden outside note
+  editing.
+- **Layout and theme controls** - tune editor padding, line height, font size,
+  blockquote note presentation, and the Nord/Gruvbox theme from the sidebar.
 - **Readable monospace typography** - uses `Noto Sans Mono` first, with the
   previous editor fonts kept as fallbacks.
 
@@ -103,6 +106,7 @@ Annotate mode uses Vim-style movement plus arrow-key equivalents.
 | --- | --- |
 | `h` / `j` / `k` / `l` | Move left / down / up / right |
 | Arrow keys | Move left / down / up / right |
+| `Tab` | Center the current line |
 | `w` / `s` | Move one visual line up / down |
 | `a` / `d` | Move one word left / right |
 | `Ctrl+h` / `Ctrl+l` | Move one word left / right |
@@ -117,11 +121,12 @@ Annotate mode uses Vim-style movement plus arrow-key equivalents.
 | `x` | Remove annotation |
 | `u` / `U` | Undo / redo |
 | `Ctrl+Z` / `Ctrl+Y` | Undo / redo |
-| `F2` | Enter Edit mode |
+| `F2` | Toggle Annotate / Edit mode |
 | `Esc` | Return to Annotate mode |
 | `Alt+Space` | Play / pause loaded media |
 | `Alt+Left` / `Alt+Right` | Seek loaded media backward / forward |
 | `Alt+r` | Cycle playback speed |
+| `Alt+A/H, S/J, D/L, W/K` | Back, play / pause, forward, speed |
 | `F1` / `?` | Toggle keyboard help |
 
 The in-app help modal also lists the full movement and selection variants,

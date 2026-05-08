@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import { EditorState, Prec, type Extension } from "@codemirror/state";
+  import { onMount, tick } from "svelte";
+  import { Compartment, EditorState, Prec, type Extension } from "@codemirror/state";
   import {
     EditorView, keymap, lineNumbers, drawSelection, runScopeHandlers,
     highlightActiveLineGutter, ViewPlugin, Decoration,
@@ -62,16 +62,17 @@
   let audioPlaying = false;
   let audioLoaded = false;
   let audioRateIndex = 0;
-  const audioRates = [1, 1.5, 2];
+  const audioRates = [1, 1.25, 1.5, 1.75, 2];
   const audioDbName = "textAnnotate-state";
   const audioStoreName = "audio";
   const mediaExtensions = [".mp3", ".wav", ".m4a", ".ogg", ".oga", ".webm", ".aac", ".flac", ".mp4", ".mov", ".mkv"];
   let loadedFileType = "Markdown";
   $: pdfFrameSrc = pdfPreviewUrl ? `${pdfPreviewUrl}#zoom=75` : "";
   $: if (audioElement) audioElement.playbackRate = audioRates[audioRateIndex];
-  $: audioRateText = audioRateIndex === 0 ? "x1" : audioRateIndex === 1 ? "x1½" : "x2";
+  $: audioRateText = audioRateLabel();
 
   let currentStyle = 0;
+  let themeMode = loadThemeMode();
   let annotationMode: "clean" | "raw" | "all" = "clean";
   let blockquoteAlign: "left" | "center" | "right" = "left";
   let blockquoteBgWidth = 100;
@@ -92,15 +93,24 @@
   let summaryItems: SummaryItem[] = [];
   let summarySections: SummarySection[] = [];
   let expandedSummaryCategories: Record<string, boolean> = {};
+  $: summaryGroupIds = summarySections.filter(section => section.kind === "group").map(section => section.id);
+  $: summaryAllGroupsExpanded = summaryGroupIds.length > 0 && summaryGroupIds.every(id => expandedSummaryCategories[id]);
   let summaryCollapsed = true;
   let summaryFullscreen = false;
   let summarySidebarWidth = 320;
   let editingSummaryTitleKey: string | null = null;
   let summaryTitleDraft = "";
+  let summaryTitleInput: HTMLInputElement | null = null;
   let resizingSummarySidebar = false;
   let finishSummaryResize: (() => void) | null = null;
+  let styleSettingsOpen = false;
   const summarySidebarMinWidth = 240;
   const summarySidebarMaxWidth = 720;
+  const themeStorageKey = "cm6-theme";
+  const themeCompartment = new Compartment();
+  const editableCompartment = new Compartment();
+  $: activeTheme = getTheme(themeMode);
+  $: activeThemeName = themeMode === "nord" ? "Nord" : "Gruvbox";
   $: editorModeLabel = editorMode === "insert" ? "EDIT" : "ANNOTATE";
   $: summaryFontSize = Math.round((11 + ((summarySidebarWidth - summarySidebarMinWidth) / 110)) * 10) / 10;
   $: clampedSummaryFontSize = Math.max(11, Math.min(15, summaryFontSize));
@@ -115,6 +125,7 @@
       items: [
         ["h j k l", "left / down / up / right"],
         ["← ↓ ↑ →", "left / down / up / right"],
+        ["Tab", "center current line"],
         ["w s", "line up / down"],
         ["a d", "word left / right"],
         ["Ctrl+h/l", "word left / right"],
@@ -158,11 +169,12 @@
     {
       title: "Other",
       items: [
-        ["F2", "enter Edit mode"],
+        ["F2", "toggle Annotate / Edit"],
         ["Esc", "return to Annotate mode"],
         ["Alt+Space", "play / pause audio"],
         ["Alt+←/→", "seek audio back / forward"],
         ["Alt+r", "cycle playback speed"],
+        ["Alt+A/H, S/J, D/L, W/K", "back, play, forward, speed"],
         ["F1 / ?", "toggle this help"]
       ]
     }
@@ -263,11 +275,8 @@
   }
 
   function audioRateLabel() {
-    return audioRates[audioRateIndex] === 1
-      ? "x1"
-      : audioRates[audioRateIndex] === 1.5
-        ? "x1½"
-        : "x2";
+    const rate = audioRates[audioRateIndex];
+    return rate === 1 ? "x1" : `x${rate}`;
   }
 
   function playAudioIfNeeded() {
@@ -328,9 +337,13 @@
     return event.altKey && !event.ctrlKey && !event.metaKey && event.key.toLowerCase() === "r";
   }
 
+  function isPlaybackShortcut(event: KeyboardEvent) {
+    return event.altKey && !event.ctrlKey && !event.metaKey && "wasdhjkl".includes(event.key.toLowerCase());
+  }
+
   function isAppShortcutCandidate(event: KeyboardEvent) {
     if (event.metaKey) return false;
-    if (isModeShortcut(event) || isAudioShortcut(event) || isAudioRateShortcut(event)) return true;
+    if (isModeShortcut(event) || isAudioShortcut(event) || isAudioRateShortcut(event) || isPlaybackShortcut(event)) return true;
     if (event.ctrlKey && !event.altKey && (event.key === "z" || event.key === "y" || event.key === "Z")) return true;
     if (editorMode !== "normal" || event.altKey) return false;
 
@@ -359,15 +372,28 @@
 
   function handleAudioKeydown(event: KeyboardEvent) {
     if (event.defaultPrevented) return;
-    if (!isAudioShortcut(event)) return;
+    if (!isAudioShortcut(event) && !isPlaybackShortcut(event)) return;
     if (isTextEntryTarget(event.target)) return;
 
     event.preventDefault();
     event.stopPropagation();
 
     if (!audioElement || !audioLoaded) return;
-    if (event.key === " ") {
+    const key = event.key.toLowerCase();
+    if (key === "a" || key === "h" || event.key === "ArrowLeft" || event.key === "Left") {
+      seekAudio(-10);
+      return;
+    }
+    if (key === "d" || key === "l" || event.key === "ArrowRight" || event.key === "Right") {
+      seekAudio(10);
+      return;
+    }
+    if (key === "s" || key === "j" || event.key === " ") {
       toggleAudioPlayback();
+      return;
+    }
+    if (key === "w" || key === "k" || key === "r") {
+      cycleAudioRate();
       return;
     }
     seekAudio(event.key === "ArrowLeft" || event.key === "Left" ? -10 : 10);
@@ -846,8 +872,11 @@
     const selection = view?.state.selection;
     editorMode = mode;
     if (view) {
-      view.dispatch(selection ? { selection } : {});  // trigger keymap/decoration rebuild
-      // In normal mode, show a block cursor via a theme class on the editor dom
+      view.dispatch({
+        ...(selection ? { selection } : {}),
+        effects: editableCompartment.reconfigure(EditorView.editable.of(mode === "insert"))
+      });
+      // Mode classes drive cursor visibility and edit/annotate styling.
       view.dom.classList.toggle("mode-insert", mode === "insert");
       view.dom.classList.toggle("mode-normal", mode === "normal");
       requestAnimationFrame(() => view?.focus());
@@ -864,6 +893,7 @@
       content.style.paddingRight  = `${padRight}px`;
       content.style.paddingTop    = `${padTop}px`;
       content.style.paddingBottom = `${padBottom}px`;
+      content.style.caretColor = "transparent";
     }
     const scroller = view.dom.querySelector<HTMLElement>(".cm-scroller");
     if (scroller) {
@@ -896,43 +926,150 @@
     { name: "rosewood", color: "#8f3f4d" },
     { name: "purple",  color: "#d3869b" }
   ];
+  const styleOrderStorageKey = "cm6-style-order";
+  const defaultStyleOrder = highlightStyles.map(s => s.name);
+  let styleOrder = loadStyleOrder();
+  $: orderedHighlightStyles = styleOrder
+    .map(name => highlightStyles.find(s => s.name === name))
+    .filter((style): style is typeof highlightStyles[number] => !!style);
+
   function cycleStyle(delta: number) {
     currentStyle = cycleStyleNumber(currentStyle, delta);
   }
 
   function cycleStyleNumber(style: number, delta: number, includePlain = true) {
     if (includePlain) {
-      const styleCount = highlightStyles.length + 1;
+      const styleCount = orderedHighlightStyles.length + 1;
       return ((style + delta) + styleCount) % styleCount;
     }
 
-    const styleCount = highlightStyles.length;
+    const styleCount = orderedHighlightStyles.length;
     const colorStyle = Math.max(1, style);
     return (((colorStyle - 1 + delta) + styleCount) % styleCount) + 1;
   }
 
   function styleName(style: number) {
-    return style === 0 ? "" : highlightStyles[style - 1]?.name ?? "";
+    return style === 0 ? "" : orderedHighlightStyles[style - 1]?.name ?? "";
   }
 
   function styleColor(style: number) {
-    return style === 0 ? gruvbox.orange : highlightStyles[style - 1]?.color ?? gruvbox.fg;
+    return style === 0 ? activeTheme.orange : styleColorForName(orderedHighlightStyles[style - 1]?.name ?? "");
   }
 
   function styleNumberForName(name: string) {
-    const index = highlightStyles.findIndex(s => s.name === name);
+    if (name === "plain") return 0;
+    const index = orderedHighlightStyles.findIndex(s => s.name === name);
     return index < 0 ? 1 : index + 1;
   }
 
-  const gruvbox = {
-    bg: "#282828", bgSoft: "#32302f", bgHard: "#1d2021",
-    bgAlt: "#3c3836", border: "#504945", fg: "#ebdbb2",
-    fgMuted: "#a89984", yellow: "#fabd2f", green: "#b8bb26",
-    blue: "#83a598", aqua: "#8ec07c", orange: "#fe8019",
-    red: "#fb4934", purple: "#d3869b", selection: "#665c54",
-    activeLine: "#3c3836aa", gutterText: "#7c6f64",
-    cursor: "#fe8019", comment: "#928374"
+  function styleColorForName(name: string) {
+    if (name === "plain") return activeTheme.orange;
+    return highlightStyles.find(s => s.name === name)?.color ?? activeTheme.yellow;
+  }
+
+  function loadStyleOrder() {
+    const stored = typeof localStorage === "undefined" ? null : localStorage.getItem(styleOrderStorageKey);
+    if (!stored) return defaultStyleOrder;
+
+    try {
+      const parsed = JSON.parse(stored);
+      if (!Array.isArray(parsed)) return defaultStyleOrder;
+      const order = parsed.filter((name: unknown): name is string => typeof name === "string" && defaultStyleOrder.includes(name));
+      const missing = defaultStyleOrder.filter(name => !order.includes(name));
+      return [...order, ...missing];
+    } catch {
+      return defaultStyleOrder;
+    }
+  }
+
+  function persistStyleOrder(order: string[]) {
+    styleOrder = order;
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(styleOrderStorageKey, JSON.stringify(order));
+    }
+  }
+
+  function moveStyleOrder(index: number, delta: number) {
+    const nextIndex = index + delta;
+    if (nextIndex < 0 || nextIndex >= styleOrder.length) return;
+    const next = [...styleOrder];
+    const [item] = next.splice(index, 1);
+    next.splice(nextIndex, 0, item);
+    persistStyleOrder(next);
+  }
+
+  function resetStyleOrder() {
+    persistStyleOrder(defaultStyleOrder);
+  }
+
+  type ThemeMode = "gruvbox" | "nord";
+  type ThemePalette = {
+    dark: boolean;
+    bg: string;
+    bgSoft: string;
+    bgHard: string;
+    bgAlt: string;
+    border: string;
+    fg: string;
+    fgMuted: string;
+    yellow: string;
+    green: string;
+    blue: string;
+    aqua: string;
+    orange: string;
+    red: string;
+    purple: string;
+    selection: string;
+    activeLine: string;
+    gutterText: string;
+    cursor: string;
+    comment: string;
+    searchMatch: string;
+    searchMatchSelected: string;
+    blockquoteBg: string;
+    blockquoteFg: string;
+    plainCodeBg: string;
+    activeLineEdit: string;
+    activeGutterEdit: string;
   };
+
+  const themes: Record<ThemeMode, ThemePalette> = {
+    gruvbox: {
+      dark: true,
+      bg: "#282828", bgSoft: "#32302f", bgHard: "#1d2021",
+      bgAlt: "#3c3836", border: "#504945", fg: "#ebdbb2",
+      fgMuted: "#a89984", yellow: "#fabd2f", green: "#b8bb26",
+      blue: "#83a598", aqua: "#8ec07c", orange: "#fe8019",
+      red: "#fb4934", purple: "#d3869b", selection: "#665c54",
+      activeLine: "#3c3836aa", gutterText: "#7c6f64",
+      cursor: "#fe8019", comment: "#928374",
+      searchMatch: "#665c54", searchMatchSelected: "#7c6f64",
+      blockquoteBg: "#4a3520", blockquoteFg: "#fabd2f",
+      plainCodeBg: "#32302f", activeLineEdit: "#2f4a3aaa", activeGutterEdit: "#2f4a3a"
+    },
+    nord: {
+      dark: false,
+      bg: "#eceff4", bgSoft: "#e5e9f0", bgHard: "#d8dee9",
+      bgAlt: "#e5e9f0", border: "#cfd7e3", fg: "#2e3440",
+      fgMuted: "#4c566a", yellow: "#ebcb8b", green: "#a3be8c",
+      blue: "#81a1c1", aqua: "#8fbcbb", orange: "#d08770",
+      red: "#bf616a", purple: "#b48ead", selection: "#d8dee9",
+      activeLine: "#e5e9f0", gutterText: "#5e6472",
+      cursor: "#5e81ac", comment: "#4c566a",
+      searchMatch: "#d8dee9", searchMatchSelected: "#cfd7e3",
+      blockquoteBg: "#e5e9f0", blockquoteFg: "#5e81ac",
+      plainCodeBg: "#e5e9f0", activeLineEdit: "#d8dee9", activeGutterEdit: "#d8dee9"
+    }
+  };
+
+  function loadThemeMode(): ThemeMode {
+    const stored = typeof localStorage === "undefined" ? null : localStorage.getItem("cm6-theme");
+    return stored === "gruvbox" ? "gruvbox" : "nord";
+  }
+
+  function getTheme(mode: ThemeMode): ThemePalette {
+    return themes[mode];
+  }
 
   function starterDoc() {
     const fmt = (d: Date) => d.toLocaleString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).replace(/,/g, "");
@@ -983,62 +1120,92 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
 `;
   }
 
-  const gruvboxHighlight = HighlightStyle.define([
-    { tag: tags.heading, color: gruvbox.yellow, fontWeight: "700" },
-    { tag: tags.contentSeparator, color: gruvbox.orange },
-    { tag: tags.emphasis, color: gruvbox.fg, fontStyle: "italic" },
-    { tag: tags.strong, color: gruvbox.fg, fontWeight: "700" },
-    { tag: tags.strikethrough, color: gruvbox.fgMuted, textDecoration: "line-through" },
-    { tag: tags.link, color: gruvbox.blue, textDecoration: "underline" },
-    { tag: tags.url, color: gruvbox.aqua, textDecoration: "underline" },
-    { tag: tags.labelName, color: gruvbox.yellow },
-    { tag: tags.keyword, color: gruvbox.red },
-    { tag: [tags.atom, tags.bool, tags.null], color: gruvbox.purple },
-    { tag: [tags.number, tags.integer, tags.float], color: gruvbox.purple },
-    { tag: [tags.string, tags.special(tags.string)], color: gruvbox.green },
-    { tag: tags.regexp, color: gruvbox.aqua },
-    { tag: tags.escape, color: gruvbox.orange },
-    { tag: [tags.variableName, tags.name], color: gruvbox.fg },
-    { tag: tags.function(tags.variableName), color: gruvbox.green },
-    { tag: [tags.className, tags.typeName], color: gruvbox.yellow },
-    { tag: [tags.operator, tags.compareOperator, tags.logicOperator], color: gruvbox.red },
-    { tag: [tags.punctuation, tags.separator, tags.bracket], color: gruvbox.fgMuted },
-    { tag: tags.comment, color: gruvbox.comment },
-    { tag: tags.meta, color: gruvbox.orange },
-    { tag: tags.monospace, color: "inherit" }
-  ]);
+  function buildHighlightStyle(theme: ThemePalette) {
+    return HighlightStyle.define([
+      { tag: tags.heading, color: theme.yellow, fontWeight: "700" },
+      { tag: tags.contentSeparator, color: theme.orange },
+      { tag: tags.emphasis, color: theme.fg, fontStyle: "italic" },
+      { tag: tags.strong, color: theme.fg, fontWeight: "700" },
+      { tag: tags.strikethrough, color: theme.fgMuted, textDecoration: "line-through" },
+      { tag: tags.link, color: theme.blue, textDecoration: "underline" },
+      { tag: tags.url, color: theme.aqua, textDecoration: "underline" },
+      { tag: tags.labelName, color: theme.yellow },
+      { tag: tags.keyword, color: theme.red },
+      { tag: [tags.atom, tags.bool, tags.null], color: theme.purple },
+      { tag: [tags.number, tags.integer, tags.float], color: theme.purple },
+      { tag: [tags.string, tags.special(tags.string)], color: theme.green },
+      { tag: tags.regexp, color: theme.aqua },
+      { tag: tags.escape, color: theme.orange },
+      { tag: [tags.variableName, tags.name], color: theme.fg },
+      { tag: tags.function(tags.variableName), color: theme.green },
+      { tag: [tags.className, tags.typeName], color: theme.yellow },
+      { tag: [tags.operator, tags.compareOperator, tags.logicOperator], color: theme.red },
+      { tag: [tags.punctuation, tags.separator, tags.bracket], color: theme.fgMuted },
+      { tag: tags.comment, color: theme.comment },
+      { tag: tags.meta, color: theme.orange },
+      { tag: tags.monospace, color: "inherit" }
+    ]);
+  }
 
-  function buildGruvboxTheme(): Extension {
+  function buildEditorTheme(theme: ThemePalette): Extension {
     return EditorView.theme({
-      "&": { height: "100%", color: gruvbox.fg, backgroundColor: gruvbox.bg },
+      "&": { height: "100%", color: theme.fg, backgroundColor: theme.bg },
       ".cm-scroller": { overflow: "auto", fontFamily: '"Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, monospace', lineHeight: "1.75" },
-      ".cm-content": { textAlign: "left", padding: "1rem 1.25rem 4rem", minHeight: "100%", caretColor: gruvbox.cursor, whiteSpace: "pre-wrap", wordBreak: "break-word" },
+      ".cm-content": { textAlign: "left", padding: "1rem 1.25rem 4rem", minHeight: "100%", caretColor: theme.cursor, whiteSpace: "pre-wrap", wordBreak: "break-word" },
       ".cm-line": { textAlign: "left" },
-      "&.cm-focused .cm-cursor": { borderLeftColor: gruvbox.cursor },
-      "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { backgroundColor: `${gruvbox.orange} !important`, color: gruvbox.bg, opacity: '50%' },
-      ".cm-gutters": { backgroundColor: gruvbox.bgHard, color: gruvbox.gutterText, borderRight: "none" },
-      ".cm-activeLine": { backgroundColor: "transparent" },
-      ".cm-activeLineGutter": { color: gruvbox.yellow },
-      ".cm-panels": { backgroundColor: gruvbox.bgSoft, color: gruvbox.fg },
-      ".cm-searchMatch": { backgroundColor: "#665c54", outline: `1px solid ${gruvbox.yellow}` },
-      ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: "#7c6f64" },
-      ".cm-matchingBracket, .cm-nonmatchingBracket": { backgroundColor: gruvbox.bgAlt, outline: `1px solid ${gruvbox.blue}` },
-      ...Object.fromEntries(highlightStyles.map(s => [
-        `.cm-annotation-${s.name}`,
-        { color: `${contrastColor(s.color)} !important`, backgroundColor: `${s.color} !important`, border: "none" }
-      ])),
-      ".cm-formatting-code": { color: gruvbox.orange },
-      ".cm-formatting-code-block": { color: gruvbox.orange },
-      ".cm-formatting": { color: gruvbox.fgMuted },
+      "&.cm-focused .cm-cursor": { borderLeftColor: theme.cursor },
+      ".cm-content, .cm-line": { caretColor: "transparent !important" },
+      ".cm-cursorLayer": {
+        animation: "none !important",
+        display: "none !important",
+        opacity: "0 !important",
+        visibility: "hidden !important"
+      },
+      ".cm-cursor, .cm-cursor-primary, .cm-cursor-secondary, .cm-secondaryCursor, .cm-dropCursor": {
+        borderLeft: "0 !important",
+        borderLeftColor: "transparent !important",
+        display: "none !important",
+        opacity: "0 !important",
+        visibility: "hidden !important"
+      },
+      "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { backgroundColor: `${theme.orange} !important`, color: theme.bg, opacity: "50%" },
+      ".cm-gutters": { backgroundColor: theme.bgHard, color: theme.gutterText, borderRight: "none" },
+      ".cm-activeLine": { backgroundColor: theme.activeLine },
+      ".cm-activeLineGutter": { color: theme.yellow },
+      ".cm-panels": { backgroundColor: theme.bgSoft, color: theme.fg },
+      ".cm-searchMatch": { backgroundColor: theme.searchMatch, outline: `1px solid ${theme.yellow}` },
+      ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: theme.searchMatchSelected },
+      ".cm-matchingBracket, .cm-nonmatchingBracket": { backgroundColor: theme.bgAlt, outline: `1px solid ${theme.blue}` },
+      ".cm-formatting-code": { color: theme.orange },
+      ".cm-formatting-code-block": { color: theme.orange },
+      ".cm-formatting": { color: theme.fgMuted },
       ".cm-blockquote-line": {
-        borderLeft: `3px solid ${gruvbox.orange}`,
+        borderLeft: `3px solid ${theme.orange}`,
         paddingLeft: "0.75em",
         paddingRight: "0.35em",
-        backgroundColor: "#4a3520",
-        marginBottom: "2px",
-        color: gruvbox.yellow
+        backgroundColor: theme.blockquoteBg,
+        color: theme.blockquoteFg
       }
-    }, { dark: true });
+    }, { dark: theme.dark });
+  }
+
+  function buildThemeExtensions(theme: ThemePalette): Extension[] {
+    return [
+      syntaxHighlighting(buildHighlightStyle(theme)),
+      buildHighlightDecorator(theme),
+      buildEditorTheme(theme)
+    ];
+  }
+
+  function reconfigureTheme(nextMode: ThemeMode) {
+    const nextTheme = getTheme(nextMode);
+    themeMode = nextMode;
+    if (typeof localStorage !== "undefined") localStorage.setItem(themeStorageKey, nextMode);
+    view?.dispatch({ effects: themeCompartment.reconfigure(buildThemeExtensions(nextTheme)) });
+  }
+
+  function toggleThemeMode() {
+    reconfigureTheme(themeMode === "nord" ? "gruvbox" : "nord");
   }
 
   function updateStatusFromView(v: EditorView) {
@@ -1056,7 +1223,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
   }
 
   // Returns theme bg or fg based on which has better contrast against the annotation color
-  function contrastColor(hex: string): string {
+  function contrastColor(hex: string, bg = activeTheme.bg, fg = activeTheme.fg): string {
     const toLinear = (c: number) => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
     const luminance = (h: string) => {
       const r = toLinear(parseInt(h.slice(1, 3), 16) / 255);
@@ -1066,12 +1233,11 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     };
     const contrast = (L1: number, L2: number) => (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
     const Lann = luminance(hex);
-    return contrast(Lann, luminance(gruvbox.bg)) >= contrast(Lann, luminance(gruvbox.fg)) ? gruvbox.bg : gruvbox.fg;
+    return contrast(Lann, luminance(bg)) >= contrast(Lann, luminance(fg)) ? bg : fg;
   }
 
   const annotationPattern = /`([^`]+)`<!--\s*(\w+),\s*(.+?):\s*"([^"]*)"(?:,\s*title:\s*"([^"]*)")?\s*-->/g;
   const srtPattern = /\[\s*([0-9:.]+)\s*-->\s*([0-9:.]+)\s*\]/g;
-  const styleColorMap: Record<string, string> = Object.fromEntries(highlightStyles.map(s => [s.name, s.color]));
   let editingSpan: number | null = null;
   type BlockquoteAlign = "left" | "center" | "right";
   const blockquoteMetaPattern = /<!--\s*align:(left|center|right)\s+width:(\d{1,3})\s*-->/i;
@@ -1110,6 +1276,12 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     return start === end ? null : { from: start, to: end };
   }
 
+  function trimTrailingWhitespaceRange(text: string, from: number, to: number): WordRange | null {
+    let end = Math.max(from, Math.min(to, text.length));
+    while (end > from && /\s/.test(text[end - 1])) end -= 1;
+    return end > from ? { from, to: end } : null;
+  }
+
   function wordBoundary(text: string, pos: number, forward: boolean): number {
     let next = Math.max(0, Math.min(pos, text.length));
 
@@ -1130,6 +1302,22 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     return next;
   }
 
+  function wordSelectionBoundary(text: string, pos: number, forward: boolean): number {
+    let next = Math.max(0, Math.min(pos, text.length));
+
+    if (forward) {
+      const current = wordRangeAt(text, next);
+      if (current && next !== current.to) return current.to;
+      while (next < text.length && !isSelectableWordChar(text, next)) next += 1;
+      return wordRangeAt(text, next)?.to ?? next;
+    }
+
+    const current = wordRangeAt(text, next);
+    if (current && next !== current.from) return current.from;
+    while (next > 0 && !isSelectableWordChar(text, next - 1)) next -= 1;
+    return next > 0 ? wordRangeAt(text, next - 1)?.from ?? next : 0;
+  }
+
   function cleanHtmlDocument(markdownText: string) {
     const body = renderCleanHtmlBody(markdownText);
     return `<!doctype html>
@@ -1141,8 +1329,8 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
   <style>
     body {
       margin: 0;
-      background: ${gruvbox.bg};
-      color: ${gruvbox.fg};
+      background: ${activeTheme.bg};
+      color: ${activeTheme.fg};
       font-family: "Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       line-height: ${lineHeight};
       font-size: ${fontSize}px;
@@ -1156,8 +1344,8 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
       white-space: normal;
     }
     p { margin: 0 0 ${1 + paragraphSpacing}em; }
-    h1, h2, h3, h4, h5, h6 { color: ${gruvbox.yellow}; margin: 1.25rem 0 0.75rem; line-height: 1.25; }
-    code { color: ${gruvbox.yellow}; background: ${gruvbox.bgSoft}; border: 1px solid ${gruvbox.border}; border-radius: 4px; padding: 0 0.25rem; }
+    h1, h2, h3, h4, h5, h6 { color: ${activeTheme.yellow}; margin: 1.25rem 0 0.75rem; line-height: 1.25; }
+    code { color: ${activeTheme.yellow}; background: ${activeTheme.bgSoft}; border: 1px solid ${activeTheme.border}; border-radius: 4px; padding: 0 0.25rem; }
     .annotation-token {
       border-radius: 3px;
       padding: 0 0.25rem;
@@ -1171,21 +1359,33 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
       padding: 0 0.35rem;
       border-radius: 999px;
       background: rgba(80, 73, 69, 0.9);
-      border: 1px solid ${gruvbox.border};
-      color: ${gruvbox.fgMuted};
+      border: 1px solid ${activeTheme.border};
+      color: ${activeTheme.fgMuted};
       font-size: 10px;
       line-height: 1.4;
       white-space: nowrap;
       vertical-align: middle;
       box-shadow: 0 1px 0 rgba(0, 0, 0, 0.15);
     }
+    .annotation-comment {
+      display: inline-block;
+      margin-left: 0.35rem;
+      padding: 0 0.4rem;
+      border-radius: 999px;
+      background: color-mix(in srgb, ${activeTheme.bgSoft} 90%, transparent);
+      border: 1px solid ${activeTheme.border};
+      color: ${activeTheme.fgMuted};
+      font-size: 10px;
+      line-height: 1.4;
+      vertical-align: middle;
+    }
     blockquote {
-      border-left: 3px solid ${gruvbox.orange};
+      border-left: 3px solid ${activeTheme.orange};
       padding: 0.25rem 0.35rem 0.25rem 0.75rem;
       margin-top: 0;
       margin-bottom: 0.25rem;
-      background: #4a3520;
-      color: ${gruvbox.yellow};
+      background: ${activeTheme.blockquoteBg};
+      color: ${activeTheme.blockquoteFg};
     }
   </style>
 </head>
@@ -1249,9 +1449,12 @@ ${body}
 
     while ((match = pattern.exec(text)) !== null) {
       html += renderPlainInlineHtml(text.slice(lastIndex, match.index));
-      const color = styleColorMap[match[2]] || gruvbox.yellow;
+      const color = styleColorForName(match[2]);
       html += `<span class="annotation-token" style="background:${escapeHtml(color)};color:${escapeHtml(contrastColor(color))};">${escapeHtml(match[1])}</span>`;
       html += `<span class="annotation-timestamp" title="${escapeHtml(match[3])}">${escapeHtml(match[3])}</span>`;
+      if (match[4]?.trim()) {
+        html += `<span class="annotation-comment">${escapeHtml(match[4].trim())}</span>`;
+      }
       lastIndex = match.index + match[0].length;
     }
 
@@ -1366,7 +1569,7 @@ ${body}
         id: `annotation-${spanStart}`,
         colorName,
         title: annotation[5]?.trim() ?? "",
-        color: styleColorMap[colorName] ?? gruvbox.fgMuted,
+        color: styleColorForName(colorName),
         text: annotation[1],
         context: annotationSentenceContext(docText, spanStart, spanStart + annotation[0].length),
         timestamp: annotation[3],
@@ -1397,7 +1600,7 @@ ${body}
         order.push(key);
         grouped.set(key, {
           label: item.type === "blockquote" ? "Notes" : summaryAnnotationTitle(item),
-          color: item.type === "blockquote" ? gruvbox.yellow : item.color,
+          color: item.type === "blockquote" ? activeTheme.yellow : item.color,
           itemType: item.type,
           items: []
         });
@@ -1425,6 +1628,14 @@ ${body}
       ...expandedSummaryCategories,
       [id]: !expandedSummaryCategories[id]
     };
+  }
+
+  function setAllSummaryCategories(expanded: boolean) {
+    expandedSummaryCategories = Object.fromEntries(summaryGroupIds.map(id => [id, expanded]));
+  }
+
+  function toggleAllSummaryCategories() {
+    setAllSummaryCategories(!summaryAllGroupsExpanded);
   }
 
   function clampSummarySidebarWidth(width: number) {
@@ -1575,6 +1786,7 @@ ${body}
     event.stopPropagation();
     editingSummaryTitleKey = key;
     summaryTitleDraft = item.title || item.colorName;
+    void focusSummaryTitleInput();
   }
 
   function startSummaryGroupTitleEdit(event: MouseEvent, section: Extract<SummarySection, { kind: "group" }>) {
@@ -1584,6 +1796,13 @@ ${body}
     if (!firstAnnotation) return;
     editingSummaryTitleKey = section.id;
     summaryTitleDraft = firstAnnotation.title || firstAnnotation.colorName;
+    void focusSummaryTitleInput();
+  }
+
+  async function focusSummaryTitleInput() {
+    await tick();
+    summaryTitleInput?.focus();
+    summaryTitleInput?.select();
   }
 
   function normalizeSummaryTitle(title: string, colorName: string) {
@@ -1758,20 +1977,20 @@ ${body}
           const colorName = m[2];
           const timestamp = m[3] || "";
           const comment   = m[4] || "";
-          const color = styleColorMap[colorName] ?? gruvbox.fgMuted;
+          const color = styleColorForName(colorName);
           return [{
             pos: wordStart, above: true, strictSide: true, arrow: false,
             create() {
               const dom = document.createElement("div");
               dom.className = "cm-annotation-bubble";
-              dom.style.cssText = `background:${gruvbox.bgAlt};border:1px solid ${gruvbox.border};border-left:3px solid ${color};border-radius:4px;padding:4px 10px;font-size:11px;color:${gruvbox.fg};line-height:1.6;white-space:nowrap;pointer-events:none;`;
+              dom.style.cssText = `background:${activeTheme.bgAlt};border:1px solid ${activeTheme.border};border-left:3px solid ${color};border-radius:4px;padding:4px 10px;font-size:11px;color:${activeTheme.fg};line-height:1.6;white-space:nowrap;pointer-events:none;`;
               const meta = document.createElement("div");
-              meta.style.color = gruvbox.fgMuted;
+              meta.style.color = activeTheme.fgMuted;
               meta.textContent = `${colorName}  ${timestamp}`;
               dom.appendChild(meta);
               const line2 = document.createElement("div");
               line2.textContent = comment || "Enter to add note";
-              if (!comment) line2.style.color = gruvbox.fgMuted;
+              if (!comment) line2.style.color = activeTheme.fgMuted;
               dom.appendChild(line2);
               return { dom };
             }
@@ -1789,14 +2008,16 @@ ${body}
     private spanStart: number;
     private spanEnd: number;
     private editorView: EditorView;
+    private theme: ThemePalette;
 
-    constructor(color: string, comment: string, spanStart: number, spanEnd: number, editorView: EditorView) {
+    constructor(color: string, comment: string, spanStart: number, spanEnd: number, editorView: EditorView, theme: ThemePalette) {
       super();
       this.color = color;
       this.comment = comment;
       this.spanStart = spanStart;
       this.spanEnd = spanEnd;
       this.editorView = editorView;
+      this.theme = theme;
     }
 
     toDOM() {
@@ -1806,7 +2027,7 @@ ${body}
       input.type = "text";
       input.value = this.comment;
       input.placeholder = "add note…";
-      input.style.cssText = `background:transparent;border:none;outline:none;color:${gruvbox.fg};font-family:inherit;font-size:inherit;width:${Math.max(this.comment.length || 8, 8)}ch;min-width:8ch;`;
+      input.style.cssText = `background:transparent;border:none;outline:none;color:${this.theme.fg};caret-color:${this.theme.cursor};font-family:inherit;font-size:inherit;width:${Math.max(this.comment.length || 8, 8)}ch;min-width:8ch;`;
       const save = () => {
         editingSpan = null;
         const full = this.editorView.state.doc.sliceString(this.spanStart, this.spanEnd);
@@ -2014,7 +2235,7 @@ ${body}
   ): readonly TransactionSpec[] | null {
     const selection = tr.newSelection.main;
     const cursor = selection.head;
-    if (cursor < range.from || cursor > range.to) return null;
+    if (cursor <= range.from || cursor >= range.to) return null;
 
     const movingRight = cursor >= tr.startState.selection.main.head;
     const target = movingRight ? range.rightExit : range.leftExit;
@@ -2072,9 +2293,12 @@ ${body}
     return true;
   }
 
-  function buildHighlightDecorator(): Extension {
+  function buildHighlightDecorator(theme: ThemePalette): Extension {
     const colorTheme = EditorView.theme(Object.fromEntries(
-      highlightStyles.map(s => [`.cm-annotation-${s.name}`, { backgroundColor: s.color, color: contrastColor(s.color), borderRadius: "3px", padding: "0 2px" }])
+      highlightStyles.map(s => {
+        const color = styleColorForName(s.name);
+        return [`.cm-annotation-${s.name}`, { backgroundColor: color, color: contrastColor(color, theme.bg, theme.fg), borderRadius: "3px", padding: "0 2px" }];
+      })
     ));
 
     const plugin = ViewPlugin.fromClass(class {
@@ -2095,7 +2319,7 @@ ${body}
           while ((match = annotationPattern.exec(text)) !== null) {
             const colorName = match[2];
             const comment   = match[4] || "";
-            const color = styleColorMap[colorName];
+            const color = styleColorForName(colorName);
             if (!color) continue;
             const spanStart = from + match.index;
             const spanEnd   = spanStart + match[0].length;
@@ -2117,7 +2341,7 @@ ${body}
             builder.add(spanStart, wordStart, Decoration.replace({ widget: new EmptyWidget(color), inclusive: false }));
             builder.add(wordStart, wordEnd, Decoration.mark({ class: `cm-annotation-${colorName}` }));
             if (isEditing) {
-              builder.add(wordEnd, spanEnd, Decoration.replace({ widget: new EditWidget(color, comment, spanStart, spanEnd, v) }));
+              builder.add(wordEnd, spanEnd, Decoration.replace({ widget: new EditWidget(color, comment, spanStart, spanEnd, v, theme) }));
             } else {
               builder.add(wordEnd, spanEnd, Decoration.replace({ widget: new EmptyWidget() }));
             }
@@ -2156,7 +2380,7 @@ ${body}
     }, { decorations: v => v.decorations });
 
     const plainTheme = EditorView.theme({
-      ".cm-plain-code": { color: `${gruvbox.yellow} !important`, backgroundColor: gruvbox.bgSoft, border: `1px solid ${gruvbox.border}`, borderRadius: "4px", padding: "0 0.25rem" }
+      ".cm-plain-code": { color: `${theme.yellow} !important`, backgroundColor: theme.plainCodeBg, border: `1px solid ${theme.border}`, borderRadius: "4px", padding: "0 0.25rem" }
     });
 
     const atomicPlugin = ViewPlugin.fromClass(class {
@@ -2282,6 +2506,7 @@ ${body}
   function wrapSelectionOrWord(v: EditorView, style: number = 0) {
     const state = v.state;
     const range = state.selection.main;
+    const cursorAfterInsert = (from: number, insert: string) => from + insert.length;
     const makeInsert = (text: string): string => {
       if (style === 0) return `\`${text}\``;
       const now = new Date();
@@ -2290,8 +2515,10 @@ ${body}
       return `\`${text}\`<!-- ${name}, ${ts}: "" -->`;
     };
     if (!range.empty) {
-      const insert = makeInsert(state.doc.sliceString(range.from, range.to));
-      v.dispatch({ changes: { from: range.from, to: range.to, insert }, selection: { anchor: Math.min(range.from + insert.length + (style > 0 ? 1 : 0), v.state.doc.length) } });
+      const trimmedRange = trimTrailingWhitespaceRange(state.doc.toString(), range.from, range.to);
+      if (!trimmedRange) return true;
+      const insert = makeInsert(state.doc.sliceString(trimmedRange.from, trimmedRange.to));
+      v.dispatch({ changes: { from: trimmedRange.from, to: trimmedRange.to, insert }, selection: { anchor: cursorAfterInsert(trimmedRange.from, insert) } });
       return true;
     }
     const docText = state.doc.toString();
@@ -2299,7 +2526,7 @@ ${body}
     if (!wordRange) return true;
     const { from, to } = wordRange;
     const insert = makeInsert(state.doc.sliceString(from, to));
-    v.dispatch({ changes: { from, to, insert }, selection: { anchor: Math.min(from + insert.length + (style > 0 ? 1 : 0), v.state.doc.length) } });
+    v.dispatch({ changes: { from, to, insert }, selection: { anchor: cursorAfterInsert(from, insert) } });
     return true;
   }
 
@@ -2313,9 +2540,14 @@ ${body}
       if (cursor >= spanStart && cursor <= spanEnd) {
         const newStyle = cycleStyleNumber(styleNumberForName(m[2]), delta, false);
         const newName = styleName(newStyle);
+        const tokenStart = spanStart + 1;
         const updated = m[0].replace(/^`([^`]+)`<!--\s*\w+,/, `\`$1\`<!-- ${newName},`);
         currentStyle = newStyle;
-        v.dispatch({ changes: { from: spanStart, to: spanEnd, insert: updated } });
+        v.dispatch({
+          changes: { from: spanStart, to: spanEnd, insert: updated },
+          selection: { anchor: tokenStart },
+          effects: cursorScrollEffect(v, tokenStart)
+        });
         return true;
       }
     }
@@ -2555,6 +2787,37 @@ ${body}
     }
   });
 
+  const hideEditorCursorPlugin = ViewPlugin.fromClass(class {
+    view: EditorView;
+    scheduled = false;
+
+    constructor(view: EditorView) {
+      this.view = view;
+      this.hideCursor();
+    }
+
+    update() {
+      this.hideCursor();
+    }
+
+    hideCursor = () => {
+      if (this.scheduled) return;
+      this.scheduled = true;
+      requestAnimationFrame(() => {
+        this.scheduled = false;
+        this.view.contentDOM.style.setProperty("caret-color", "transparent", "important");
+        const selectors = ".cm-cursorLayer, .cm-cursor, .cm-cursor-primary, .cm-cursor-secondary, .cm-dropCursor";
+        this.view.dom.querySelectorAll<HTMLElement>(selectors).forEach(element => {
+          element.style.setProperty("animation", "none", "important");
+          element.style.setProperty("border-left", "0", "important");
+          element.style.setProperty("display", "none", "important");
+          element.style.setProperty("opacity", "0", "important");
+          element.style.setProperty("visibility", "hidden", "important");
+        });
+      });
+    };
+  });
+
   function cursorScrollMargin(v: EditorView) {
     const linePx = parseFloat(getComputedStyle(v.contentDOM).lineHeight) || fontSize * lineHeight;
     const viewportHeight = v.scrollDOM.clientHeight;
@@ -2569,6 +2832,15 @@ ${body}
 
   function scrollCursorIntoView(v: EditorView) {
     v.dispatch({ effects: cursorScrollEffect(v) });
+  }
+
+  function centerCurrentLine(v: EditorView) {
+    const head = v.state.selection.main.head;
+    v.dispatch({
+      selection: { anchor: head },
+      effects: EditorView.scrollIntoView(head, { y: "center", yMargin: 0 })
+    });
+    return true;
   }
 
   function runWithCursorScroll(v: EditorView, command: (view: EditorView) => boolean) {
@@ -2609,7 +2881,7 @@ ${body}
     let head = selection.head;
 
     for (let i = 0; i < count; i += 1) {
-      const next = wordBoundary(docText, head, forward);
+      const next = extend ? wordSelectionBoundary(docText, head, forward) : wordBoundary(docText, head, forward);
       if (next === head) break;
       head = next;
     }
@@ -2664,6 +2936,7 @@ ${body}
     const currentLine = doc.lineAt(selection.head);
     const step = direction === "up" ? -1 : 1;
     const adjacentNumber = currentLine.number + step;
+    const isSkippableLine = (text: string) => isSrtTimestampLine(text) || text.trimStart().startsWith(">");
 
     if (adjacentNumber < 1 || adjacentNumber > doc.lines) {
       runWithCursorScroll(v, move);
@@ -2671,7 +2944,7 @@ ${body}
     }
 
     const adjacentLine = doc.line(adjacentNumber);
-    if (!isSrtTimestampLine(adjacentLine.text)) {
+    if (!isSkippableLine(adjacentLine.text)) {
       runWithCursorScroll(v, move);
       return true;
     }
@@ -2679,7 +2952,7 @@ ${body}
     const column = selection.head - currentLine.from;
     for (let lineNumber = adjacentNumber + step; lineNumber >= 1 && lineNumber <= doc.lines; lineNumber += step) {
       const line = doc.line(lineNumber);
-      if (isSrtTimestampLine(line.text) || !line.text.trim()) continue;
+      if (isSkippableLine(line.text) || !line.text.trim()) continue;
       const head = line.from + Math.min(column, line.length);
       v.dispatch({
         selection: { anchor: extend ? selection.anchor : head, head },
@@ -2699,9 +2972,10 @@ ${body}
     return Prec.high(keymap.of([
       // Always: Escape returns to normal
       { key: "Escape", run: v => { setMode("normal"); return true; } },
-      // Always: F2 enters edit
-      { key: "F2", run: v => { setMode("insert"); return true; } },
+      // Always: F2 toggles edit mode
+      { key: "F2", run: v => { setMode(editorMode === "insert" ? "normal" : "insert"); return true; } },
       { key: "F1", run: () => { showHelp = !showHelp; return true; } },
+      { key: "Tab", run: normal(v => centerCurrentLine(v)) },
 
       // Normal-mode only: Navigation
       { key: "ArrowLeft",        run: normal(v => { cursorCharLeft(v);  return true; }) },
@@ -2772,6 +3046,14 @@ ${body}
       { key: "Alt-Space",  run: () => { toggleAudioPlayback(); return true; } },
       { key: "Alt-ArrowLeft",  run: () => { seekAudio(-10); return true; } },
       { key: "Alt-ArrowRight", run: () => { seekAudio(10); return true; } },
+      { key: "Alt-a", run: () => { seekAudio(-10); return true; } },
+      { key: "Alt-h", run: () => { seekAudio(-10); return true; } },
+      { key: "Alt-d", run: () => { seekAudio(10); return true; } },
+      { key: "Alt-l", run: () => { seekAudio(10); return true; } },
+      { key: "Alt-s", run: () => { toggleAudioPlayback(); return true; } },
+      { key: "Alt-j", run: () => { toggleAudioPlayback(); return true; } },
+      { key: "Alt-w", run: () => { cycleAudioRate(); return true; } },
+      { key: "Alt-k", run: () => { cycleAudioRate(); return true; } },
       {
         any: (_view, event) =>
           editorMode === "normal" &&
@@ -2802,11 +3084,13 @@ ${body}
         }
       }),
       drawSelection(),
+      editableCompartment.of(EditorView.editable.of(editorMode === "insert")),
+      EditorView.contentAttributes.of({ tabindex: "0" }),
       history(),
       indentOnInput(),
       bracketMatching(),
       highlightActiveLineGutter(),
-      syntaxHighlighting(gruvboxHighlight),
+      themeCompartment.of(buildThemeExtensions(getTheme(themeMode))),
       buildKeymap(),
       keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
       markdown({ base: markdownLanguage }),
@@ -2816,13 +3100,12 @@ ${body}
       blockquoteLinePlugin,
       columnGuidePlugin,
       visualLinePlugin,
-      buildHighlightDecorator(),
+      hideEditorCursorPlugin,
       annotationTooltipField,
       EditorView.theme({
         ".cm-tooltip": { background: "transparent", border: "none" },
         ".cm-annotation-bubble": { display: "block" }
       }),
-      buildGruvboxTheme()
     ];
   }
 
@@ -2830,10 +3113,13 @@ ${body}
     const onWindowKeydown = (event: KeyboardEvent) => handleWindowKeydown(event);
     window.addEventListener("keydown", onWindowKeydown);
     const editorResizeObserver = new ResizeObserver(() => updateEditorViewportHeight());
+    const initialDoc = localStorage.getItem("cm6-buffer") ?? starterDoc();
+    const initialCursor = firstVisibleDocumentPosition(initialDoc);
 
     view = new EditorView({
       state: EditorState.create({
-        doc: localStorage.getItem("cm6-buffer") ?? starterDoc(),
+        doc: initialDoc,
+        selection: { anchor: initialCursor },
         extensions: [...baseExtensions()]
       }),
       parent: editorEl
@@ -2859,16 +3145,16 @@ ${body}
 <div
   class="app"
   style={`
-    --bg: ${gruvbox.bg}; --bg-soft: ${gruvbox.bgSoft}; --bg-hard: ${gruvbox.bgHard};
-    --bg-alt: ${gruvbox.bgAlt}; --border: ${gruvbox.border}; --fg: ${gruvbox.fg};
+    --bg: ${activeTheme.bg}; --bg-soft: ${activeTheme.bgSoft}; --bg-hard: ${activeTheme.bgHard};
+    --bg-alt: ${activeTheme.bgAlt}; --border: ${activeTheme.border}; --fg: ${activeTheme.fg};
     --internal-border: transparent;
-    --fg-muted: ${gruvbox.fgMuted}; --yellow: ${gruvbox.yellow}; --green: ${gruvbox.green};
-    --blue: ${gruvbox.blue}; --orange: ${gruvbox.orange}; --selection: ${gruvbox.selection};
+    --fg-muted: ${activeTheme.fgMuted}; --yellow: ${activeTheme.yellow}; --green: ${activeTheme.green};
+    --blue: ${activeTheme.blue}; --orange: ${activeTheme.orange}; --selection: ${activeTheme.selection};
     --active-style-color: ${currentStyleColor};
     --active-line-annotate: color-mix(in srgb, var(--active-style-color) 34%, transparent);
-    --active-line-edit: #2f4a3aaa;
+    --active-line-edit: ${activeTheme.activeLineEdit};
     --active-gutter-annotate: color-mix(in srgb, var(--active-style-color) 58%, var(--bg-hard));
-    --active-gutter-edit: #2f4a3a;
+    --active-gutter-edit: ${activeTheme.activeGutterEdit};
   `}
 >
   <div class="toolbar">
@@ -2905,18 +3191,66 @@ ${body}
       </div>
 
       <div class="sidebar-section">
-        <label class="mode-switch" aria-label="Switch between Annotate and Edit mode">
-          <span class:active={editorMode === "normal"}>Annotate</span>
-          <input
-            type="checkbox"
-            checked={editorMode === "insert"}
-            on:change={e => setMode((e.target as HTMLInputElement).checked ? "insert" : "normal")}
-          />
-          <span class="mode-track" aria-hidden="true">
-            <span class="mode-thumb"></span>
-          </span>
-          <span class:active={editorMode === "insert"}>Edit</span>
-        </label>
+        <div class="style-controls">
+          <label class="mode-switch" aria-label="Switch between Annotate and Edit mode">
+            <span class:active={editorMode === "normal"}>Annotate</span>
+            <input
+              type="checkbox"
+              checked={editorMode === "insert"}
+              on:change={e => setMode((e.target as HTMLInputElement).checked ? "insert" : "normal")}
+            />
+            <span class="mode-track" aria-hidden="true">
+              <span class="mode-thumb"></span>
+            </span>
+            <span class:active={editorMode === "insert"}>Edit</span>
+          </label>
+          <button class="sidebar-label load-btn theme-toggle" on:click={toggleThemeMode}>Theme: {activeThemeName}</button>
+          <button
+            class="style-dropdown-toggle"
+            type="button"
+            aria-expanded={styleSettingsOpen}
+            on:click={() => styleSettingsOpen = !styleSettingsOpen}
+          >
+            Styles
+          </button>
+          {#if styleSettingsOpen}
+            <div class="style-list">
+              <div class="style-row style-row-plain">
+                <span class="style-swatch" style={`background: ${styleColor(0)}`}></span>
+                <span class="style-name">0. plain</span>
+              </div>
+              {#each orderedHighlightStyles as style, index}
+                <div class="style-row">
+                  <span class="style-swatch" style={`background: ${style.color}`}></span>
+                  <span class="style-name">{index + 1}. {style.name}</span>
+                  <div class="style-actions">
+                    <button
+                      class="style-move-btn"
+                      type="button"
+                      on:click={() => moveStyleOrder(index, -1)}
+                      disabled={index === 0}
+                      aria-label={`Move ${style.name} up`}
+                      title={`Move ${style.name} up`}
+                    >
+                      ↑
+                    </button>
+                    <button
+                      class="style-move-btn"
+                      type="button"
+                      on:click={() => moveStyleOrder(index, 1)}
+                      disabled={index === orderedHighlightStyles.length - 1}
+                      aria-label={`Move ${style.name} down`}
+                      title={`Move ${style.name} down`}
+                    >
+                      ↓
+                    </button>
+                  </div>
+                </div>
+              {/each}
+            </div>
+            <button class="style-reset-btn" type="button" on:click={resetStyleOrder}>Reset order</button>
+          {/if}
+        </div>
       </div>
 
       <div class="sidebar-section">
@@ -3002,6 +3336,18 @@ ${body}
         {/if}
         <div class="summary-header-actions">
           {#if !summaryCollapsed}
+            {#if summaryGroupIds.length > 0}
+              <button
+                class="summary-icon-btn"
+                type="button"
+                title={summaryAllGroupsExpanded ? "Collapse all groups" : "Expand all groups"}
+                aria-label={summaryAllGroupsExpanded ? "Collapse all groups" : "Expand all groups"}
+                aria-pressed={summaryAllGroupsExpanded}
+                on:click={toggleAllSummaryCategories}
+              >
+                {summaryAllGroupsExpanded ? "−" : "+"}
+              </button>
+            {/if}
             <button
               class="summary-icon-btn"
               type="button"
@@ -3047,9 +3393,9 @@ ${body}
                       {#if editingSummaryTitleKey === section.item.id}
                         <input
                           class="summary-title-input"
+                          bind:this={summaryTitleInput}
                           bind:value={summaryTitleDraft}
                           aria-label="Annotation title"
-                          autofocus
                           on:click={event => event.stopPropagation()}
                           on:focus={event => (event.target as HTMLInputElement).select()}
                           on:blur={() => saveSummaryTitle([section.item])}
@@ -3109,9 +3455,9 @@ ${body}
                 {#if section.itemType === "annotation" && editingSummaryTitleKey === section.id}
                   <input
                     class="summary-title-input summary-group-title-input"
+                    bind:this={summaryTitleInput}
                     bind:value={summaryTitleDraft}
                     aria-label="Annotation group title"
-                    autofocus
                     on:click={event => event.stopPropagation()}
                     on:focus={event => (event.target as HTMLInputElement).select()}
                     on:blur={() => saveSummaryTitle(summaryAnnotationItems(section.items))}
@@ -3148,9 +3494,9 @@ ${body}
                           {#if editingSummaryTitleKey === item.id}
                             <input
                               class="summary-title-input"
+                              bind:this={summaryTitleInput}
                               bind:value={summaryTitleDraft}
                               aria-label="Annotation title"
-                              autofocus
                               on:click={event => event.stopPropagation()}
                               on:focus={event => (event.target as HTMLInputElement).select()}
                               on:blur={() => saveSummaryTitle([item])}
@@ -3205,7 +3551,7 @@ ${body}
   {#if !summaryFullscreen}
     <div class="statusbar">
       <div class="status-left">
-        <span class="segment mode" style="color: {editorMode === 'insert' ? gruvbox.green : gruvbox.orange}">{editorModeLabel}</span>
+        <span class="segment mode" style="color: {editorMode === 'insert' ? activeTheme.green : activeTheme.orange}">{editorModeLabel}</span>
         <span class="segment">{selectionInfo}</span>
         <span class="segment">{wordCountInfo}</span>
         <span class="segment style" style="color: {currentStyleColor}">{styleLabel}</span>
@@ -3215,11 +3561,11 @@ ${body}
           <div class="audio-widget">
             <span class="audio-name">{audioFileName}</span>
             <span class="audio-sep">|</span>
-            <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(-10)} title="Back 10 seconds" aria-label="Back 10 seconds">&lt;&lt;</button>
-            <button class="audio-glyph play" type="button" on:click={toggleAudioPlayback} title="Play / pause" aria-label="Play / pause">{audioPlaying ? "⏸" : "▶"}</button>
-            <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(10)} title="Forward 10 seconds" aria-label="Forward 10 seconds">&gt;&gt;</button>
+            <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(-10)} title="Back 10 seconds (Alt+A/H)" aria-label="Back 10 seconds">&lt;&lt;</button>
+            <button class="audio-glyph play" type="button" on:click={toggleAudioPlayback} title="Play / pause (Alt+S/J)" aria-label="Play / pause">{audioPlaying ? "⏸" : "▶"}</button>
+            <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(10)} title="Forward 10 seconds (Alt+D/L)" aria-label="Forward 10 seconds">&gt;&gt;</button>
             <span class="audio-sep">|</span>
-            <button class="audio-rate-text" type="button" on:click={cycleAudioRate} aria-label="Playback speed" title="Playback speed">{audioRateText}</button>
+            <button class="audio-rate-text" type="button" on:click={cycleAudioRate} aria-label="Playback speed" title="Playback speed (Alt+W/K or Alt+R)">{audioRateText}</button>
             <span class="audio-sep">|</span>
             <span class="audio-time">{formatAudioTime(audioCurrentTime)} / {formatAudioTime(audioDuration)}</span>
           </div>
@@ -3756,7 +4102,14 @@ ${body}
     border-bottom: 1px solid var(--internal-border);
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
+  }
+
+  .style-controls {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
   }
 
   .sidebar-label {
@@ -3841,7 +4194,31 @@ ${body}
   }
 
   .load-btn:hover {
-    color: var(--yellow);
+    color: var(--orange);
+  }
+
+  .style-dropdown-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    padding: 0;
+    background: none;
+    border: none;
+    color: var(--fg-muted);
+    font: inherit;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .style-dropdown-toggle:hover,
+  .style-dropdown-toggle:focus-visible {
+    color: var(--orange);
+    outline: none;
   }
 
   .file-actions {
@@ -3870,7 +4247,7 @@ ${body}
     align-items: baseline;
   }
 
-  .kb-key { color: var(--yellow); white-space: nowrap; font-size: 11px; }
+  .kb-key { color: var(--orange); white-space: nowrap; font-size: 11px; font-weight: 700; }
   .kb-desc { color: var(--fg-muted); font-size: 11px; }
 
   .toolbar-btn {
@@ -3897,7 +4274,7 @@ ${body}
     color: var(--fg-muted);
     border-color: var(--border);
   }
-  .help-btn:hover { color: var(--yellow); border-color: var(--yellow); }
+  .help-btn:hover { color: var(--orange); border-color: var(--orange); }
 
   .help-overlay {
     position: fixed;
@@ -3951,7 +4328,105 @@ ${body}
     border-radius: 3px;
     font-family: inherit;
   }
-  .help-close:hover { color: var(--fg); background: var(--bg-alt); }
+  .help-close:hover { color: var(--orange); background: var(--bg-alt); }
+
+  .style-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    z-index: 20;
+    margin-top: 0;
+    padding: 6px 8px 8px;
+    background: var(--bg-hard);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
+  }
+
+  .style-row {
+    display: grid;
+    grid-template-columns: 10px minmax(0, 1fr) auto;
+    gap: 6px;
+    align-items: center;
+    padding: 1px 0;
+  }
+
+  .style-row-plain {
+    grid-template-columns: 10px minmax(0, 1fr);
+  }
+
+  .style-swatch {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    border: 1px solid rgba(0, 0, 0, 0.2);
+  }
+
+  .style-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--fg);
+    font-size: 10px;
+  }
+
+  .style-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+  }
+
+  .style-move-btn {
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: 1px solid var(--border);
+    background: var(--bg-alt);
+    color: var(--fg-muted);
+    border-radius: 3px;
+    cursor: pointer;
+    font: inherit;
+    font-size: 10px;
+    line-height: 1;
+  }
+
+  .style-move-btn:hover,
+  .style-move-btn:focus-visible {
+    color: var(--orange);
+    border-color: var(--orange);
+    outline: none;
+  }
+
+  .style-move-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .style-reset-btn {
+    margin-top: 4px;
+    padding: 0;
+    background: none;
+    border: none;
+    color: var(--fg-muted);
+    font: inherit;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+    cursor: pointer;
+    width: fit-content;
+  }
+
+  .style-reset-btn:hover,
+  .style-reset-btn:focus-visible {
+    color: var(--orange);
+    outline: none;
+  }
 
   .pdf-modal-overlay {
     position: fixed;
@@ -3998,7 +4473,7 @@ ${body}
   .pdf-modal-title {
     font-size: 13px;
     font-weight: 600;
-    color: var(--fg);
+    color: var(--fg-muted);
   }
 
   .pdf-modal-file {
@@ -4077,7 +4552,7 @@ ${body}
     font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    color: var(--fg-muted);
+    color: var(--fg);
     font-weight: 600;
     margin-top: 12px;
     margin-bottom: 4px;
@@ -4146,6 +4621,27 @@ ${body}
   :global(.editor .cm-editor) { width: 100%; height: 100%; }
   :global(.cm-editor.cm-focused) { outline: none; }
   :global(.cm-scroller) { position: relative; }
+  :global(.editor .cm-content),
+  :global(.editor .cm-line) {
+    caret-color: transparent !important;
+  }
+  :global(.editor .cm-cursorLayer),
+  :global(.editor .cm-cursor),
+  :global(.editor .cm-cursor-primary),
+  :global(.editor .cm-cursor-secondary),
+  :global(.editor .cm-secondaryCursor),
+  :global(.editor .cm-dropCursor) {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    animation: none !important;
+    border-left: 0 !important;
+  }
+  :global(.editor .cm-content input),
+  :global(.editor .cm-content textarea),
+  :global(.editor .cm-content [contenteditable="true"]) {
+    caret-color: currentColor !important;
+  }
   :global(.cm-line:not(.cm-srt-timestamp-line)) {
     padding-bottom: var(--paragraph-spacing, 0em);
   }
@@ -4162,7 +4658,7 @@ ${body}
     position: absolute;
     z-index: 2;
     width: 0;
-    border-left: 1px solid var(--orange);
+    border-left: 1px solid var(--active-style-color);
     opacity: 0.45;
     pointer-events: none;
   }
@@ -4226,7 +4722,7 @@ ${body}
   }
   .segment:last-child { border-right: none; }
   .status-right .segment:first-child { border-left: 1px solid var(--internal-border); }
-  .syntax { color: var(--yellow); }
+  .syntax { color: var(--orange); }
   .mode { color: var(--orange); font-weight: 600; }
   .audio-widget {
     display: inline-flex;
@@ -4243,8 +4739,8 @@ ${body}
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: var(--yellow);
-    font-weight: 500;
+    color: var(--orange);
+    font-weight: 600;
     font-size: 11px;
   }
 
@@ -4273,7 +4769,7 @@ ${body}
 
   .audio-rate-text:hover,
   .audio-rate-text:focus-visible {
-    color: var(--yellow);
+    color: var(--orange);
     outline: none;
   }
 
