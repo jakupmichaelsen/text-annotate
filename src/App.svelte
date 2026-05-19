@@ -62,14 +62,30 @@
   let audioPlaying = false;
   let audioLoaded = false;
   let audioRateIndex = 0;
+  let audioPlaybackRate = 1;
   const audioRates = [1, 1.25, 1.5, 1.75, 2];
+  const mediaSeekSeconds = 5;
   const audioDbName = "textAnnotate-state";
   const audioStoreName = "audio";
   const mediaExtensions = [".mp3", ".wav", ".m4a", ".ogg", ".oga", ".webm", ".aac", ".flac", ".mp4", ".mov", ".mkv"];
   let loadedFileType = "Markdown";
+  type TtsSegment = { text: string; from: number; to: number };
+  let ttsAvailable = false;
+  let ttsSpeaking = false;
+  let ttsPaused = false;
+  let ttsSegments: TtsSegment[] = [];
+  let ttsIndex = 0;
+  let ttsRunId = 0;
+  let ttsStatus = "";
+  let ttsSpeakTimer: ReturnType<typeof setTimeout> | null = null;
+  let ttsVoices: SpeechSynthesisVoice[] = [];
+  let ttsUtterance: SpeechSynthesisUtterance | null = null;
   $: pdfFrameSrc = pdfPreviewUrl ? `${pdfPreviewUrl}#zoom=75` : "";
+  $: audioPlaybackRate = audioElement?.playbackRate ?? audioRates[audioRateIndex];
   $: if (audioElement) audioElement.playbackRate = audioRates[audioRateIndex];
-  $: audioRateText = audioRateLabel();
+  $: audioRateText = formatPlaybackRate(audioPlaybackRate);
+  $: showTtsWidget = ttsAvailable && !audioUrl && loadedFileType !== "SRT";
+  $: ttsProgressText = ttsStatus || (ttsSegments.length ? `${Math.min(ttsIndex + 1, ttsSegments.length)}/${ttsSegments.length}` : "ready");
 
   let currentStyle = 0;
   let themeMode = loadThemeMode();
@@ -92,8 +108,13 @@
     | { kind: "group"; id: string; label: string; count: number; color: string; itemType: SummaryItem["type"]; items: SummaryItem[] };
   let summaryItems: SummaryItem[] = [];
   let summarySections: SummarySection[] = [];
+  let summaryCategoryOrder: string[] = [];
   let expandedSummaryCategories: Record<string, boolean> = {};
-  $: summaryGroupIds = summarySections.filter(section => section.kind === "group").map(section => section.id);
+  $: orderedSummarySections = orderSummarySections(summarySections, summaryCategoryOrder);
+  $: summaryGroupIds = orderedSummarySections.filter(section => section.kind === "group").map(section => section.id);
+  $: summaryAnnotationGroupIds = orderedSummarySections
+    .filter(section => section.kind === "group" && section.itemType === "annotation")
+    .map(section => section.id);
   $: summaryAllGroupsExpanded = summaryGroupIds.length > 0 && summaryGroupIds.every(id => expandedSummaryCategories[id]);
   let summaryCollapsed = true;
   let summaryFullscreen = false;
@@ -103,6 +124,10 @@
   let summaryTitleInput: HTMLInputElement | null = null;
   let resizingSummarySidebar = false;
   let finishSummaryResize: (() => void) | null = null;
+  type ReorderDragState = { kind: "style" | "summary"; id: string } | null;
+  type ReorderDropTarget = { kind: "style" | "summary"; id: string; after: boolean } | null;
+  let reorderDragState: ReorderDragState = null;
+  let reorderDropTarget: ReorderDropTarget = null;
   let styleSettingsOpen = false;
   const summarySidebarMinWidth = 240;
   const summarySidebarMaxWidth = 720;
@@ -125,7 +150,7 @@
       items: [
         ["h j k l", "left / down / up / right"],
         ["← ↓ ↑ →", "left / down / up / right"],
-        ["Tab", "center current line"],
+        ["Tab", "edit note / cue playback"],
         ["w s", "line up / down"],
         ["a d", "word left / right"],
         ["Ctrl+h/l", "word left / right"],
@@ -171,10 +196,12 @@
       items: [
         ["F2", "toggle Annotate / Edit"],
         ["Esc", "return to Annotate mode"],
-        ["Alt+Space", "play / pause audio"],
-        ["Alt+←/→", "seek audio back / forward"],
-        ["Alt+r", "cycle playback speed"],
-        ["Alt+A/H, S/J, D/L, W/K", "back, play, forward, speed"],
+        ["Alt+Space", "play / pause media or TTS"],
+        ["Alt+←/→", "seek media / step TTS"],
+        ["Alt+r", "cycle playback / TTS speed"],
+        ["Alt+n/p", "next / previous annotation"],
+        ["Alt+A/H, D/L", "back / forward"],
+        ["Alt+W/K, S/J", "scroll up / down"],
         ["F1 / ?", "toggle this help"]
       ]
     }
@@ -233,6 +260,27 @@
     }
   }
 
+  async function clearPersistedAudioFile() {
+    try {
+      const db = await openAudioDb();
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(audioStoreName, "readwrite");
+        tx.objectStore(audioStoreName).delete("current");
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+      db.close();
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
+  function clearAudioSession() {
+    resetTtsState();
+    clearAudioTarget();
+    void clearPersistedAudioFile();
+  }
+
   async function restoreAudioFile() {
     try {
       const db = await openAudioDb();
@@ -250,6 +298,7 @@
   }
 
   async function loadAudioFile(file: File) {
+    resetTtsState();
     clearAudioTarget();
     audioUrl = URL.createObjectURL(file);
     audioFileName = file.name;
@@ -270,13 +319,16 @@
 
   function cycleAudioRate() {
     audioRateIndex = (audioRateIndex + 1) % audioRates.length;
+    audioPlaybackRate = audioRates[audioRateIndex];
     if (!audioElement) return;
     audioElement.playbackRate = audioRates[audioRateIndex];
+    audioPlaybackRate = audioElement.playbackRate;
   }
 
-  function audioRateLabel() {
-    const rate = audioRates[audioRateIndex];
-    return rate === 1 ? "x1" : `x${rate}`;
+  function formatPlaybackRate(rate: number) {
+    if (!Number.isFinite(rate) || rate <= 0) return "1x";
+    const formatted = rate.toFixed(2).replace(/\.?0+$/, "");
+    return `${formatted}x`;
   }
 
   function playAudioIfNeeded() {
@@ -306,6 +358,233 @@
   function jumpAudioToAndPlay(seconds: number) {
     jumpAudioTo(seconds);
     playAudioIfNeeded();
+  }
+
+  function scrollEditorViewport(direction: -1 | 1) {
+    if (!view) return;
+    const scrollAmount = Math.max(24, Math.round(fontSize * lineHeight * 4));
+    view.scrollDOM.scrollBy({ top: direction * scrollAmount, behavior: "auto" });
+  }
+
+  function speechSynth() {
+    return typeof window === "undefined" ? null : window.speechSynthesis;
+  }
+
+  function refreshTtsVoices() {
+    const voices = speechSynth()?.getVoices() ?? [];
+    ttsVoices = voices;
+    if (voices.length && ttsStatus === "no voice") ttsStatus = "";
+    return voices;
+  }
+
+  function preferredTtsVoice(voices: SpeechSynthesisVoice[]) {
+    const isEnglish = (voice: SpeechSynthesisVoice) => voice.lang.toLowerCase().startsWith("en");
+    return voices.find(voice => voice.localService && isEnglish(voice)) ??
+      voices.find(isEnglish) ??
+      voices.find(voice => voice.default) ??
+      voices.find(voice => voice.localService) ??
+      null;
+  }
+
+  function resetTtsState() {
+    ttsRunId += 1;
+    if (ttsSpeakTimer) {
+      clearTimeout(ttsSpeakTimer);
+      ttsSpeakTimer = null;
+    }
+    speechSynth()?.cancel();
+    ttsUtterance = null;
+    ttsSpeaking = false;
+    ttsPaused = false;
+    ttsSegments = [];
+    ttsIndex = 0;
+    ttsStatus = "";
+  }
+
+  function cleanTtsLine(text: string) {
+    return summaryVisibleText(text
+      .replace(/^\s*#{1,6}\s+/, "")
+      .replace(/^\s*[-*+]\s+/, "")
+      .replace(/^\s*\d+[.)]\s+/, ""))
+      .trim();
+  }
+
+  function splitTtsText(text: string) {
+    const pieces = text.match(/[^.!?]+[.!?]*/g) ?? [text];
+    const chunks: string[] = [];
+    let current = "";
+    for (const piece of pieces.map(part => part.trim()).filter(Boolean)) {
+      if (current && `${current} ${piece}`.length > 240) {
+        chunks.push(current);
+        current = piece;
+      } else {
+        current = current ? `${current} ${piece}` : piece;
+      }
+    }
+    if (current) chunks.push(current);
+    return chunks.length ? chunks : [text];
+  }
+
+  function buildTtsSegments() {
+    if (!view) return { segments: [] as TtsSegment[], startIndex: 0 };
+    const state = view.state;
+    const selection = state.selection.main;
+    const doc = state.doc;
+    const segments: TtsSegment[] = [];
+
+    const addLineSegments = (from: number, to: number, lineText: string) => {
+      const cleaned = cleanTtsLine(lineText);
+      if (!cleaned) return;
+      for (const chunk of splitTtsText(cleaned)) {
+        segments.push({ text: chunk, from, to });
+      }
+    };
+
+    if (!selection.empty) {
+      addLineSegments(selection.from, selection.to, state.sliceDoc(selection.from, selection.to));
+      return { segments, startIndex: 0 };
+    }
+
+    for (let lineNumber = 1; lineNumber <= doc.lines; lineNumber += 1) {
+      const lineInfo = doc.line(lineNumber);
+      if (isSrtTimestampLine(lineInfo.text)) continue;
+      addLineSegments(lineInfo.from, lineInfo.to, lineInfo.text);
+    }
+
+    const head = selection.head;
+    const foundIndex = segments.findIndex(segment => segment.to >= head);
+    const startIndex = foundIndex < 0 ? Math.max(0, segments.length - 1) : foundIndex;
+    return { segments, startIndex };
+  }
+
+  function prepareTtsSegments() {
+    const result = buildTtsSegments();
+    ttsSegments = result.segments;
+    ttsIndex = result.startIndex;
+    ttsStatus = ttsSegments.length ? "" : "no text";
+    return ttsSegments.length > 0;
+  }
+
+  function speakTtsSegment(index: number, useBrowserDefaultVoice = false) {
+    const synth = speechSynth();
+    const segment = ttsSegments[index];
+    const Utterance = typeof window === "undefined" ? null : window.SpeechSynthesisUtterance;
+    if (!synth || !Utterance) {
+      ttsStatus = "unavailable";
+      return;
+    }
+    if (!segment) return;
+
+    ttsRunId += 1;
+    const runId = ttsRunId;
+    if (ttsSpeakTimer) {
+      clearTimeout(ttsSpeakTimer);
+      ttsSpeakTimer = null;
+    }
+    const replacingSpeech = synth.speaking || synth.pending || !!ttsUtterance;
+    if (replacingSpeech) synth.cancel();
+
+    const voices = refreshTtsVoices();
+    if (!voices.length) {
+      ttsUtterance = null;
+      ttsSpeaking = false;
+      ttsPaused = false;
+      ttsStatus = "no voice";
+      return;
+    }
+
+    const utterance = new Utterance(segment.text);
+    const voice = useBrowserDefaultVoice ? null : preferredTtsVoice(voices);
+    if (voice) utterance.voice = voice;
+    if (voice) utterance.lang = voice.lang;
+    else utterance.lang = "en-US";
+    utterance.rate = audioRates[audioRateIndex];
+    utterance.onstart = () => {
+      if (runId !== ttsRunId) return;
+      ttsStatus = "";
+      ttsSpeaking = true;
+      ttsPaused = false;
+    };
+    utterance.onend = () => {
+      if (runId !== ttsRunId) return;
+      if (ttsIndex < ttsSegments.length - 1) {
+        ttsIndex += 1;
+        speakTtsSegment(ttsIndex);
+        return;
+      }
+      ttsUtterance = null;
+      ttsSpeaking = false;
+      ttsPaused = false;
+      ttsStatus = "";
+    };
+    utterance.onerror = event => {
+      if (runId !== ttsRunId) return;
+      ttsUtterance = null;
+      ttsSpeaking = false;
+      ttsPaused = false;
+      if (!useBrowserDefaultVoice && utterance.voice) {
+        ttsStatus = "retrying";
+        speakTtsSegment(index, true);
+        return;
+      }
+      ttsStatus = event.error === "interrupted" || event.error === "canceled" ? "" : event.error;
+      if (ttsStatus) console.warn("TTS failed", event.error);
+    };
+
+    ttsUtterance = utterance;
+    ttsIndex = index;
+    ttsSpeaking = true;
+    ttsPaused = false;
+    ttsStatus = voices.length ? "queued" : "voice...";
+    const startSpeaking = () => {
+      if (runId !== ttsRunId) return;
+      ttsSpeakTimer = null;
+      const currentSynth = speechSynth();
+      if (!currentSynth) {
+        ttsStatus = "unavailable";
+        ttsSpeaking = false;
+        return;
+      }
+      currentSynth.resume();
+      currentSynth.speak(utterance);
+      setTimeout(() => {
+        if (runId !== ttsRunId || ttsUtterance !== utterance || currentSynth.speaking || currentSynth.pending) return;
+        ttsSpeaking = false;
+        ttsPaused = false;
+        ttsStatus = "no voice";
+      }, 1200);
+    };
+
+    if (replacingSpeech) ttsSpeakTimer = setTimeout(startSpeaking, 80);
+    else startSpeaking();
+  }
+
+  function toggleTtsPlayback() {
+    if (!showTtsWidget) return;
+    const synth = speechSynth();
+    if (!synth) return;
+
+    if (ttsSpeaking && !ttsPaused) {
+      synth.pause();
+      ttsPaused = true;
+      return;
+    }
+    if (ttsSpeaking && ttsPaused) {
+      synth.resume();
+      ttsPaused = false;
+      return;
+    }
+    if (!prepareTtsSegments()) return;
+    speakTtsSegment(ttsIndex);
+  }
+
+  function stepTts(delta: number) {
+    if (!showTtsWidget) return;
+    if ((!ttsSpeaking && !ttsPaused) || !ttsSegments.length) {
+      if (!prepareTtsSegments()) return;
+    }
+    const nextIndex = Math.min(Math.max(ttsIndex + delta, 0), ttsSegments.length - 1);
+    speakTtsSegment(nextIndex);
   }
 
   function isTextEntryTarget(target: EventTarget | null) {
@@ -338,12 +617,30 @@
   }
 
   function isPlaybackShortcut(event: KeyboardEvent) {
-    return event.altKey && !event.ctrlKey && !event.metaKey && "wasdhjkl".includes(event.key.toLowerCase());
+    return event.altKey && !event.ctrlKey && !event.metaKey && "ahdl".includes(event.key.toLowerCase());
+  }
+
+  function isScrollShortcut(event: KeyboardEvent) {
+    return event.altKey && !event.ctrlKey && !event.metaKey && "wsjk".includes(event.key.toLowerCase());
+  }
+
+  function isAnnotationJumpShortcut(event: KeyboardEvent) {
+    return event.altKey && !event.ctrlKey && !event.metaKey && "np".includes(event.key.toLowerCase());
+  }
+
+  function isHelpCloseShortcut(event: KeyboardEvent) {
+    return showHelp && !event.ctrlKey && !event.metaKey && !event.altKey && (event.key === "Escape" || event.key === "?");
+  }
+
+  function closeHelpFromShortcut() {
+    if (!showHelp) return false;
+    showHelp = false;
+    return true;
   }
 
   function isAppShortcutCandidate(event: KeyboardEvent) {
     if (event.metaKey) return false;
-    if (isModeShortcut(event) || isAudioShortcut(event) || isAudioRateShortcut(event) || isPlaybackShortcut(event)) return true;
+    if (isModeShortcut(event) || isAudioShortcut(event) || isAudioRateShortcut(event) || isPlaybackShortcut(event) || isScrollShortcut(event) || isAnnotationJumpShortcut(event)) return true;
     if (event.ctrlKey && !event.altKey && (event.key === "z" || event.key === "y" || event.key === "Z")) return true;
     if (editorMode !== "normal" || event.altKey) return false;
 
@@ -372,35 +669,78 @@
 
   function handleAudioKeydown(event: KeyboardEvent) {
     if (event.defaultPrevented) return;
-    if (!isAudioShortcut(event) && !isPlaybackShortcut(event)) return;
+    if (!isAudioShortcut(event) && !isPlaybackShortcut(event) && !isScrollShortcut(event) && !isAnnotationJumpShortcut(event)) return;
     if (isTextEntryTarget(event.target)) return;
 
     event.preventDefault();
     event.stopPropagation();
 
-    if (!audioElement || !audioLoaded) return;
     const key = event.key.toLowerCase();
+    if (key === "n") {
+      jumpToAdjacentAnnotation(1);
+      return;
+    }
+    if (key === "p") {
+      jumpToAdjacentAnnotation(-1);
+      return;
+    }
+    if (key === "w" || key === "k") {
+      scrollEditorViewport(-1);
+      return;
+    }
+    if (key === "s" || key === "j") {
+      scrollEditorViewport(1);
+      return;
+    }
+    if (!audioElement || !audioLoaded) {
+      if (!showTtsWidget) return;
+      if (key === "a" || key === "h" || event.key === "ArrowLeft" || event.key === "Left") {
+        stepTts(-1);
+        return;
+      }
+      if (key === "d" || key === "l" || event.key === "ArrowRight" || event.key === "Right") {
+        stepTts(1);
+        return;
+      }
+      if (event.key === " ") {
+        toggleTtsPlayback();
+        return;
+      }
+      if (key === "r") {
+        cycleAudioRate();
+      }
+      return;
+    }
+
     if (key === "a" || key === "h" || event.key === "ArrowLeft" || event.key === "Left") {
-      seekAudio(-10);
+      seekAudio(-mediaSeekSeconds);
       return;
     }
     if (key === "d" || key === "l" || event.key === "ArrowRight" || event.key === "Right") {
-      seekAudio(10);
+      seekAudio(mediaSeekSeconds);
       return;
     }
-    if (key === "s" || key === "j" || event.key === " ") {
+    if (event.key === " ") {
       toggleAudioPlayback();
       return;
     }
-    if (key === "w" || key === "k" || key === "r") {
+    if (key === "r") {
       cycleAudioRate();
       return;
     }
-    seekAudio(event.key === "ArrowLeft" || event.key === "Left" ? -10 : 10);
+    seekAudio(event.key === "ArrowLeft" || event.key === "Left" ? -mediaSeekSeconds : mediaSeekSeconds);
   }
 
   function handleWindowKeydown(event: KeyboardEvent) {
-    if (event.defaultPrevented || isEditorEventTarget(event.target) || shouldDeferWindowShortcut(event)) return;
+    if (event.defaultPrevented) return;
+    if (isHelpCloseShortcut(event)) {
+      closeHelpFromShortcut();
+      event.preventDefault();
+      event.stopPropagation();
+      requestAnimationFrame(() => view?.focus());
+      return;
+    }
+    if (isEditorEventTarget(event.target) || shouldDeferWindowShortcut(event)) return;
     handleAudioKeydown(event);
     if (event.defaultPrevented || !view || !isAppShortcutCandidate(event)) return;
     if (!runScopeHandlers(view, event, "editor")) return;
@@ -423,6 +763,7 @@
 
   function replaceDocument(text: string, preserveLineBreaks = false) {
     if (!view) return;
+    resetTtsState();
     const insert = preserveLineBreaks ? text.replace(/\r\n?/g, "\n").trim() : sentenceLineBreaks(text);
     const initialCursor = firstVisibleDocumentPosition(insert);
     view.dispatch({
@@ -469,6 +810,7 @@
     const audioFile = files.find(isMediaFile);
     const srtFile = files.find(file => file.name.toLowerCase().endsWith(".srt"));
     if (audioFile) await loadAudioFile(audioFile);
+    else if (!srtFile) clearAudioSession();
     if (srtFile) {
       loadedFileType = "SRT";
       replaceDocument(formatSrtTranscript(await srtFile.text()), true);
@@ -651,8 +993,171 @@
     if (fallbackName) downloadText(fallbackName, html, "text/html;charset=utf-8");
   }
 
+  async function exportSummaryHtml() {
+    if (!view) return;
+    const suggestedName = `${stripExtension(activeSaveName || "annotations")}-summary.html`;
+    const html = buildSummaryExportHtml();
+    const picker = (window as any).showSaveFilePicker;
+
+    if (picker) {
+      try {
+        const handle = await picker({
+          suggestedName,
+          types: [{ description: "HTML", accept: { "text/html": [".html"] } }]
+        });
+        await writeTextToHandle(handle, html);
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) console.error(error);
+      }
+      return;
+    }
+
+    const fallbackName = prompt("Export filename", suggestedName);
+    if (fallbackName) downloadText(fallbackName, html, "text/html;charset=utf-8");
+  }
+
   function stripExtension(name: string) {
     return name.replace(/\.[^.]+$/, "") || "annotations";
+  }
+
+  function buildSummaryExportHtml() {
+    const body = buildSummaryExportBody();
+    return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapeHtml(stripExtension(activeSaveName || "Annotated document"))} summary</title>
+  <style>
+    body {
+      margin: 0;
+      background: ${activeTheme.bg};
+      color: ${activeTheme.fg};
+      font-family: "Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      line-height: 1.45;
+      font-size: ${fontSize}px;
+    }
+    main {
+      box-sizing: border-box;
+      max-width: 960px;
+      min-height: 100vh;
+      margin: 0 auto;
+      padding: ${padTop}px ${padRight}px ${padBottom}px ${padLeft}px;
+    }
+    h1, h2 {
+      color: ${activeTheme.yellow};
+      line-height: 1.25;
+    }
+    h1 {
+      margin: 0 0 1rem;
+      font-size: 1.5rem;
+    }
+    h2 {
+      margin: 1.5rem 0 0.75rem;
+      font-size: 1.1rem;
+    }
+    p { margin: 0 0 0.75rem; }
+    .summary-export-source {
+      color: ${activeTheme.fgMuted};
+      margin-bottom: 1.25rem;
+    }
+    .summary-export-entry {
+      margin: 0 0 0.75rem;
+      padding: 0.75rem 0.9rem;
+      border: 1px solid ${activeTheme.border};
+      border-radius: 6px;
+      background: ${activeTheme.bgHard};
+    }
+    .summary-export-head {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem 0.5rem;
+      align-items: center;
+      margin-bottom: 0.55rem;
+    }
+    .summary-export-swatch {
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+      border: 1px solid rgba(0, 0, 0, 0.25);
+      flex: 0 0 auto;
+    }
+    .summary-export-title {
+      font-weight: 700;
+      color: ${activeTheme.fg};
+    }
+    .summary-export-meta {
+      color: ${activeTheme.fgMuted};
+      font-size: 0.85em;
+    }
+    .summary-export-context {
+      margin-bottom: 0.4rem;
+    }
+    .summary-export-context mark {
+      border-radius: 3px;
+      padding: 0 0.25rem;
+      border: 1px solid rgba(0, 0, 0, 0.18);
+    }
+    .summary-export-comment {
+      color: ${activeTheme.fgMuted};
+      font-size: 0.95em;
+      margin-bottom: 0;
+    }
+    blockquote {
+      margin: 0 0 0.75rem;
+      padding: 0.25rem 0.35rem 0.25rem 0.75rem;
+      border-left: 3px solid ${activeTheme.orange};
+      background: ${activeTheme.blockquoteBg};
+      color: ${activeTheme.blockquoteFg};
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+${body}
+  </main>
+</body>
+</html>
+`;
+  }
+
+  function buildSummaryExportBody() {
+    const blocks: string[] = [];
+    blocks.push(`    <h1>Summary</h1>`);
+    blocks.push(`    <p class="summary-export-source">Source: ${escapeHtml(activeSaveName || "annotations.md")}</p>`);
+
+    for (const section of orderedSummarySections) {
+      if (section.kind === "group") {
+        blocks.push(`    <h2>${escapeHtml(section.label)}</h2>`);
+        for (const item of section.items) {
+          blocks.push(buildSummaryExportEntry(item));
+        }
+        continue;
+      }
+
+      blocks.push(buildSummaryExportEntry(section.item));
+    }
+
+    return blocks.join("\n");
+  }
+
+  function buildSummaryExportEntry(item: SummaryItem) {
+    if (item.type === "blockquote") {
+      return `    <blockquote>${escapeHtml(item.text)}</blockquote>`;
+    }
+
+    const comment = item.comment.trim();
+    return `    <article class="summary-export-entry">
+      <div class="summary-export-head">
+        <span class="summary-export-swatch" style="background:${escapeHtml(item.color)}"></span>
+        <span class="summary-export-title">${escapeHtml(summaryAnnotationTitle(item))}</span>
+        <span class="summary-export-meta">Ln ${item.line}</span>
+        <span class="summary-export-meta">${escapeHtml(summaryTimestamp(item.timestamp))}</span>
+      </div>
+      <p class="summary-export-context"><span>${escapeHtml(item.context.before)}</span><mark style="background:${escapeHtml(item.color)};color:${escapeHtml(contrastColor(item.color))}">${escapeHtml(item.context.text)}</mark><span>${escapeHtml(item.context.after)}</span></p>
+      ${comment ? `<p class="summary-export-comment">${escapeHtml(comment)}</p>` : ""}
+    </article>`;
   }
 
   function downloadText(filename: string, text: string, type: string) {
@@ -989,13 +1494,57 @@
     }
   }
 
-  function moveStyleOrder(index: number, delta: number) {
-    const nextIndex = index + delta;
-    if (nextIndex < 0 || nextIndex >= styleOrder.length) return;
-    const next = [...styleOrder];
-    const [item] = next.splice(index, 1);
-    next.splice(nextIndex, 0, item);
-    persistStyleOrder(next);
+  function moveArrayItem<T>(items: T[], fromIndex: number, toIndex: number) {
+    if (fromIndex < 0 || fromIndex >= items.length) return items;
+    if (toIndex < 0 || toIndex > items.length) return items;
+    if (fromIndex === toIndex) return items;
+    const next = [...items];
+    const [item] = next.splice(fromIndex, 1);
+    next.splice(Math.max(0, Math.min(toIndex, next.length)), 0, item);
+    return next;
+  }
+
+  function moveStyleOrderById(id: string, targetId: string, after: boolean) {
+    const fromIndex = styleOrder.indexOf(id);
+    const targetIndex = styleOrder.indexOf(targetId);
+    if (fromIndex < 0 || targetIndex < 0) return;
+    const insertIndex = after ? targetIndex + 1 : targetIndex;
+    persistStyleOrder(moveArrayItem(styleOrder, fromIndex, insertIndex));
+  }
+
+  function setReorderDragState(kind: "style" | "summary", id: string, event: DragEvent) {
+    reorderDragState = { kind, id };
+    reorderDropTarget = null;
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", id);
+    }
+  }
+
+  function updateReorderDropTarget(kind: "style" | "summary", id: string, event: DragEvent) {
+    if (!reorderDragState || reorderDragState.kind !== kind || reorderDragState.id === id) return false;
+    event.preventDefault();
+    const currentTarget = event.currentTarget as HTMLElement | null;
+    if (!currentTarget) return false;
+    const rect = currentTarget.getBoundingClientRect();
+    const after = event.clientY > rect.top + rect.height / 2;
+    reorderDropTarget = { kind, id, after };
+    return true;
+  }
+
+  function finishReorderDrag() {
+    reorderDragState = null;
+    reorderDropTarget = null;
+  }
+
+  function commitStyleReorder(targetId: string, after: boolean) {
+    if (!reorderDragState || reorderDragState.kind !== "style") return;
+    moveStyleOrderById(reorderDragState.id, targetId, after);
+  }
+
+  function commitSummaryReorder(targetId: string, after: boolean) {
+    if (!reorderDragState || reorderDragState.kind !== "summary") return;
+    moveSummaryCategoryById(reorderDragState.id, targetId, after);
   }
 
   function resetStyleOrder() {
@@ -1588,6 +2137,7 @@ ${body}
     });
     summaryItems = sortedItems;
     summarySections = buildSummarySections(sortedItems);
+    summaryCategoryOrder = reconcileSummaryCategoryOrder(summarySections, summaryCategoryOrder);
   }
 
   function buildSummarySections(items: SummaryItem[]) {
@@ -1610,7 +2160,6 @@ ${body}
 
     return order.map((key): SummarySection => {
       const group = grouped.get(key)!;
-      if (group.items.length === 1) return { kind: "item", id: group.items[0].id, item: group.items[0] };
       return {
         kind: "group",
         id: key,
@@ -1623,11 +2172,59 @@ ${body}
     });
   }
 
+  function orderSummarySections(sections: SummarySection[], categoryOrder: string[]) {
+    const annotationGroups = sections.filter(section => section.kind === "group" && section.itemType === "annotation");
+    if (!annotationGroups.length) return sections;
+    if (!categoryOrder.length) return sections;
+
+    const groupLookup = new Map(annotationGroups.map(section => [section.id, section] as const));
+    const orderedGroups: SummarySection[] = [];
+    const seen = new Set<string>();
+
+    for (const id of categoryOrder) {
+      const section = groupLookup.get(id);
+      if (!section) continue;
+      orderedGroups.push(section);
+      seen.add(id);
+    }
+
+    for (const section of annotationGroups) {
+      if (!seen.has(section.id)) orderedGroups.push(section);
+    }
+
+    let groupIndex = 0;
+    return sections.map(section => {
+      if (section.kind !== "group" || section.itemType !== "annotation") return section;
+      return orderedGroups[groupIndex++] ?? section;
+    });
+  }
+
+  function reconcileSummaryCategoryOrder(sections: SummarySection[], currentOrder: string[]) {
+    const groupIds = sections
+      .filter(section => section.kind === "group" && section.itemType === "annotation")
+      .map(section => section.id);
+    if (!groupIds.length) return [];
+    const nextOrder = currentOrder.filter(id => groupIds.includes(id));
+    for (const id of groupIds) {
+      if (!nextOrder.includes(id)) nextOrder.push(id);
+    }
+    return nextOrder;
+  }
+
   function toggleSummaryCategory(id: string) {
     expandedSummaryCategories = {
       ...expandedSummaryCategories,
       [id]: !expandedSummaryCategories[id]
     };
+  }
+
+  function moveSummaryCategoryById(id: string, targetId: string, after: boolean) {
+    const currentOrder = summaryCategoryOrder.length ? summaryCategoryOrder : summaryAnnotationGroupIds.slice();
+    const fromIndex = currentOrder.indexOf(id);
+    const targetIndex = currentOrder.indexOf(targetId);
+    if (fromIndex < 0 || targetIndex < 0) return;
+    const insertIndex = after ? targetIndex + 1 : targetIndex;
+    summaryCategoryOrder = moveArrayItem(currentOrder, fromIndex, insertIndex);
   }
 
   function setAllSummaryCategories(expanded: boolean) {
@@ -1763,6 +2360,38 @@ ${body}
       effects: EditorView.scrollIntoView(item.from, { y: "center" })
     });
     view.focus();
+  }
+
+  function annotationJumpTargets() {
+    return summaryItems
+      .filter(isSummaryAnnotationItem)
+      .slice()
+      .sort((a, b) => a.from - b.from || a.to - b.to);
+  }
+
+  function jumpToAdjacentAnnotation(delta: -1 | 1) {
+    if (!view) return false;
+    const items = annotationJumpTargets();
+    if (!items.length) return false;
+
+    const head = view.state.selection.main.head;
+    let index = -1;
+
+    if (delta > 0) {
+      index = items.findIndex(item => item.from > head);
+      if (index < 0) index = 0;
+    } else {
+      for (let i = items.length - 1; i >= 0; i -= 1) {
+        if (items[i].to < head) {
+          index = i;
+          break;
+        }
+      }
+      if (index < 0) index = items.length - 1;
+    }
+
+    jumpToSummaryItem(items[index]);
+    return true;
   }
 
   function handleSummaryItemKeydown(event: KeyboardEvent, item: SummaryItem) {
@@ -2834,15 +3463,6 @@ ${body}
     v.dispatch({ effects: cursorScrollEffect(v) });
   }
 
-  function centerCurrentLine(v: EditorView) {
-    const head = v.state.selection.main.head;
-    v.dispatch({
-      selection: { anchor: head },
-      effects: EditorView.scrollIntoView(head, { y: "center", yMargin: 0 })
-    });
-    return true;
-  }
-
   function runWithCursorScroll(v: EditorView, command: (view: EditorView) => boolean) {
     const handled = command(v);
     if (handled) scrollCursorIntoView(v);
@@ -2970,12 +3590,12 @@ ${body}
       (v: EditorView) => editorMode === "normal" ? fn(v) : false;
 
     return Prec.high(keymap.of([
-      // Always: Escape returns to normal
-      { key: "Escape", run: v => { setMode("normal"); return true; } },
+      // Escape closes help first, otherwise returns to normal
+      { key: "Escape", run: () => { if (closeHelpFromShortcut()) return true; setMode("normal"); return true; } },
       // Always: F2 toggles edit mode
       { key: "F2", run: v => { setMode(editorMode === "insert" ? "normal" : "insert"); return true; } },
       { key: "F1", run: () => { showHelp = !showHelp; return true; } },
-      { key: "Tab", run: normal(v => centerCurrentLine(v)) },
+      { key: "Tab", run: normal(v => handleEnterInAnnotationMode(v)) },
 
       // Normal-mode only: Navigation
       { key: "ArrowLeft",        run: normal(v => { cursorCharLeft(v);  return true; }) },
@@ -3041,19 +3661,21 @@ ${body}
       { key: "Ctrl-z", run: v => undo(v) },
       { key: "Ctrl-y", run: v => redo(v) },
       { key: "Ctrl-Z", run: v => redo(v) },
-      { key: "?",      run: normal(() => { showHelp = !showHelp; return true; }) },
+      { key: "?",      run: () => { if (closeHelpFromShortcut()) return true; if (editorMode !== "normal") return false; showHelp = true; return true; } },
       { key: "Alt-r", run: () => { cycleAudioRate(); return true; } },
       { key: "Alt-Space",  run: () => { toggleAudioPlayback(); return true; } },
-      { key: "Alt-ArrowLeft",  run: () => { seekAudio(-10); return true; } },
-      { key: "Alt-ArrowRight", run: () => { seekAudio(10); return true; } },
-      { key: "Alt-a", run: () => { seekAudio(-10); return true; } },
-      { key: "Alt-h", run: () => { seekAudio(-10); return true; } },
-      { key: "Alt-d", run: () => { seekAudio(10); return true; } },
-      { key: "Alt-l", run: () => { seekAudio(10); return true; } },
-      { key: "Alt-s", run: () => { toggleAudioPlayback(); return true; } },
-      { key: "Alt-j", run: () => { toggleAudioPlayback(); return true; } },
-      { key: "Alt-w", run: () => { cycleAudioRate(); return true; } },
-      { key: "Alt-k", run: () => { cycleAudioRate(); return true; } },
+      { key: "Alt-ArrowLeft",  run: () => { seekAudio(-mediaSeekSeconds); return true; } },
+      { key: "Alt-ArrowRight", run: () => { seekAudio(mediaSeekSeconds); return true; } },
+      { key: "Alt-a", run: () => { seekAudio(-mediaSeekSeconds); return true; } },
+      { key: "Alt-h", run: () => { seekAudio(-mediaSeekSeconds); return true; } },
+      { key: "Alt-d", run: () => { seekAudio(mediaSeekSeconds); return true; } },
+      { key: "Alt-l", run: () => { seekAudio(mediaSeekSeconds); return true; } },
+      { key: "Alt-n", run: () => { jumpToAdjacentAnnotation(1); return true; } },
+      { key: "Alt-p", run: () => { jumpToAdjacentAnnotation(-1); return true; } },
+      { key: "Alt-w", run: () => { scrollEditorViewport(-1); return true; } },
+      { key: "Alt-k", run: () => { scrollEditorViewport(-1); return true; } },
+      { key: "Alt-s", run: () => { scrollEditorViewport(1); return true; } },
+      { key: "Alt-j", run: () => { scrollEditorViewport(1); return true; } },
       {
         any: (_view, event) =>
           editorMode === "normal" &&
@@ -3112,6 +3734,13 @@ ${body}
   onMount(() => {
     const onWindowKeydown = (event: KeyboardEvent) => handleWindowKeydown(event);
     window.addEventListener("keydown", onWindowKeydown);
+    ttsAvailable = "speechSynthesis" in window && "SpeechSynthesisUtterance" in window;
+    const synth = speechSynth();
+    const onVoicesChanged = () => refreshTtsVoices();
+    if (synth) {
+      refreshTtsVoices();
+      synth.addEventListener("voiceschanged", onVoicesChanged);
+    }
     const editorResizeObserver = new ResizeObserver(() => updateEditorViewportHeight());
     const initialDoc = localStorage.getItem("cm6-buffer") ?? starterDoc();
     const initialCursor = firstVisibleDocumentPosition(initialDoc);
@@ -3134,8 +3763,10 @@ ${body}
 
     return () => {
       window.removeEventListener("keydown", onWindowKeydown);
+      synth?.removeEventListener("voiceschanged", onVoicesChanged);
       finishSummaryResize?.();
       editorResizeObserver.disconnect();
+      resetTtsState();
       clearAudioTarget();
       view?.destroy();
     };
@@ -3190,7 +3821,7 @@ ${body}
         </div>
       </div>
 
-      <div class="sidebar-section">
+      <div class="sidebar-section style-section">
         <div class="style-controls">
           <label class="mode-switch" aria-label="Switch between Annotate and Edit mode">
             <span class:active={editorMode === "normal"}>Annotate</span>
@@ -3220,31 +3851,37 @@ ${body}
                 <span class="style-name">0. plain</span>
               </div>
               {#each orderedHighlightStyles as style, index}
-                <div class="style-row">
+                <div
+                  class="style-row reorderable"
+                  role="listitem"
+                  class:drag-over={reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name}
+                  class:drop-after={reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name && reorderDropTarget.after}
+                  class:drop-before={reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name && !reorderDropTarget.after}
+                  on:dragover={event => updateReorderDropTarget("style", style.name, event)}
+                  on:drop={event => {
+                    if (reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name) {
+                      event.preventDefault();
+                      commitStyleReorder(style.name, reorderDropTarget.after);
+                    }
+                    finishReorderDrag();
+                  }}
+                  on:dragend={finishReorderDrag}
+                >
                   <span class="style-swatch" style={`background: ${style.color}`}></span>
                   <span class="style-name">{index + 1}. {style.name}</span>
-                  <div class="style-actions">
-                    <button
-                      class="style-move-btn"
-                      type="button"
-                      on:click={() => moveStyleOrder(index, -1)}
-                      disabled={index === 0}
-                      aria-label={`Move ${style.name} up`}
-                      title={`Move ${style.name} up`}
-                    >
-                      ↑
-                    </button>
-                    <button
-                      class="style-move-btn"
-                      type="button"
-                      on:click={() => moveStyleOrder(index, 1)}
-                      disabled={index === orderedHighlightStyles.length - 1}
-                      aria-label={`Move ${style.name} down`}
-                      title={`Move ${style.name} down`}
-                    >
-                      ↓
-                    </button>
-                  </div>
+                  <button
+                    class="reorder-handle"
+                    type="button"
+                    draggable="true"
+                    aria-label={`Drag ${style.name} to reorder`}
+                    title={`Drag ${style.name} to reorder`}
+                    on:mousedown={event => event.stopPropagation()}
+                    on:click={event => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                    on:dragstart={event => setReorderDragState("style", style.name, event)}
+                  >↕</button>
                 </div>
               {/each}
             </div>
@@ -3368,6 +4005,9 @@ ${body}
           >
             {summaryCollapsed ? "‹" : "›"}
           </button>
+          {#if !summaryCollapsed}
+            <button class="summary-export-btn" type="button" on:click={exportSummaryHtml}>EXPORT</button>
+          {/if}
         </div>
       </div>
       {#if summaryCollapsed}
@@ -3377,7 +4017,7 @@ ${body}
         {#if summaryItems.length === 0}
           <div class="summary-empty">No annotations</div>
         {:else}
-          {#each summarySections as section (section.id)}
+          {#each orderedSummarySections as section (section.id)}
             {#if section.kind === "item"}
               <div
                 class="summary-item"
@@ -3440,11 +4080,24 @@ ${body}
             {:else}
               <div
                 class="summary-group-header"
+                class:reorderable={section.itemType === "annotation"}
                 class:open={expandedSummaryCategories[section.id]}
+                class:drag-over={section.itemType === "annotation" && reorderDropTarget?.kind === "summary" && reorderDropTarget.id === section.id}
+                class:drop-after={section.itemType === "annotation" && reorderDropTarget?.kind === "summary" && reorderDropTarget.id === section.id && reorderDropTarget.after}
+                class:drop-before={section.itemType === "annotation" && reorderDropTarget?.kind === "summary" && reorderDropTarget.id === section.id && !reorderDropTarget.after}
                 role="button"
                 tabindex="0"
                 aria-expanded={!!expandedSummaryCategories[section.id]}
                 on:click={() => toggleSummaryCategory(section.id)}
+                on:dragover={event => section.itemType === "annotation" && updateReorderDropTarget("summary", section.id, event)}
+                on:drop={event => {
+                  if (section.itemType === "annotation" && reorderDropTarget?.kind === "summary" && reorderDropTarget.id === section.id) {
+                    event.preventDefault();
+                    commitSummaryReorder(section.id, reorderDropTarget.after);
+                  }
+                  finishReorderDrag();
+                }}
+                on:dragend={event => section.itemType === "annotation" && finishReorderDrag()}
                 on:keydown={event => handleSummaryGroupKeydown(event, section)}
               >
                 {#if section.itemType === "blockquote"}
@@ -3474,6 +4127,21 @@ ${body}
                   </button>
                 {:else}
                   <span class="summary-group-label">{section.label}</span>
+                {/if}
+                {#if section.itemType === "annotation"}
+                  <button
+                    class="reorder-handle"
+                    type="button"
+                    draggable="true"
+                    aria-label={`Drag ${section.label} to reorder`}
+                    title={`Drag ${section.label} to reorder`}
+                    on:mousedown={event => event.stopPropagation()}
+                    on:click={event => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                    on:dragstart={event => setReorderDragState("summary", section.id, event)}
+                  >↕</button>
                 {/if}
                 <span class="summary-group-count">{section.count}</span>
                 <span class="summary-group-chevron">›</span>
@@ -3561,13 +4229,25 @@ ${body}
           <div class="audio-widget">
             <span class="audio-name">{audioFileName}</span>
             <span class="audio-sep">|</span>
-            <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(-10)} title="Back 10 seconds (Alt+A/H)" aria-label="Back 10 seconds">&lt;&lt;</button>
-            <button class="audio-glyph play" type="button" on:click={toggleAudioPlayback} title="Play / pause (Alt+S/J)" aria-label="Play / pause">{audioPlaying ? "⏸" : "▶"}</button>
-            <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(10)} title="Forward 10 seconds (Alt+D/L)" aria-label="Forward 10 seconds">&gt;&gt;</button>
+            <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(-mediaSeekSeconds)} title={`Back ${mediaSeekSeconds} seconds (Alt+A/H)`} aria-label={`Back ${mediaSeekSeconds} seconds`}>&lt;&lt;</button>
+            <button class="audio-glyph play" type="button" on:click={toggleAudioPlayback} title="Play / pause (Alt+Space)" aria-label="Play / pause">{audioPlaying ? "⏸" : "▶"}</button>
+            <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(mediaSeekSeconds)} title={`Forward ${mediaSeekSeconds} seconds (Alt+D/L)`} aria-label={`Forward ${mediaSeekSeconds} seconds`}>&gt;&gt;</button>
             <span class="audio-sep">|</span>
-            <button class="audio-rate-text" type="button" on:click={cycleAudioRate} aria-label="Playback speed" title="Playback speed (Alt+W/K or Alt+R)">{audioRateText}</button>
+            <button class="audio-rate-text" type="button" on:click={cycleAudioRate} aria-label="Playback speed" title="Playback speed (Alt+R)">{audioRateText}</button>
             <span class="audio-sep">|</span>
             <span class="audio-time">{formatAudioTime(audioCurrentTime)} / {formatAudioTime(audioDuration)}</span>
+          </div>
+        {:else if showTtsWidget}
+          <div class="audio-widget">
+            <span class="audio-name">TTS</span>
+            <span class="audio-sep">|</span>
+            <button class="audio-glyph" type="button" on:click={() => stepTts(-1)} title="Previous spoken chunk (Alt+A/H)" aria-label="Previous spoken chunk">&lt;&lt;</button>
+            <button class="audio-glyph play" type="button" on:click={toggleTtsPlayback} title="Play / pause TTS (Alt+Space)" aria-label="Play / pause TTS">{ttsSpeaking && !ttsPaused ? "⏸" : "▶"}</button>
+            <button class="audio-glyph" type="button" on:click={() => stepTts(1)} title="Next spoken chunk (Alt+D/L)" aria-label="Next spoken chunk">&gt;&gt;</button>
+            <span class="audio-sep">|</span>
+            <button class="audio-rate-text" type="button" on:click={cycleAudioRate} aria-label="TTS speed" title="TTS speed (Alt+R)">{audioRateText}</button>
+            <span class="audio-sep">|</span>
+            <span class="audio-time">{ttsProgressText}</span>
           </div>
         {/if}
       </div>
@@ -3587,6 +4267,10 @@ ${body}
       audioDuration = audioElement?.duration ?? 0;
       audioLoaded = true;
       if (audioElement) audioElement.playbackRate = audioRates[audioRateIndex];
+      audioPlaybackRate = audioElement?.playbackRate ?? audioRates[audioRateIndex];
+    }}
+    on:ratechange={() => {
+      audioPlaybackRate = audioElement?.playbackRate ?? audioPlaybackRate;
     }}
     on:timeupdate={() => {
       audioCurrentTime = audioElement?.currentTime ?? 0;
@@ -3779,7 +4463,7 @@ ${body}
   .summary-resize-handle:hover::after,
   .summary-resize-handle:focus-visible::after,
   .summary-sidebar.resizing .summary-resize-handle::after {
-    background: var(--yellow);
+    background: var(--orange);
   }
 
   .summary-resize-handle:focus-visible {
@@ -3823,13 +4507,35 @@ ${body}
   }
 
   .summary-icon-btn[aria-pressed="true"] {
-    color: var(--yellow);
+    color: var(--orange);
     border-color: var(--border);
   }
 
   .summary-icon-btn:hover,
   .summary-icon-btn:focus-visible {
-    color: var(--yellow);
+    color: var(--orange);
+    border-color: var(--border);
+    outline: none;
+  }
+
+  .summary-export-btn {
+    min-width: 0;
+    padding: 0 8px;
+    height: 24px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--fg-muted);
+    font: inherit;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+
+  .summary-export-btn:hover,
+  .summary-export-btn:focus-visible {
+    color: var(--orange);
     border-color: var(--border);
     outline: none;
   }
@@ -3899,7 +4605,7 @@ ${body}
     width: 100%;
     min-width: 0;
     display: grid;
-    grid-template-columns: 16px minmax(0, 1fr) auto auto;
+    grid-template-columns: 16px minmax(0, 1fr) auto auto auto;
     gap: 8px;
     align-items: center;
     padding: 9px 12px;
@@ -3912,10 +4618,22 @@ ${body}
     cursor: pointer;
   }
 
+  .summary-group-header.reorderable {
+    cursor: default;
+  }
+
   .summary-group-header:hover,
   .summary-group-header:focus-visible {
     background: var(--bg-alt);
     outline: none;
+  }
+
+  .summary-group-header.drop-before {
+    box-shadow: inset 0 2px 0 var(--orange);
+  }
+
+  .summary-group-header.drop-after {
+    box-shadow: inset 0 -2px 0 var(--orange);
   }
 
   .summary-group-label {
@@ -3950,7 +4668,7 @@ ${body}
 
   .summary-title-action:hover,
   .summary-title-action:focus-visible {
-    color: var(--yellow);
+    color: var(--orange);
     outline: none;
     text-decoration: underline;
   }
@@ -3971,7 +4689,7 @@ ${body}
   }
 
   .summary-title-input:focus {
-    border-color: var(--yellow);
+    border-color: var(--orange);
   }
 
   .summary-group-title-input {
@@ -4006,7 +4724,7 @@ ${body}
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    color: var(--yellow);
+    color: var(--orange);
     font-size: 18px;
     font-weight: 700;
     line-height: 1;
@@ -4087,7 +4805,7 @@ ${body}
   }
 
   .summary-comment-action.has-comment {
-    color: var(--yellow);
+    color: var(--orange);
   }
 
   .summary-comment-action:hover,
@@ -4110,6 +4828,10 @@ ${body}
     display: flex;
     flex-direction: column;
     gap: 4px;
+  }
+
+  .style-section {
+    padding-bottom: 8px;
   }
 
   .sidebar-label {
@@ -4359,6 +5081,18 @@ ${body}
     grid-template-columns: 10px minmax(0, 1fr);
   }
 
+  .style-row.reorderable {
+    grid-template-columns: 10px minmax(0, 1fr) 20px;
+  }
+
+  .style-row.reorderable.drop-before {
+    box-shadow: inset 0 2px 0 var(--orange);
+  }
+
+  .style-row.reorderable.drop-after {
+    box-shadow: inset 0 -2px 0 var(--orange);
+  }
+
   .style-swatch {
     width: 8px;
     height: 8px;
@@ -4375,36 +5109,45 @@ ${body}
     font-size: 10px;
   }
 
-  .style-actions {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-  }
-
-  .style-move-btn {
-    width: 18px;
-    height: 18px;
+  .reorder-handle {
+    width: 20px;
+    height: 20px;
     padding: 0;
     border: 1px solid var(--border);
     background: var(--bg-alt);
     color: var(--fg-muted);
     border-radius: 3px;
-    cursor: pointer;
+    cursor: grab;
     font: inherit;
-    font-size: 10px;
+    font-size: 11px;
     line-height: 1;
+    opacity: 0.45;
+    transition: opacity 120ms ease, color 120ms ease, border-color 120ms ease;
   }
 
-  .style-move-btn:hover,
-  .style-move-btn:focus-visible {
+  .style-row:hover .reorder-handle,
+  .style-row:focus-within .reorder-handle,
+  .summary-group-header:hover .reorder-handle,
+  .summary-group-header:focus-within .reorder-handle,
+  .reorder-handle:focus-visible,
+  .reorder-handle[draggable="true"]:active {
+    opacity: 1;
+  }
+
+  .reorder-handle:hover,
+  .reorder-handle:focus-visible {
     color: var(--orange);
     border-color: var(--orange);
     outline: none;
   }
 
-  .style-move-btn:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
+  .reorder-handle:active {
+    cursor: grabbing;
+  }
+
+  .reorder-handle:disabled {
+    opacity: 0.25;
+    cursor: default;
   }
 
   .style-reset-btn {

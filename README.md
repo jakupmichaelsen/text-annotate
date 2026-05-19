@@ -17,7 +17,7 @@ markdown instead of a proprietary document format.
 3. Switch to Edit mode when you want normal text entry.
 4. Optionally load a matching media file and use gutter timestamps for playback.
 5. Review comments and blockquote notes in the collapsible summary sidebar.
-6. Save the raw markdown or export a clean HTML version for sharing.
+6. Save the raw markdown, export a clean HTML version, or export a clean HTML summary for sharing.
 
 ## Features
 
@@ -28,12 +28,13 @@ markdown instead of a proprietary document format.
 - **Named highlight palette** - includes plain backtick style plus named colors
   such as `green`, `red`, `steel`, `orange`, `periwinkle`, `sand`, `mint`,
   `denim`, `yellow`, `indigo`, `brown`, `slate`, `sky`, `rosewood`, and
-  `purple`, with sidebar controls for reordering styles.
+  `purple`, with draggable `↕` handles for reordering styles.
 - **Inline note editing** - double-click or press `Enter` on an annotation to
   edit its stored comment.
 - **Summary sidebar** - groups annotations and blockquote notes, jumps back to
-  the source text, opens annotation comments for editing, and lets you rename
-  annotation titles inline. The sidebar can also be resized or expanded
+  the source text, opens annotation comments for editing, lets you rename
+  annotation titles inline, and lets you reorder annotation categories with a
+  draggable `↕` handle. The sidebar can also be resized or expanded
   fullscreen.
 - **Blockquote note controls** - adjust feedback-note alignment and background
   width while preserving those settings in markdown comments.
@@ -44,10 +45,15 @@ markdown instead of a proprietary document format.
 - **Transcript media playback** - load a media file beside an SRT transcript,
   click gutter timestamps, press `Enter` on transcript text, or use keyboard
   shortcuts to play and seek while reviewing.
+- **Browser text-to-speech** - for non-SRT documents without loaded media, the
+  same compact player strip reads selected text or continues from the current
+  cursor line using the browser or OS speech engine, preferring English voices
+  when available.
 - **PDF review modal** - extracts selectable PDF text, shows the PDF beside the
   extracted draft, and lets you correct the text before loading it.
-- **Save and export** - saves the editable markdown and exports clean HTML that
-  preserves the editor's clean-mode annotation styling.
+- **Save and export** - saves the editable markdown, exports clean HTML that
+  preserves the editor's clean-mode annotation styling, and exports a clean
+  HTML summary based on the sidebar view.
 - **Local restore and autosave** - restores the browser buffer from local
   storage and autosaves to an active file handle after Save when supported by
   the browser.
@@ -93,9 +99,9 @@ markdown editors and rendered comments stay hidden in normal markdown output.
 | Input | Behavior |
 | --- | --- |
 | `.srt` | Converts cues to hidden timestamp source lines plus transcript text, with cue labels shown in the gutter. |
-| `.txt` / `.md` | Loads text directly into the editor. |
-| `.docx` | Extracts raw text with `mammoth`. |
-| `.pdf` | Extracts text with `pdfjs-dist` and opens the review modal before loading. |
+| `.txt` / `.md` | Loads text directly into the editor and clears any previous media session unless new media is selected too. |
+| `.docx` | Extracts raw text with `mammoth` and clears any previous media session unless new media is selected too. |
+| `.pdf` | Extracts text with `pdfjs-dist`, opens the review modal before loading, and clears any previous media session unless new media is selected too. |
 | Media | Loads `.mp3`, `.wav`, `.m4a`, `.ogg`, `.oga`, `.webm`, `.aac`, `.flac`, `.mp4`, `.mov`, or `.mkv` for transcript playback. |
 
 ## Keyboard Shortcuts
@@ -106,7 +112,7 @@ Annotate mode uses Vim-style movement plus arrow-key equivalents.
 | --- | --- |
 | `h` / `j` / `k` / `l` | Move left / down / up / right |
 | Arrow keys | Move left / down / up / right |
-| `Tab` | Center the current line |
+| `Tab` | Edit note / cue playback |
 | `w` / `s` | Move one visual line up / down |
 | `a` / `d` | Move one word left / right |
 | `Ctrl+h` / `Ctrl+l` | Move one word left / right |
@@ -123,10 +129,12 @@ Annotate mode uses Vim-style movement plus arrow-key equivalents.
 | `Ctrl+Z` / `Ctrl+Y` | Undo / redo |
 | `F2` | Toggle Annotate / Edit mode |
 | `Esc` | Return to Annotate mode |
-| `Alt+Space` | Play / pause loaded media |
-| `Alt+Left` / `Alt+Right` | Seek loaded media backward / forward |
-| `Alt+r` | Cycle playback speed |
-| `Alt+A/H, S/J, D/L, W/K` | Back, play / pause, forward, speed |
+| `Alt+Space` | Play / pause loaded media or TTS |
+| `Alt+Left` / `Alt+Right` | Seek loaded media or step TTS backward / forward |
+| `Alt+r` | Cycle playback / TTS speed |
+| `Alt+n` / `Alt+p` | Next / previous annotation |
+| `Alt+A/H, D/L` | Back / forward |
+| `Alt+W/K, S/J` | Scroll up / down |
 | `F1` / `?` | Toggle keyboard help |
 
 The in-app help modal also lists the full movement and selection variants,
