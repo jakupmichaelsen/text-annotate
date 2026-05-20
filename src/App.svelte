@@ -190,7 +190,7 @@
       items: [
         ["F2", "toggle Annotate / Edit"],
         ["Esc", "return to Annotate mode"],
-        ["Alt+↑", "play / pause media or TTS"],
+        ["Alt+Space / Alt+↑", "play / pause media or TTS"],
         ["Alt+←/→", "seek media / step TTS"],
         ["Alt+↓ / Alt+r", "cycle playback / TTS speed"],
         ["Alt+n/p", "next / previous annotation"],
@@ -610,10 +610,14 @@
     return !event.ctrlKey && !event.metaKey && !event.altKey && (event.key === "Escape" || event.key === "F1" || event.key === "F2");
   }
 
+  function isSpaceKey(event: KeyboardEvent) {
+    return event.key === " " || event.key === "Spacebar" || event.code === "Space";
+  }
+
   function isAudioShortcut(event: KeyboardEvent) {
     return event.altKey && !event.ctrlKey && !event.metaKey &&
       (
-        event.key === " " ||
+        isSpaceKey(event) ||
         event.key === "ArrowLeft" ||
         event.key === "Left" ||
         event.key === "ArrowRight" ||
@@ -710,7 +714,7 @@
     }
     if (!audioElement || !audioLoaded) {
       if (!showTtsWidget) return;
-      if (event.key === " " || event.key === "ArrowUp" || event.key === "Up") {
+      if (isSpaceKey(event) || event.key === "ArrowUp" || event.key === "Up") {
         toggleTtsPlayback();
         return;
       }
@@ -732,7 +736,7 @@
       return;
     }
 
-    if (event.key === " " || event.key === "ArrowUp" || event.key === "Up") {
+    if (isSpaceKey(event) || event.key === "ArrowUp" || event.key === "Up") {
       toggleAudioPlayback();
       return;
     }
@@ -3825,6 +3829,13 @@ ${body}
       { key: "Shift-Ctrl-a", run: normal(v => moveByWordCount(v, false, 1, true)) },
       { key: "Shift-Ctrl-d", run: normal(v => moveByWordCount(v, true, 1, true)) },
       // Normal-mode only: Annotation actions
+      {
+        any: (_v, event) => {
+          if (!event.altKey || event.ctrlKey || event.metaKey || !isSpaceKey(event)) return false;
+          toggleMediaPlayback();
+          return true;
+        }
+      },
       { key: "Space",  run: normal(v => wrapSelectionOrWord(v, currentStyle)) },
       { key: "Enter",  run: normal(v => handleEnterInAnnotationMode(v)) },
       { key: "Delete", run: normal(v => { removeAnnotation(v); return true; }) },

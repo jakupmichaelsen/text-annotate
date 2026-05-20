@@ -127,7 +127,7 @@ Annotate mode uses Vim-style movement plus arrow-key equivalents.
 | `Ctrl+Z` / `Ctrl+Y` | Undo / redo |
 | `F2` | Toggle Annotate / Edit mode |
 | `Esc` | Return to Annotate mode |
-| `Alt+Up` | Play / pause loaded media or TTS |
+| `Alt+Space` / `Alt+Up` | Play / pause loaded media or TTS |
 | `Alt+Left` / `Alt+Right` | Seek loaded media or step TTS backward / forward |
 | `Alt+Down` / `Alt+r` | Cycle playback / TTS speed |
 | `Alt+n` / `Alt+p` | Next / previous annotation |
