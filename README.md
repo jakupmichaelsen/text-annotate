@@ -28,7 +28,8 @@ markdown instead of a proprietary document format.
 - **Named highlight palette** - includes plain backtick style plus named colors
   such as `green`, `red`, `steel`, `orange`, `periwinkle`, `sand`, `mint`,
   `denim`, `yellow`, `indigo`, `brown`, `slate`, `sky`, `rosewood`, and
-  `purple`, with draggable `↕` handles for reordering styles.
+  `purple`, with editable direct shortcut keys and draggable `↕` handles for
+  reordering styles.
 - **Inline note editing** - double-click or press `Enter` on an annotation to
   edit its stored comment.
 - **Summary sidebar** - groups annotations and blockquote notes, jumps back to
@@ -110,28 +111,25 @@ Annotate mode uses Vim-style movement plus arrow-key equivalents.
 
 | Key | Action |
 | --- | --- |
-| `h` / `j` / `k` / `l` | Move left / down / up / right |
+| `h` / `j` / `k` / `l`, `a` / `s` / `w` / `d` | Move left / down / up / right |
 | Arrow keys | Move left / down / up / right |
 | `Tab` | Edit note / cue playback |
-| `w` / `s` | Move one visual line up / down |
-| `a` / `d` | Move one word left / right |
-| `Ctrl+h` / `Ctrl+l` | Move one word left / right |
-| `Ctrl+k` / `Ctrl+j` | Move to paragraph start / end |
-| `Ctrl+w` / `Ctrl+s` | Move to paragraph start / end |
-| `Ctrl+a` / `Ctrl+d` | Jump five words left / right |
+| `Ctrl+h` / `Ctrl+l`, `Ctrl+a` / `Ctrl+d` | Move one word left / right |
+| CapsLock + `h` / `l`, CapsLock + `a` / `d` | Move one word left / right |
+| `Ctrl+k` / `Ctrl+j`, `Ctrl+w` / `Ctrl+s` | Move to paragraph start / end |
 | `Shift` movement variants | Extend the current selection |
+| Style keys | Annotate with that color, or recolor the annotation under the cursor. Defaults are `1`-`0`, then `z`, `x`, `c`, `v`, `b`. |
+| `q` / `r`, `i` / `o` | Previous / next annotation style |
 | `Space` | Wrap selection or current word as an annotation |
-| `q` / `e` | Previous / next annotation style |
-| `n` / `N` | Next / previous annotation style |
 | `Enter` | Edit annotation note, or play the current SRT cue when no annotation is active |
-| `x` | Remove annotation |
+| `Delete` / `Backspace` | Remove annotation |
 | `u` / `U` | Undo / redo |
 | `Ctrl+Z` / `Ctrl+Y` | Undo / redo |
 | `F2` | Toggle Annotate / Edit mode |
 | `Esc` | Return to Annotate mode |
-| `Alt+Space` | Play / pause loaded media or TTS |
+| `Alt+Up` | Play / pause loaded media or TTS |
 | `Alt+Left` / `Alt+Right` | Seek loaded media or step TTS backward / forward |
-| `Alt+r` | Cycle playback / TTS speed |
+| `Alt+Down` / `Alt+r` | Cycle playback / TTS speed |
 | `Alt+n` / `Alt+p` | Next / previous annotation |
 | `Alt+A/H, D/L` | Back / forward |
 | `Alt+W/K, S/J` | Scroll up / down |

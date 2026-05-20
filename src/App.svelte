@@ -148,40 +148,34 @@
     {
       title: "Navigation",
       items: [
-        ["h j k l", "left / down / up / right"],
+        ["h j k l / a s w d", "left / down / up / right"],
         ["← ↓ ↑ →", "left / down / up / right"],
         ["Tab", "edit note / cue playback"],
-        ["w s", "line up / down"],
-        ["a d", "word left / right"],
-        ["Ctrl+h/l", "word left / right"],
-        ["Ctrl+k/j", "paragraph start / end"],
-        ["Ctrl+w/s", "paragraph start / end"],
+        ["Ctrl+h/l or Ctrl+a/d", "word left / right"],
+        ["CapsLock+h/l or a/d", "word left / right"],
+        ["Ctrl+k/j or Ctrl+w/s", "paragraph start / end"],
         ["Ctrl+↑/↓", "paragraph start / end"],
-        ["Ctrl+a/d", "jump 5 words left / right"]
       ]
     },
     {
       title: "Selection",
       items: [
-        ["⇧hjkl", "select by char / line"],
+        ["⇧hjkl / ⇧aswd", "select by char / line"],
         ["⇧Arrows", "select by char / line"],
-        ["⇧w ⇧s", "select by line"],
-        ["⇧a ⇧d", "select by word"],
-        ["Ctrl+⇧h/l", "select by word"],
-        ["Ctrl+⇧k/j", "select to paragraph start / end"],
-        ["Ctrl+⇧w/s", "select to paragraph start / end"],
+        ["Ctrl+⇧h/l or Ctrl+⇧a/d", "select by word"],
+        ["CapsLock+⇧h/l or ⇧a/d", "select by word"],
+        ["Ctrl+⇧k/j or Ctrl+⇧w/s", "select to paragraph start / end"],
         ["Ctrl+⇧↑/↓", "select to paragraph start / end"],
-        ["Ctrl+Shift+a/d", "select 5 words left / right"]
       ]
     },
     {
       title: "Annotations",
       items: [
+        ["STYLE_KEYS", "select color / recolor annotation"],
+        ["q/r, i/o", "style prev / next"],
         ["Space", "wrap word / selection"],
-        ["q e", "style prev / next"],
-        ["n N", "style next / prev"],
         ["Enter", "edit note / cue playback"],
-        ["x", "remove annotation"]
+        ["Del / Backspace", "remove annotation"]
       ]
     },
     {
@@ -196,9 +190,9 @@
       items: [
         ["F2", "toggle Annotate / Edit"],
         ["Esc", "return to Annotate mode"],
-        ["Alt+Space", "play / pause media or TTS"],
+        ["Alt+↑", "play / pause media or TTS"],
         ["Alt+←/→", "seek media / step TTS"],
-        ["Alt+r", "cycle playback / TTS speed"],
+        ["Alt+↓ / Alt+r", "cycle playback / TTS speed"],
         ["Alt+n/p", "next / previous annotation"],
         ["Alt+A/H, D/L", "back / forward"],
         ["Alt+W/K, S/J", "scroll up / down"],
@@ -227,6 +221,7 @@
   }
 
   function helpShortcutLabel(label: string) {
+    if (label === "STYLE_KEYS") return styleShortcutSummary();
     return label;
   }
 
@@ -315,6 +310,14 @@
     if (!audioElement || !audioLoaded) return;
     if (audioElement.paused) void audioElement.play();
     else audioElement.pause();
+  }
+
+  function toggleMediaPlayback() {
+    if (audioElement && audioLoaded) {
+      toggleAudioPlayback();
+      return;
+    }
+    toggleTtsPlayback();
   }
 
   function cycleAudioRate() {
@@ -609,7 +612,17 @@
 
   function isAudioShortcut(event: KeyboardEvent) {
     return event.altKey && !event.ctrlKey && !event.metaKey &&
-      (event.key === " " || event.key === "ArrowLeft" || event.key === "Left" || event.key === "ArrowRight" || event.key === "Right");
+      (
+        event.key === " " ||
+        event.key === "ArrowLeft" ||
+        event.key === "Left" ||
+        event.key === "ArrowRight" ||
+        event.key === "Right" ||
+        event.key === "ArrowUp" ||
+        event.key === "Up" ||
+        event.key === "ArrowDown" ||
+        event.key === "Down"
+      );
   }
 
   function isAudioRateShortcut(event: KeyboardEvent) {
@@ -643,6 +656,7 @@
     if (isModeShortcut(event) || isAudioShortcut(event) || isAudioRateShortcut(event) || isPlaybackShortcut(event) || isScrollShortcut(event) || isAnnotationJumpShortcut(event)) return true;
     if (event.ctrlKey && !event.altKey && (event.key === "z" || event.key === "y" || event.key === "Z")) return true;
     if (editorMode !== "normal" || event.altKey) return false;
+    if (!event.ctrlKey && styleNumberForKey(event.key) !== null) return true;
 
     if (event.ctrlKey) {
       if (event.key === "ArrowLeft" || event.key === "ArrowRight" || event.key === "ArrowUp" || event.key === "ArrowDown") return true;
@@ -656,7 +670,9 @@
       event.key === "ArrowRight" ||
       event.key === "ArrowUp" ||
       event.key === "ArrowDown" ||
-      "hjklwasdHJKLWASDxeqnNuU".includes(event.key);
+      event.key === "Delete" ||
+      event.key === "Backspace" ||
+      "hjklwasdHJKLWASDqrioUu".includes(event.key);
   }
 
   function shouldDeferWindowShortcut(event: KeyboardEvent) {
@@ -694,6 +710,14 @@
     }
     if (!audioElement || !audioLoaded) {
       if (!showTtsWidget) return;
+      if (event.key === " " || event.key === "ArrowUp" || event.key === "Up") {
+        toggleTtsPlayback();
+        return;
+      }
+      if (event.key === "ArrowDown" || event.key === "Down") {
+        cycleAudioRate();
+        return;
+      }
       if (key === "a" || key === "h" || event.key === "ArrowLeft" || event.key === "Left") {
         stepTts(-1);
         return;
@@ -702,26 +726,26 @@
         stepTts(1);
         return;
       }
-      if (event.key === " ") {
-        toggleTtsPlayback();
-        return;
-      }
       if (key === "r") {
         cycleAudioRate();
       }
       return;
     }
 
+    if (event.key === " " || event.key === "ArrowUp" || event.key === "Up") {
+      toggleAudioPlayback();
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "Down") {
+      cycleAudioRate();
+      return;
+    }
     if (key === "a" || key === "h" || event.key === "ArrowLeft" || event.key === "Left") {
       seekAudio(-mediaSeekSeconds);
       return;
     }
     if (key === "d" || key === "l" || event.key === "ArrowRight" || event.key === "Right") {
       seekAudio(mediaSeekSeconds);
-      return;
-    }
-    if (event.key === " ") {
-      toggleAudioPlayback();
       return;
     }
     if (key === "r") {
@@ -1375,6 +1399,7 @@ ${body}
 
   function setMode(mode: "normal" | "insert") {
     const selection = view?.state.selection;
+    const head = selection?.main.head;
     editorMode = mode;
     if (view) {
       view.dispatch({
@@ -1384,7 +1409,15 @@ ${body}
       // Mode classes drive cursor visibility and edit/annotate styling.
       view.dom.classList.toggle("mode-insert", mode === "insert");
       view.dom.classList.toggle("mode-normal", mode === "normal");
-      requestAnimationFrame(() => view?.focus());
+      requestAnimationFrame(() => {
+        if (!view) return;
+        view.focus();
+        view.requestMeasure();
+        if (head !== undefined) {
+          view.dispatch({ effects: cursorScrollEffect(view, head) });
+        }
+        view.scrollDOM.dispatchEvent(new Event("scroll"));
+      });
     }
   }
 
@@ -1432,8 +1465,13 @@ ${body}
     { name: "purple",  color: "#d3869b" }
   ];
   const styleOrderStorageKey = "cm6-style-order";
+  const styleKeysStorageKey = "cm6-style-keys";
+  const defaultStyleKeyOrder = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "z", "x", "c", "v", "b", "n", "m", ",", ".", "/"];
+  const reservedStyleKeys = new Set(["q", "r", "i", "o"]);
   const defaultStyleOrder = highlightStyles.map(s => s.name);
+  const defaultStyleKeys = Object.fromEntries(defaultStyleOrder.map((name, index) => [name, defaultStyleKeyOrder[index] ?? ""]));
   let styleOrder = loadStyleOrder();
+  let styleKeys = loadStyleKeys();
   $: orderedHighlightStyles = styleOrder
     .map(name => highlightStyles.find(s => s.name === name))
     .filter((style): style is typeof highlightStyles[number] => !!style);
@@ -1470,6 +1508,94 @@ ${body}
   function styleColorForName(name: string) {
     if (name === "plain") return activeTheme.orange;
     return highlightStyles.find(s => s.name === name)?.color ?? activeTheme.yellow;
+  }
+
+  function styleKeyForName(name: string) {
+    return styleKeys[name] ?? "";
+  }
+
+  function styleKeyForStyle(style: number) {
+    return style <= 0 ? "" : styleKeyForName(styleName(style));
+  }
+
+  function styleNumberForKey(key: string) {
+    const normalized = normalizeStyleKey(key);
+    if (!normalized) return null;
+    const index = orderedHighlightStyles.findIndex(style => styleKeyForName(style.name) === normalized);
+    return index < 0 ? null : index + 1;
+  }
+
+  function styleShortcutSummary() {
+    const keys = orderedHighlightStyles
+      .map(style => styleKeyForName(style.name))
+      .filter(Boolean);
+    return keys.length ? keys.join(" ") : "style keys";
+  }
+
+  function normalizeStyleKey(key: string) {
+    if (key.length !== 1 || /\s/.test(key)) return "";
+    const normalized = key.toLowerCase();
+    return reservedStyleKeys.has(normalized) ? "" : normalized;
+  }
+
+  function loadStyleKeys() {
+    const stored = typeof localStorage === "undefined" ? null : localStorage.getItem(styleKeysStorageKey);
+    if (!stored) return { ...defaultStyleKeys };
+
+    try {
+      const parsed = JSON.parse(stored);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { ...defaultStyleKeys };
+      const next: Record<string, string> = {};
+      const used = new Set<string>();
+      for (const name of defaultStyleOrder) {
+        const value = normalizeStyleKey(String((parsed as Record<string, unknown>)[name] ?? defaultStyleKeys[name] ?? ""));
+        if (value && !used.has(value)) {
+          next[name] = value;
+          used.add(value);
+        } else {
+          next[name] = "";
+        }
+      }
+      return next;
+    } catch {
+      return { ...defaultStyleKeys };
+    }
+  }
+
+  function persistStyleKeys(next: Record<string, string>) {
+    styleKeys = next;
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(styleKeysStorageKey, JSON.stringify(next));
+    }
+  }
+
+  function assignStyleKey(name: string, key: string) {
+    const normalized = normalizeStyleKey(key);
+    const next = { ...styleKeys };
+    for (const styleName of Object.keys(next)) {
+      if (styleName !== name && normalized && next[styleName] === normalized) next[styleName] = "";
+    }
+    next[name] = normalized;
+    persistStyleKeys(next);
+  }
+
+  function resetStyleKeys() {
+    persistStyleKeys({ ...defaultStyleKeys });
+  }
+
+  function handleStyleKeydown(event: KeyboardEvent, name: string) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.key === "Escape" || event.key === "Enter") {
+      (event.currentTarget as HTMLInputElement).blur();
+      return;
+    }
+    if (event.key === "Backspace" || event.key === "Delete") {
+      assignStyleKey(name, "");
+      return;
+    }
+    const normalized = normalizeStyleKey(event.key);
+    if (normalized) assignStyleKey(name, normalized);
   }
 
   function loadStyleOrder() {
@@ -3159,7 +3285,10 @@ ${body}
     return true;
   }
 
-  function cycleAnnotationColor(v: EditorView, delta: number) {
+  function setAnnotationColorOrStyle(v: EditorView, style: number) {
+    const name = styleName(style);
+    if (!name) return true;
+    currentStyle = style;
     const cursor = v.state.selection.main.head;
     const docText = v.state.doc.toString();
     annotationPattern.lastIndex = 0;
@@ -3167,11 +3296,8 @@ ${body}
     while ((m = annotationPattern.exec(docText)) !== null) {
       const spanStart = m.index, spanEnd = spanStart + m[0].length;
       if (cursor >= spanStart && cursor <= spanEnd) {
-        const newStyle = cycleStyleNumber(styleNumberForName(m[2]), delta, false);
-        const newName = styleName(newStyle);
         const tokenStart = spanStart + 1;
-        const updated = m[0].replace(/^`([^`]+)`<!--\s*\w+,/, `\`$1\`<!-- ${newName},`);
-        currentStyle = newStyle;
+        const updated = m[0].replace(/^`([^`]+)`<!--\s*\w+,/, `\`$1\`<!-- ${name},`);
         v.dispatch({
           changes: { from: spanStart, to: spanEnd, insert: updated },
           selection: { anchor: tokenStart },
@@ -3180,7 +3306,22 @@ ${body}
         return true;
       }
     }
-    return false;
+    return wrapSelectionOrWord(v, style);
+  }
+
+  function cycleAnnotationColorOrStyle(v: EditorView, delta: number) {
+    const cursor = v.state.selection.main.head;
+    const docText = v.state.doc.toString();
+    annotationPattern.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = annotationPattern.exec(docText)) !== null) {
+      const spanStart = m.index, spanEnd = spanStart + m[0].length;
+      if (cursor >= spanStart && cursor <= spanEnd) {
+        return setAnnotationColorOrStyle(v, cycleStyleNumber(styleNumberForName(m[2]), delta, false));
+      }
+    }
+    cycleStyle(delta);
+    return true;
   }
 
   function removeAnnotation(v: EditorView) {
@@ -3224,9 +3365,9 @@ ${body}
   }
 
   // Status bar reactive values
-  $: styleLabel = currentStyle === 0
+  $: styleLabel = (styleKeys, currentStyle === 0
     ? "Style: plain"
-    : `Style: ${currentStyle}/${highlightStyles.length} (${styleName(currentStyle)})`;
+    : `Style: ${currentStyle}/${highlightStyles.length} (${styleName(currentStyle)})${styleKeyForStyle(currentStyle) ? ` [${styleKeyForStyle(currentStyle)}]` : ""}`);
   $: currentStyleColor = styleColor(currentStyle);
 
   const statusPlugin = ViewPlugin.fromClass(class {
@@ -3584,6 +3725,24 @@ ${body}
     return true;
   }
 
+  function handleCapsLockNavigation(v: EditorView, event: KeyboardEvent) {
+    if (
+      editorMode !== "normal" ||
+      !event.getModifierState("CapsLock") ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.altKey
+    ) return false;
+
+    const key = event.key.toLowerCase();
+    const extend = event.shiftKey;
+    if (key === "h" || key === "a") return moveByWordCount(v, false, 1, extend);
+    if (key === "l" || key === "d") return moveByWordCount(v, true, 1, extend);
+    if (key === "k" || key === "w") return moveLineSkippingSrt(v, "up", extend);
+    if (key === "j" || key === "s") return moveLineSkippingSrt(v, "down", extend);
+    return false;
+  }
+
   // Custom keymap — all app-specific bindings
   function buildKeymap() {
     const normal = (fn: (v: EditorView) => boolean) =>
@@ -3596,6 +3755,24 @@ ${body}
       { key: "F2", run: v => { setMode(editorMode === "insert" ? "normal" : "insert"); return true; } },
       { key: "F1", run: () => { showHelp = !showHelp; return true; } },
       { key: "Tab", run: normal(v => handleEnterInAnnotationMode(v)) },
+      { key: "q", run: normal(v => cycleAnnotationColorOrStyle(v, -1)) },
+      { key: "r", run: normal(v => cycleAnnotationColorOrStyle(v, +1)) },
+      { key: "i", run: normal(v => cycleAnnotationColorOrStyle(v, -1)) },
+      { key: "o", run: normal(v => cycleAnnotationColorOrStyle(v, +1)) },
+      { any: (v, event) => handleCapsLockNavigation(v, event) },
+      {
+        any: (v, event) => {
+          if (
+            editorMode !== "normal" ||
+            event.key.length !== 1 ||
+            event.ctrlKey ||
+            event.metaKey ||
+            event.altKey
+          ) return false;
+          const style = styleNumberForKey(event.key);
+          return style === null ? false : setAnnotationColorOrStyle(v, style);
+        }
+      },
 
       // Normal-mode only: Navigation
       { key: "ArrowLeft",        run: normal(v => { cursorCharLeft(v);  return true; }) },
@@ -3624,12 +3801,12 @@ ${body}
       { key: "Ctrl-l", run: normal(v => moveByWordCount(v, true, 1)) },
       { key: "w", run: normal(v => moveLineSkippingSrt(v, "up")) },
       { key: "s", run: normal(v => moveLineSkippingSrt(v, "down")) },
-      { key: "a", run: normal(v => moveByWordCount(v, false, 1)) },
-      { key: "d", run: normal(v => moveByWordCount(v, true, 1)) },
+      { key: "a", run: normal(v => { cursorCharLeft(v);  return true; }) },
+      { key: "d", run: normal(v => { cursorCharRight(v); return true; }) },
       { key: "Ctrl-w", run: normal(v => paragraphBoundary(v, "start")) },
       { key: "Ctrl-s", run: normal(v => paragraphBoundary(v, "end")) },
-      { key: "Ctrl-a", run: normal(v => moveByWordCount(v, false, 5)) },
-      { key: "Ctrl-d", run: normal(v => moveByWordCount(v, true, 5)) },
+      { key: "Ctrl-a", run: normal(v => moveByWordCount(v, false, 1)) },
+      { key: "Ctrl-d", run: normal(v => moveByWordCount(v, true, 1)) },
       // Shift variants extend selection
       { key: "H", run: normal(v => { selectCharLeft(v);  return true; }) },
       { key: "J", run: normal(v => moveLineSkippingSrt(v, "down", true)) },
@@ -3641,20 +3818,17 @@ ${body}
       { key: "Shift-Ctrl-l", run: normal(v => moveByWordCount(v, true, 1, true)) },
       { key: "W", run: normal(v => moveLineSkippingSrt(v, "up", true)) },
       { key: "S", run: normal(v => moveLineSkippingSrt(v, "down", true)) },
-      { key: "A", run: normal(v => moveByWordCount(v, false, 1, true)) },
-      { key: "D", run: normal(v => moveByWordCount(v, true, 1, true)) },
+      { key: "A", run: normal(v => { selectCharLeft(v);  return true; }) },
+      { key: "D", run: normal(v => { selectCharRight(v); return true; }) },
       { key: "Shift-Ctrl-w", run: normal(v => paragraphBoundary(v, "start", true)) },
       { key: "Shift-Ctrl-s", run: normal(v => paragraphBoundary(v, "end", true)) },
-      { key: "Shift-Ctrl-a", run: normal(v => moveByWordCount(v, false, 5, true)) },
-      { key: "Shift-Ctrl-d", run: normal(v => moveByWordCount(v, true, 5, true)) },
+      { key: "Shift-Ctrl-a", run: normal(v => moveByWordCount(v, false, 1, true)) },
+      { key: "Shift-Ctrl-d", run: normal(v => moveByWordCount(v, true, 1, true)) },
       // Normal-mode only: Annotation actions
       { key: "Space",  run: normal(v => wrapSelectionOrWord(v, currentStyle)) },
       { key: "Enter",  run: normal(v => handleEnterInAnnotationMode(v)) },
-      { key: "x",      run: normal(v => removeAnnotation(v)) },
-      { key: "q",      run: normal(v => { if (!cycleAnnotationColor(v, -1)) cycleStyle(-1); return true; }) },
-      { key: "e",      run: normal(v => { if (!cycleAnnotationColor(v, +1)) cycleStyle(+1); return true; }) },
-      { key: "n",      run: normal(v => { if (!cycleAnnotationColor(v, +1)) cycleStyle(+1); return true; }) },
-      { key: "N",      run: normal(v => { if (!cycleAnnotationColor(v, -1)) cycleStyle(-1); return true; }) },
+      { key: "Delete", run: normal(v => { removeAnnotation(v); return true; }) },
+      { key: "Backspace", run: normal(v => { removeAnnotation(v); return true; }) },
       // Undo/redo (both modes)
       { key: "u",      run: normal(v => undo(v)) },
       { key: "U",      run: normal(v => redo(v)) },
@@ -3663,9 +3837,11 @@ ${body}
       { key: "Ctrl-Z", run: v => redo(v) },
       { key: "?",      run: () => { if (closeHelpFromShortcut()) return true; if (editorMode !== "normal") return false; showHelp = true; return true; } },
       { key: "Alt-r", run: () => { cycleAudioRate(); return true; } },
-      { key: "Alt-Space",  run: () => { toggleAudioPlayback(); return true; } },
+      { key: "Alt-Space",  run: () => { toggleMediaPlayback(); return true; } },
       { key: "Alt-ArrowLeft",  run: () => { seekAudio(-mediaSeekSeconds); return true; } },
       { key: "Alt-ArrowRight", run: () => { seekAudio(mediaSeekSeconds); return true; } },
+      { key: "Alt-ArrowUp",  run: () => { toggleMediaPlayback(); return true; } },
+      { key: "Alt-ArrowDown", run: () => { cycleAudioRate(); return true; } },
       { key: "Alt-a", run: () => { seekAudio(-mediaSeekSeconds); return true; } },
       { key: "Alt-h", run: () => { seekAudio(-mediaSeekSeconds); return true; } },
       { key: "Alt-d", run: () => { seekAudio(mediaSeekSeconds); return true; } },
@@ -3869,6 +4045,15 @@ ${body}
                 >
                   <span class="style-swatch" style={`background: ${style.color}`}></span>
                   <span class="style-name">{index + 1}. {style.name}</span>
+                  <input
+                    class="style-key-input"
+                    value={styleKeyForName(style.name)}
+                    aria-label={`Shortcut key for ${style.name}`}
+                    title={`Shortcut key for ${style.name}`}
+                    on:keydown={event => handleStyleKeydown(event, style.name)}
+                    on:input={event => assignStyleKey(style.name, (event.target as HTMLInputElement).value.slice(-1))}
+                    on:click={event => event.stopPropagation()}
+                  />
                   <button
                     class="reorder-handle"
                     type="button"
@@ -3885,17 +4070,20 @@ ${body}
                 </div>
               {/each}
             </div>
-            <button class="style-reset-btn" type="button" on:click={resetStyleOrder}>Reset order</button>
+            <div class="style-footer-actions">
+              <button class="style-reset-btn" type="button" on:click={resetStyleOrder}>Reset order</button>
+              <button class="style-reset-btn" type="button" on:click={resetStyleKeys}>Reset keys</button>
+            </div>
           {/if}
         </div>
       </div>
 
       <div class="sidebar-section">
         <div class="sidebar-label">Layout</div>
-        <div class="slider-row" data-tooltip="Left padding"><span class="slider-lbl">L</span><input type="range" min="0" max="400" step="4" bind:value={padLeft}   class="slider" aria-label="Left padding" /><span class="slider-val">{padLeft}</span></div>
-        <div class="slider-row" data-tooltip="Right padding"><span class="slider-lbl">R</span><input type="range" min="0" max="400" step="4" bind:value={padRight}  class="slider" aria-label="Right padding" /><span class="slider-val">{padRight}</span></div>
-        <div class="slider-row" data-tooltip="Top padding"><span class="slider-lbl">T</span><input type="range" min="0" max="400" step="4" bind:value={padTop}    class="slider" aria-label="Top padding" /><span class="slider-val">{padTop}</span></div>
-        <div class="slider-row" data-tooltip="Bottom padding"><span class="slider-lbl">B</span><input type="range" min="0" max={Math.max(0, editorViewportHeight - 48)} step="4" bind:value={padBottom} class="slider" aria-label="Bottom padding" /><span class="slider-val">{padBottom}</span></div>
+        <div class="slider-row" data-tooltip="Left padding"><span class="slider-lbl">L</span><input type="range" min="0" max="400" step="2" bind:value={padLeft}   class="slider" aria-label="Left padding" /><span class="slider-val">{padLeft}</span></div>
+        <div class="slider-row" data-tooltip="Right padding"><span class="slider-lbl">R</span><input type="range" min="0" max="400" step="2" bind:value={padRight}  class="slider" aria-label="Right padding" /><span class="slider-val">{padRight}</span></div>
+        <div class="slider-row" data-tooltip="Top padding"><span class="slider-lbl">T</span><input type="range" min="0" max="400" step="2" bind:value={padTop}    class="slider" aria-label="Top padding" /><span class="slider-val">{padTop}</span></div>
+        <div class="slider-row" data-tooltip="Bottom padding"><span class="slider-lbl">B</span><input type="range" min="0" max={Math.max(0, editorViewportHeight - 48)} step="2" bind:value={padBottom} class="slider" aria-label="Bottom padding" /><span class="slider-val">{padBottom}</span></div>
         <div class="slider-row" data-tooltip="Line height"><span class="slider-lbl">LH</span><input type="range" min="1" max="3" step="0.05" bind:value={lineHeight} class="slider" aria-label="Line height" /><span class="slider-val">{lineHeight.toFixed(2)}</span></div>
         <div class="slider-row" data-tooltip="Spacing after each line"><span class="slider-lbl">PS</span><input type="range" min="0" max="2" step="0.05" bind:value={paragraphSpacing} class="slider" aria-label="Paragraph spacing" /><span class="slider-val">{paragraphSpacing.toFixed(2)}</span></div>
         <div class="slider-row" data-tooltip="Font size"><span class="slider-lbl">FS</span><input type="range" min="10" max="28" step="1" bind:value={fontSize} class="slider" aria-label="Font size" /><span class="slider-val">{fontSize}</span></div>
@@ -4118,7 +4306,7 @@ ${body}
                   />
                 {:else if section.itemType === "annotation"}
                   <button
-                    class="summary-group-label summary-title-action"
+                    class="summary-group-label summary-title-action summary-group-title-action"
                     type="button"
                     on:click={event => startSummaryGroupTitleEdit(event, section)}
                     on:keydown={event => event.stopPropagation()}
@@ -4229,11 +4417,11 @@ ${body}
           <div class="audio-widget">
             <span class="audio-name">{audioFileName}</span>
             <span class="audio-sep">|</span>
-            <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(-mediaSeekSeconds)} title={`Back ${mediaSeekSeconds} seconds (Alt+A/H)`} aria-label={`Back ${mediaSeekSeconds} seconds`}>&lt;&lt;</button>
-            <button class="audio-glyph play" type="button" on:click={toggleAudioPlayback} title="Play / pause (Alt+Space)" aria-label="Play / pause">{audioPlaying ? "⏸" : "▶"}</button>
-            <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(mediaSeekSeconds)} title={`Forward ${mediaSeekSeconds} seconds (Alt+D/L)`} aria-label={`Forward ${mediaSeekSeconds} seconds`}>&gt;&gt;</button>
+            <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(-mediaSeekSeconds)} title={`Back ${mediaSeekSeconds} seconds (Alt+Left or Alt+A/H)`} aria-label={`Back ${mediaSeekSeconds} seconds`}>&lt;&lt;</button>
+            <button class="audio-glyph play" type="button" on:click={toggleAudioPlayback} title="Play / pause (Alt+Up)" aria-label="Play / pause">{audioPlaying ? "⏸" : "▶"}</button>
+            <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(mediaSeekSeconds)} title={`Forward ${mediaSeekSeconds} seconds (Alt+Right or Alt+D/L)`} aria-label={`Forward ${mediaSeekSeconds} seconds`}>&gt;&gt;</button>
             <span class="audio-sep">|</span>
-            <button class="audio-rate-text" type="button" on:click={cycleAudioRate} aria-label="Playback speed" title="Playback speed (Alt+R)">{audioRateText}</button>
+            <button class="audio-rate-text" type="button" on:click={cycleAudioRate} aria-label="Playback speed" title="Playback speed (Alt+Down or Alt+R)">{audioRateText}</button>
             <span class="audio-sep">|</span>
             <span class="audio-time">{formatAudioTime(audioCurrentTime)} / {formatAudioTime(audioDuration)}</span>
           </div>
@@ -4241,11 +4429,11 @@ ${body}
           <div class="audio-widget">
             <span class="audio-name">TTS</span>
             <span class="audio-sep">|</span>
-            <button class="audio-glyph" type="button" on:click={() => stepTts(-1)} title="Previous spoken chunk (Alt+A/H)" aria-label="Previous spoken chunk">&lt;&lt;</button>
-            <button class="audio-glyph play" type="button" on:click={toggleTtsPlayback} title="Play / pause TTS (Alt+Space)" aria-label="Play / pause TTS">{ttsSpeaking && !ttsPaused ? "⏸" : "▶"}</button>
-            <button class="audio-glyph" type="button" on:click={() => stepTts(1)} title="Next spoken chunk (Alt+D/L)" aria-label="Next spoken chunk">&gt;&gt;</button>
+            <button class="audio-glyph" type="button" on:click={() => stepTts(-1)} title="Previous spoken chunk (Alt+Left or Alt+A/H)" aria-label="Previous spoken chunk">&lt;&lt;</button>
+            <button class="audio-glyph play" type="button" on:click={toggleTtsPlayback} title="Play / pause TTS (Alt+Up)" aria-label="Play / pause TTS">{ttsSpeaking && !ttsPaused ? "⏸" : "▶"}</button>
+            <button class="audio-glyph" type="button" on:click={() => stepTts(1)} title="Next spoken chunk (Alt+Right or Alt+D/L)" aria-label="Next spoken chunk">&gt;&gt;</button>
             <span class="audio-sep">|</span>
-            <button class="audio-rate-text" type="button" on:click={cycleAudioRate} aria-label="TTS speed" title="TTS speed (Alt+R)">{audioRateText}</button>
+            <button class="audio-rate-text" type="button" on:click={cycleAudioRate} aria-label="TTS speed" title="TTS speed (Alt+Down or Alt+R)">{audioRateText}</button>
             <span class="audio-sep">|</span>
             <span class="audio-time">{ttsProgressText}</span>
           </div>
@@ -4673,6 +4861,12 @@ ${body}
     text-decoration: underline;
   }
 
+  .summary-group-title-action {
+    display: inline-block;
+    width: fit-content;
+    max-width: 100%;
+  }
+
   .summary-title-input {
     min-width: 0;
     width: 100%;
@@ -5082,7 +5276,7 @@ ${body}
   }
 
   .style-row.reorderable {
-    grid-template-columns: 10px minmax(0, 1fr) 20px;
+    grid-template-columns: 10px minmax(0, 1fr) 28px 20px;
   }
 
   .style-row.reorderable.drop-before {
@@ -5107,6 +5301,29 @@ ${body}
     white-space: nowrap;
     color: var(--fg);
     font-size: 10px;
+  }
+
+  .style-key-input {
+    width: 28px;
+    height: 20px;
+    box-sizing: border-box;
+    padding: 0 2px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: var(--bg-alt);
+    color: var(--fg);
+    font: inherit;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 18px;
+    text-align: center;
+    text-transform: lowercase;
+    outline: none;
+  }
+
+  .style-key-input:focus {
+    border-color: var(--orange);
+    color: var(--orange);
   }
 
   .reorder-handle {
@@ -5148,6 +5365,13 @@ ${body}
   .reorder-handle:disabled {
     opacity: 0.25;
     cursor: default;
+  }
+
+  .style-footer-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 4px;
   }
 
   .style-reset-btn {
