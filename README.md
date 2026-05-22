@@ -28,7 +28,7 @@ markdown instead of a proprietary document format.
 - **Named highlight palette** - includes plain backtick style plus named colors
   such as `green`, `red`, `steel`, `orange`, `periwinkle`, `sand`, `mint`,
   `denim`, `yellow`, `indigo`, `brown`, `slate`, `sky`, `rosewood`, and
-  `purple`, with editable direct shortcut keys and draggable `↕` handles for
+  `purple`, with order-based shortcut keys and draggable `↕` handles for
   reordering styles.
 - **Inline note editing** - double-click or press `Enter` on an annotation to
   edit its stored comment.
@@ -111,15 +111,21 @@ Annotate mode uses Vim-style movement plus arrow-key equivalents.
 
 | Key | Action |
 | --- | --- |
-| `h` / `j` / `k` / `l`, `a` / `s` / `w` / `d` | Move left / down / up / right |
+| `h` / `l` | Move left / right |
 | Arrow keys | Move left / down / up / right |
-| `Tab` | Edit note / cue playback |
-| `Ctrl+h` / `Ctrl+l`, `Ctrl+a` / `Ctrl+d` | Move one word left / right |
-| CapsLock + `h` / `l`, CapsLock + `a` / `d` | Move one word left / right |
-| `Ctrl+k` / `Ctrl+j`, `Ctrl+w` / `Ctrl+s` | Move to paragraph start / end |
+| `Tab` | Center cursor in view |
+| `w` / `k` | Move one visual line up |
+| `s` / `j` | Move one visual line down |
+| `a` / `d` | Move one word left / right |
+| `Ctrl+h` / `Ctrl+a`, `Ctrl+l` / `Ctrl+d` | Move to display line start / end |
+| `Ctrl+k` / `Ctrl+j` | Move to paragraph start / end |
+| `Ctrl+w` / `Ctrl+s` | Move to paragraph start / end |
+| CapsLock + `h` / `l`, CapsLock + `a` / `d` | Jump three words left / right |
+| CapsLock + `k` / `j`, CapsLock + `w` / `s` | Move/select visual lines up / down |
+| `f` | Toggle slow word-by-word follow mode |
 | `Shift` movement variants | Extend the current selection |
-| Style keys | Annotate with that color, or recolor the annotation under the cursor. Defaults are `1`-`0`, then `z`, `x`, `c`, `v`, `b`. |
-| `q` / `r`, `i` / `o` | Previous / next annotation style |
+| Style keys | Annotate or recolor using the current Styles order. Keys run `1`-`0`, then `z`, `x`, `c`, `v`, `b`. |
+| `q` / `i`, `e` / `o` | Previous / next annotation style |
 | `Space` | Wrap selection or current word as an annotation |
 | `Enter` | Edit annotation note, or play the current SRT cue when no annotation is active |
 | `Delete` / `Backspace` | Remove annotation |
@@ -127,16 +133,17 @@ Annotate mode uses Vim-style movement plus arrow-key equivalents.
 | `Ctrl+Z` / `Ctrl+Y` | Undo / redo |
 | `F2` | Toggle Annotate / Edit mode |
 | `Esc` | Return to Annotate mode |
-| `Alt+Space` / `Alt+Up` | Play / pause loaded media or TTS |
+| `Alt+Space` | Play / pause loaded media or TTS |
 | `Alt+Left` / `Alt+Right` | Seek loaded media or step TTS backward / forward |
-| `Alt+Down` / `Alt+r` | Cycle playback / TTS speed |
+| `r` / `Alt+r` | Cycle playback / TTS speed |
 | `Alt+n` / `Alt+p` | Next / previous annotation |
 | `Alt+A/H, D/L` | Back / forward |
-| `Alt+W/K, S/J` | Scroll up / down |
+| `Alt+W/K` | Play current SRT cue line |
+| `Alt+S/J` | Play / pause loaded media or TTS |
 | `F1` / `?` | Toggle keyboard help |
 
 The in-app help modal also lists the full movement and selection variants,
-including Ctrl-based word and paragraph jumps.
+including display-line, CapsLock, and paragraph jumps.
 
 ## Project Structure
 

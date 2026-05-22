@@ -11,12 +11,8 @@
   import { EditorSelection, RangeSet, StateEffect, StateField, type Range, type Text, type Transaction, type TransactionSpec } from "@codemirror/state";
   import {
     defaultKeymap, history, historyKeymap, undo, redo,
-    cursorLineUp, cursorLineDown, cursorLineStart, cursorLineEnd,
     cursorCharLeft, cursorCharRight,
-    selectAll,
-    selectCharLeft, selectCharRight,
-    selectLineUp, selectLineDown,
-    selectLineStart, selectLineEnd
+    selectCharLeft, selectCharRight
   } from "@codemirror/commands";
   import { searchKeymap } from "@codemirror/search";
   import { RangeSetBuilder } from "@codemirror/state";
@@ -34,7 +30,7 @@
   let editorEl: HTMLDivElement;
   let view: EditorView;
   let fileInput: HTMLInputElement;
-  let padLeft = 40;
+  let padLeft = 24;
   let padRight = 40;
   let padTop = 16;
   let padBottom = 64;
@@ -42,6 +38,7 @@
   let lineHeight = 1.6;
   let fontSize = 14;
   let paragraphSpacing = 0;
+  let centerCurrentLine = false;
   let showHelp = false;
   let pdfModalOpen = false;
   let pdfDraftText = "";
@@ -124,11 +121,14 @@
   let summaryTitleInput: HTMLInputElement | null = null;
   let resizingSummarySidebar = false;
   let finishSummaryResize: (() => void) | null = null;
+  let finishRightPaddingDrag: (() => void) | null = null;
   type ReorderDragState = { kind: "style" | "summary"; id: string } | null;
   type ReorderDropTarget = { kind: "style" | "summary"; id: string; after: boolean } | null;
   let reorderDragState: ReorderDragState = null;
   let reorderDropTarget: ReorderDropTarget = null;
-  let styleSettingsOpen = false;
+  let settingsOpen = false;
+  let settingsTab: "display" | "styles" | "layout" = "display";
+  let followTimer: ReturnType<typeof setInterval> | null = null;
   const summarySidebarMinWidth = 240;
   const summarySidebarMaxWidth = 720;
   const themeStorageKey = "cm6-theme";
@@ -144,27 +144,36 @@
   $: activeSummaryFontSize = summaryFullscreen ? fontSize : clampedSummaryFontSize;
   $: activeSummaryMetaFontSize = summaryFullscreen ? Math.max(9, fontSize - 4) : summaryMetaFontSize;
   $: activeSummaryTimestampFontSize = summaryFullscreen ? Math.max(8, fontSize - 5) : summaryTimestampFontSize;
+  $: editorBottomPadding = Math.round(fontSize * lineHeight * 20);
   const helpSections = [
     {
       title: "Navigation",
       items: [
-        ["h j k l / a s w d", "left / down / up / right"],
+        ["h l", "left / right"],
         ["← ↓ ↑ →", "left / down / up / right"],
-        ["Tab", "edit note / cue playback"],
-        ["Ctrl+h/l or Ctrl+a/d", "word left / right"],
-        ["CapsLock+h/l or a/d", "word left / right"],
-        ["Ctrl+k/j or Ctrl+w/s", "paragraph start / end"],
+        ["Tab", "center cursor in view"],
+        ["w k", "line up"],
+        ["s j", "line down"],
+        ["a d", "word left / right"],
+        ["Ctrl+h/a or l/d", "display line start / end"],
+        ["Ctrl+k/j", "paragraph start / end"],
+        ["Ctrl+w/s", "paragraph start / end"],
         ["Ctrl+↑/↓", "paragraph start / end"],
+        ["CapsLock+h/l or a/d", "jump 3 words left / right"],
+        ["CapsLock+k/j or w/s", "visual line up / down"],
+        ["f", "toggle slow word follow"]
       ]
     },
     {
       title: "Selection",
       items: [
-        ["⇧hjkl / ⇧aswd", "select by char / line"],
+        ["⇧hjkl", "select by char / line"],
         ["⇧Arrows", "select by char / line"],
-        ["Ctrl+⇧h/l or Ctrl+⇧a/d", "select by word"],
-        ["CapsLock+⇧h/l or ⇧a/d", "select by word"],
-        ["Ctrl+⇧k/j or Ctrl+⇧w/s", "select to paragraph start / end"],
+        ["⇧w ⇧s", "select by line"],
+        ["⇧a ⇧d", "select by word"],
+        ["Ctrl+⇧h/a or l/d", "select to display line start / end"],
+        ["Ctrl+⇧k/j", "select to paragraph start / end"],
+        ["Ctrl+⇧w/s", "select to paragraph start / end"],
         ["Ctrl+⇧↑/↓", "select to paragraph start / end"],
       ]
     },
@@ -172,7 +181,7 @@
       title: "Annotations",
       items: [
         ["STYLE_KEYS", "select color / recolor annotation"],
-        ["q/r, i/o", "style prev / next"],
+        ["q/i, e/o", "style prev / next"],
         ["Space", "wrap word / selection"],
         ["Enter", "edit note / cue playback"],
         ["Del / Backspace", "remove annotation"]
@@ -190,12 +199,13 @@
       items: [
         ["F2", "toggle Annotate / Edit"],
         ["Esc", "return to Annotate mode"],
-        ["Alt+Space / Alt+↑", "play / pause media or TTS"],
+        ["Alt+Space", "play / pause media or TTS"],
         ["Alt+←/→", "seek media / step TTS"],
-        ["Alt+↓ / Alt+r", "cycle playback / TTS speed"],
+        ["r / Alt+r", "cycle playback / TTS speed"],
         ["Alt+n/p", "next / previous annotation"],
         ["Alt+A/H, D/L", "back / forward"],
-        ["Alt+W/K, S/J", "scroll up / down"],
+        ["Alt+W/K", "play current line"],
+        ["Alt+S/J", "play / pause media or TTS"],
         ["F1 / ?", "toggle this help"]
       ]
     }
@@ -621,11 +631,7 @@
         event.key === "ArrowLeft" ||
         event.key === "Left" ||
         event.key === "ArrowRight" ||
-        event.key === "Right" ||
-        event.key === "ArrowUp" ||
-        event.key === "Up" ||
-        event.key === "ArrowDown" ||
-        event.key === "Down"
+        event.key === "Right"
       );
   }
 
@@ -637,7 +643,7 @@
     return event.altKey && !event.ctrlKey && !event.metaKey && "ahdl".includes(event.key.toLowerCase());
   }
 
-  function isScrollShortcut(event: KeyboardEvent) {
+  function isMediaControlShortcut(event: KeyboardEvent) {
     return event.altKey && !event.ctrlKey && !event.metaKey && "wsjk".includes(event.key.toLowerCase());
   }
 
@@ -645,19 +651,25 @@
     return event.altKey && !event.ctrlKey && !event.metaKey && "np".includes(event.key.toLowerCase());
   }
 
+  function isTabScrollShortcut(event: KeyboardEvent) {
+    return event.key === "Tab" && !event.ctrlKey && !event.metaKey && !event.altKey;
+  }
+
   function isHelpCloseShortcut(event: KeyboardEvent) {
-    return showHelp && !event.ctrlKey && !event.metaKey && !event.altKey && (event.key === "Escape" || event.key === "?");
+    return (showHelp || settingsOpen) && !event.ctrlKey && !event.metaKey && !event.altKey && (event.key === "Escape" || event.key === "?");
   }
 
   function closeHelpFromShortcut() {
-    if (!showHelp) return false;
+    if (!showHelp && !settingsOpen) return false;
     showHelp = false;
+    settingsOpen = false;
     return true;
   }
 
   function isAppShortcutCandidate(event: KeyboardEvent) {
     if (event.metaKey) return false;
-    if (isModeShortcut(event) || isAudioShortcut(event) || isAudioRateShortcut(event) || isPlaybackShortcut(event) || isScrollShortcut(event) || isAnnotationJumpShortcut(event)) return true;
+    if (isTabScrollShortcut(event)) return true;
+    if (isModeShortcut(event) || isAudioShortcut(event) || isAudioRateShortcut(event) || isPlaybackShortcut(event) || isMediaControlShortcut(event) || isAnnotationJumpShortcut(event)) return true;
     if (event.ctrlKey && !event.altKey && (event.key === "z" || event.key === "y" || event.key === "Z")) return true;
     if (editorMode !== "normal" || event.altKey) return false;
     if (!event.ctrlKey && styleNumberForKey(event.key) !== null) return true;
@@ -676,7 +688,7 @@
       event.key === "ArrowDown" ||
       event.key === "Delete" ||
       event.key === "Backspace" ||
-      "hjklwasdHJKLWASDqrioUu".includes(event.key);
+      "fhjklwasdFHJKLWASDqerioUu".includes(event.key);
   }
 
   function shouldDeferWindowShortcut(event: KeyboardEvent) {
@@ -689,7 +701,7 @@
 
   function handleAudioKeydown(event: KeyboardEvent) {
     if (event.defaultPrevented) return;
-    if (!isAudioShortcut(event) && !isPlaybackShortcut(event) && !isScrollShortcut(event) && !isAnnotationJumpShortcut(event)) return;
+    if (!isAudioShortcut(event) && !isPlaybackShortcut(event) && !isMediaControlShortcut(event) && !isAnnotationJumpShortcut(event)) return;
     if (isTextEntryTarget(event.target)) return;
 
     event.preventDefault();
@@ -704,22 +716,18 @@
       jumpToAdjacentAnnotation(-1);
       return;
     }
-    if (key === "w" || key === "k") {
-      scrollEditorViewport(-1);
+    if (key === "s" || key === "j") {
+      toggleMediaPlayback();
       return;
     }
-    if (key === "s" || key === "j") {
-      scrollEditorViewport(1);
+    if (view && (key === "w" || key === "k")) {
+      toggleAssociatedSrtPlayback(view);
       return;
     }
     if (!audioElement || !audioLoaded) {
       if (!showTtsWidget) return;
-      if (isSpaceKey(event) || event.key === "ArrowUp" || event.key === "Up") {
+      if (isSpaceKey(event)) {
         toggleTtsPlayback();
-        return;
-      }
-      if (event.key === "ArrowDown" || event.key === "Down") {
-        cycleAudioRate();
         return;
       }
       if (key === "a" || key === "h" || event.key === "ArrowLeft" || event.key === "Left") {
@@ -736,12 +744,8 @@
       return;
     }
 
-    if (isSpaceKey(event) || event.key === "ArrowUp" || event.key === "Up") {
+    if (isSpaceKey(event)) {
       toggleAudioPlayback();
-      return;
-    }
-    if (event.key === "ArrowDown" || event.key === "Down") {
-      cycleAudioRate();
       return;
     }
     if (key === "a" || key === "h" || event.key === "ArrowLeft" || event.key === "Left") {
@@ -765,6 +769,13 @@
       closeHelpFromShortcut();
       event.preventDefault();
       event.stopPropagation();
+      requestAnimationFrame(() => view?.focus());
+      return;
+    }
+    if (view && isTabScrollShortcut(event) && !isTextEntryTarget(event.target)) {
+      event.preventDefault();
+      event.stopPropagation();
+      scrollCursorIntoView(view, true);
       requestAnimationFrame(() => view?.focus());
       return;
     }
@@ -926,6 +937,47 @@
 
   function updateEditorViewportHeight() {
     editorViewportHeight = editorEl?.clientHeight ?? 0;
+  }
+
+  function clampNumber(value: number, min: number, max: number) {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  function setRightPaddingFromClientX(clientX: number) {
+    if (!editorEl) return;
+    const rect = editorEl.getBoundingClientRect();
+    const maxPadding = Math.max(0, Math.min(720, rect.width - 120));
+    padRight = Math.round(clampNumber(rect.right - clientX, 0, maxPadding));
+  }
+
+  function startRightPaddingDrag(event: PointerEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    finishRightPaddingDrag?.();
+    setRightPaddingFromClientX(event.clientX);
+
+    const move = (moveEvent: PointerEvent) => setRightPaddingFromClientX(moveEvent.clientX);
+    const finish = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+      finishRightPaddingDrag = null;
+    };
+
+    finishRightPaddingDrag = finish;
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
+  }
+
+  function adjustLayoutValue(kind: "lineHeight" | "fontSize" | "paragraphSpacing", delta: number) {
+    if (kind === "lineHeight") {
+      lineHeight = Math.round(clampNumber(lineHeight + delta * 0.05, 1, 3) * 100) / 100;
+    } else if (kind === "fontSize") {
+      fontSize = Math.round(clampNumber(fontSize + delta, 10, 28));
+    } else {
+      paragraphSpacing = Math.round(clampNumber(paragraphSpacing + delta * 0.05, 0, 2) * 100) / 100;
+    }
   }
 
   function clearActiveSaveTarget() {
@@ -1434,7 +1486,7 @@ ${body}
       content.style.paddingLeft   = `${padLeft}px`;
       content.style.paddingRight  = `${padRight}px`;
       content.style.paddingTop    = `${padTop}px`;
-      content.style.paddingBottom = `${padBottom}px`;
+      content.style.paddingBottom = `${editorBottomPadding}px`;
       content.style.caretColor = "transparent";
     }
     const scroller = view.dom.querySelector<HTMLElement>(".cm-scroller");
@@ -1469,13 +1521,9 @@ ${body}
     { name: "purple",  color: "#d3869b" }
   ];
   const styleOrderStorageKey = "cm6-style-order";
-  const styleKeysStorageKey = "cm6-style-keys";
   const defaultStyleKeyOrder = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "z", "x", "c", "v", "b", "n", "m", ",", ".", "/"];
-  const reservedStyleKeys = new Set(["q", "r", "i", "o"]);
   const defaultStyleOrder = highlightStyles.map(s => s.name);
-  const defaultStyleKeys = Object.fromEntries(defaultStyleOrder.map((name, index) => [name, defaultStyleKeyOrder[index] ?? ""]));
   let styleOrder = loadStyleOrder();
-  let styleKeys = loadStyleKeys();
   $: orderedHighlightStyles = styleOrder
     .map(name => highlightStyles.find(s => s.name === name))
     .filter((style): style is typeof highlightStyles[number] => !!style);
@@ -1515,7 +1563,8 @@ ${body}
   }
 
   function styleKeyForName(name: string) {
-    return styleKeys[name] ?? "";
+    const index = orderedHighlightStyles.findIndex(style => style.name === name);
+    return index < 0 ? "" : defaultStyleKeyOrder[index] ?? "";
   }
 
   function styleKeyForStyle(style: number) {
@@ -1525,8 +1574,8 @@ ${body}
   function styleNumberForKey(key: string) {
     const normalized = normalizeStyleKey(key);
     if (!normalized) return null;
-    const index = orderedHighlightStyles.findIndex(style => styleKeyForName(style.name) === normalized);
-    return index < 0 ? null : index + 1;
+    const index = defaultStyleKeyOrder.indexOf(normalized);
+    return index < 0 || index >= orderedHighlightStyles.length ? null : index + 1;
   }
 
   function styleShortcutSummary() {
@@ -1538,68 +1587,7 @@ ${body}
 
   function normalizeStyleKey(key: string) {
     if (key.length !== 1 || /\s/.test(key)) return "";
-    const normalized = key.toLowerCase();
-    return reservedStyleKeys.has(normalized) ? "" : normalized;
-  }
-
-  function loadStyleKeys() {
-    const stored = typeof localStorage === "undefined" ? null : localStorage.getItem(styleKeysStorageKey);
-    if (!stored) return { ...defaultStyleKeys };
-
-    try {
-      const parsed = JSON.parse(stored);
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { ...defaultStyleKeys };
-      const next: Record<string, string> = {};
-      const used = new Set<string>();
-      for (const name of defaultStyleOrder) {
-        const value = normalizeStyleKey(String((parsed as Record<string, unknown>)[name] ?? defaultStyleKeys[name] ?? ""));
-        if (value && !used.has(value)) {
-          next[name] = value;
-          used.add(value);
-        } else {
-          next[name] = "";
-        }
-      }
-      return next;
-    } catch {
-      return { ...defaultStyleKeys };
-    }
-  }
-
-  function persistStyleKeys(next: Record<string, string>) {
-    styleKeys = next;
-    if (typeof localStorage !== "undefined") {
-      localStorage.setItem(styleKeysStorageKey, JSON.stringify(next));
-    }
-  }
-
-  function assignStyleKey(name: string, key: string) {
-    const normalized = normalizeStyleKey(key);
-    const next = { ...styleKeys };
-    for (const styleName of Object.keys(next)) {
-      if (styleName !== name && normalized && next[styleName] === normalized) next[styleName] = "";
-    }
-    next[name] = normalized;
-    persistStyleKeys(next);
-  }
-
-  function resetStyleKeys() {
-    persistStyleKeys({ ...defaultStyleKeys });
-  }
-
-  function handleStyleKeydown(event: KeyboardEvent, name: string) {
-    event.preventDefault();
-    event.stopPropagation();
-    if (event.key === "Escape" || event.key === "Enter") {
-      (event.currentTarget as HTMLInputElement).blur();
-      return;
-    }
-    if (event.key === "Backspace" || event.key === "Delete") {
-      assignStyleKey(name, "");
-      return;
-    }
-    const normalized = normalizeStyleKey(event.key);
-    if (normalized) assignStyleKey(name, normalized);
+    return key.toLowerCase();
   }
 
   function loadStyleOrder() {
@@ -3369,9 +3357,9 @@ ${body}
   }
 
   // Status bar reactive values
-  $: styleLabel = (styleKeys, currentStyle === 0
+  $: styleLabel = currentStyle === 0
     ? "Style: plain"
-    : `Style: ${currentStyle}/${highlightStyles.length} (${styleName(currentStyle)})${styleKeyForStyle(currentStyle) ? ` [${styleKeyForStyle(currentStyle)}]` : ""}`);
+    : `Style: ${currentStyle}/${highlightStyles.length} (${styleName(currentStyle)})${styleKeyForStyle(currentStyle) ? ` [${styleKeyForStyle(currentStyle)}]` : ""}`;
   $: currentStyleColor = styleColor(currentStyle);
 
   const statusPlugin = ViewPlugin.fromClass(class {
@@ -3525,17 +3513,16 @@ ${body}
       this.scheduled = true;
       this.view.requestMeasure({
         read: view => {
-          const coords = view.coordsAtPos(view.state.selection.main.head);
-          if (!coords) return null;
+          const head = view.state.selection.main.head;
           const scroller = view.scrollDOM;
           const scrollerRect = scroller.getBoundingClientRect();
-          const lineHeight = parseFloat(getComputedStyle(view.contentDOM).lineHeight) || 18;
-          const cursorHeight = Math.max(1, coords.bottom - coords.top);
+          const coords = view.coordsAtPos(head);
+          if (!coords) return null;
           return {
-            top: coords.top - scrollerRect.top + scroller.scrollTop - ((lineHeight - cursorHeight) / 2),
+            top: coords.top - scrollerRect.top + scroller.scrollTop,
             left: scroller.scrollLeft,
             width: scroller.clientWidth,
-            height: lineHeight,
+            height: Math.max(1, coords.bottom - coords.top),
             isEdit: editorMode === "insert"
           };
         },
@@ -3601,11 +3588,18 @@ ${body}
   }
 
   function cursorScrollEffect(v: EditorView, head = v.state.selection.main.head) {
-    return EditorView.scrollIntoView(head, { y: "nearest", yMargin: cursorScrollMargin(v) });
+    return centerCurrentLine
+      ? EditorView.scrollIntoView(head, { y: "center" })
+      : EditorView.scrollIntoView(head, { y: "nearest", yMargin: cursorScrollMargin(v) });
   }
 
-  function scrollCursorIntoView(v: EditorView) {
-    v.dispatch({ effects: cursorScrollEffect(v) });
+  function scrollCursorIntoView(v: EditorView, forceCenter = false) {
+    const head = v.state.selection.main.head;
+    v.dispatch({
+      effects: forceCenter
+        ? EditorView.scrollIntoView(head, { y: "center" })
+        : cursorScrollEffect(v, head)
+    });
   }
 
   function runWithCursorScroll(v: EditorView, command: (view: EditorView) => boolean) {
@@ -3613,6 +3607,31 @@ ${body}
     if (handled) scrollCursorIntoView(v);
     return handled;
   }
+
+  function stopFollowMode() {
+    if (!followTimer) return;
+    clearInterval(followTimer);
+    followTimer = null;
+  }
+
+  function runLeftWithCursorScroll(v: EditorView, command: (view: EditorView) => boolean) {
+    stopFollowMode();
+    return runWithCursorScroll(v, command);
+  }
+
+  const centerCurrentLinePlugin = ViewPlugin.fromClass(class {
+    scheduled = false;
+
+    update(update: ViewUpdate) {
+      if (!centerCurrentLine || (!update.selectionSet && !update.docChanged)) return;
+      if (this.scheduled) return;
+      this.scheduled = true;
+      requestAnimationFrame(() => {
+        this.scheduled = false;
+        if (centerCurrentLine) scrollCursorIntoView(update.view);
+      });
+    }
+  });
 
   const dblClickBehavior = EditorView.domEventHandlers({
     dblclick(event, v) {
@@ -3651,6 +3670,36 @@ ${body}
       head = next;
     }
 
+    if (!forward && head < selection.head) stopFollowMode();
+    v.dispatch({
+      selection: { anchor: extend ? selection.anchor : head, head },
+      effects: cursorScrollEffect(v, head)
+    });
+    return true;
+  }
+
+  function editorLineHeightPx(v: EditorView) {
+    return parseFloat(getComputedStyle(v.contentDOM).lineHeight) || fontSize * lineHeight || 20;
+  }
+
+  function visualLineStartAtY(v: EditorView, y: number) {
+    const contentRect = v.contentDOM.getBoundingClientRect();
+    const pos = v.posAtCoords({ x: contentRect.left + 1, y });
+    if (pos === null) return null;
+    const coords = v.coordsAtPos(pos);
+    if (!coords) return pos;
+    return v.posAtCoords({ x: contentRect.left + 1, y: coords.top + Math.max(1, (coords.bottom - coords.top) / 2) }) ?? pos;
+  }
+
+  function visualLineBoundary(v: EditorView, direction: "start" | "end", extend = false) {
+    const selection = v.state.selection.main;
+    const coords = v.coordsAtPos(selection.head);
+    if (!coords) return true;
+    const contentRect = v.contentDOM.getBoundingClientRect();
+    const y = coords.top + Math.max(1, (coords.bottom - coords.top) / 2);
+    const x = direction === "start" ? contentRect.left + 1 : contentRect.right - 1;
+    const head = v.posAtCoords({ x, y }) ?? selection.head;
+    if (direction === "start" && head < selection.head) stopFollowMode();
     v.dispatch({
       selection: { anchor: extend ? selection.anchor : head, head },
       effects: cursorScrollEffect(v, head)
@@ -3692,40 +3741,71 @@ ${body}
     return true;
   }
 
-  function moveLineSkippingSrt(v: EditorView, direction: "up" | "down", extend = false) {
-    const move = direction === "up"
-      ? (extend ? selectLineUp : cursorLineUp)
-      : (extend ? selectLineDown : cursorLineDown);
+  function moveVisualLineSkippingSrt(v: EditorView, direction: "up" | "down", extend = false) {
     const selection = v.state.selection.main;
-    const doc = v.state.doc;
-    const currentLine = doc.lineAt(selection.head);
-    const step = direction === "up" ? -1 : 1;
-    const adjacentNumber = currentLine.number + step;
     const isSkippableLine = (text: string) => isSrtTimestampLine(text) || text.trimStart().startsWith(">");
+    const coords = v.coordsAtPos(selection.head);
+    if (!coords) return true;
+    const step = direction === "up" ? -1 : 1;
+    const linePx = editorLineHeightPx(v);
+    const scrollerRect = v.scrollDOM.getBoundingClientRect();
+    const minY = scrollerRect.top + 1;
+    const maxY = scrollerRect.bottom - 1;
+    let targetY = direction === "up" ? coords.top - linePx * 0.6 : coords.bottom + linePx * 0.6;
 
-    if (adjacentNumber < 1 || adjacentNumber > doc.lines) {
-      runWithCursorScroll(v, move);
+    for (let i = 0; i < 80; i += 1) {
+      if (targetY < minY) {
+        if (v.scrollDOM.scrollTop <= 0) break;
+        v.scrollDOM.scrollTop = Math.max(0, v.scrollDOM.scrollTop - linePx);
+        targetY = minY + linePx * 0.5;
+      } else if (targetY > maxY) {
+        v.scrollDOM.scrollTop += linePx;
+        targetY = maxY - linePx * 0.5;
+      }
+
+      const head = visualLineStartAtY(v, targetY);
+      if (head === null) break;
+      const line = v.state.doc.lineAt(head);
+      if (!isSkippableLine(line.text) && line.text.trim()) {
+        v.dispatch({
+          selection: { anchor: extend ? selection.anchor : head, head },
+          effects: cursorScrollEffect(v, head)
+        });
+        return true;
+      }
+      targetY += step * linePx;
+    }
+
+    const fallbackHead = direction === "up" ? 0 : v.state.doc.length;
+    v.dispatch({
+      selection: { anchor: extend ? selection.anchor : fallbackHead, head: fallbackHead },
+      effects: cursorScrollEffect(v, fallbackHead)
+    });
+    return true;
+  }
+
+  function toggleFollowMode(v: EditorView) {
+    if (followTimer) {
+      clearInterval(followTimer);
+      followTimer = null;
       return true;
     }
 
-    const adjacentLine = doc.line(adjacentNumber);
-    if (!isSkippableLine(adjacentLine.text)) {
-      runWithCursorScroll(v, move);
-      return true;
-    }
+    followTimer = setInterval(() => {
+      if (!view || editorMode !== "normal") {
+        if (followTimer) clearInterval(followTimer);
+        followTimer = null;
+        return;
+      }
+      const before = view.state.selection.main.head;
+      moveByWordCount(view, true, 1);
+      if (view.state.selection.main.head === before || before >= view.state.doc.length) {
+        if (followTimer) clearInterval(followTimer);
+        followTimer = null;
+      }
+    }, 520);
 
-    const column = selection.head - currentLine.from;
-    for (let lineNumber = adjacentNumber + step; lineNumber >= 1 && lineNumber <= doc.lines; lineNumber += step) {
-      const line = doc.line(lineNumber);
-      if (isSkippableLine(line.text) || !line.text.trim()) continue;
-      const head = line.from + Math.min(column, line.length);
-      v.dispatch({
-        selection: { anchor: extend ? selection.anchor : head, head },
-        effects: cursorScrollEffect(v, head)
-      });
-      return true;
-    }
-
+    moveByWordCount(v, true, 1);
     return true;
   }
 
@@ -3740,12 +3820,31 @@ ${body}
 
     const key = event.key.toLowerCase();
     const extend = event.shiftKey;
-    if (key === "h" || key === "a") return moveByWordCount(v, false, 1, extend);
-    if (key === "l" || key === "d") return moveByWordCount(v, true, 1, extend);
-    if (key === "k" || key === "w") return moveLineSkippingSrt(v, "up", extend);
-    if (key === "j" || key === "s") return moveLineSkippingSrt(v, "down", extend);
+    if (key === "h" || key === "a") return moveByWordCount(v, false, 3, extend);
+    if (key === "l" || key === "d") return moveByWordCount(v, true, 3, extend);
+    if (key === "k" || key === "w") return moveVisualLineSkippingSrt(v, "up", extend);
+    if (key === "j" || key === "s") return moveVisualLineSkippingSrt(v, "down", extend);
     return false;
   }
+
+  const capsLockNavigationBehavior = EditorView.domEventHandlers({
+    keydown(event, v) {
+      if (!handleCapsLockNavigation(v, event)) return false;
+      event.preventDefault();
+      event.stopPropagation();
+      return true;
+    }
+  });
+
+  const tabScrollBehavior = EditorView.domEventHandlers({
+    keydown(event, v) {
+      if (event.key !== "Tab" || event.ctrlKey || event.metaKey || event.altKey) return false;
+      event.preventDefault();
+      event.stopPropagation();
+      scrollCursorIntoView(v, true);
+      return true;
+    }
+  });
 
   // Custom keymap — all app-specific bindings
   function buildKeymap() {
@@ -3758,9 +3857,11 @@ ${body}
       // Always: F2 toggles edit mode
       { key: "F2", run: v => { setMode(editorMode === "insert" ? "normal" : "insert"); return true; } },
       { key: "F1", run: () => { showHelp = !showHelp; return true; } },
-      { key: "Tab", run: normal(v => handleEnterInAnnotationMode(v)) },
+      { key: "Tab", run: normal(v => { scrollCursorIntoView(v, true); return true; }) },
       { key: "q", run: normal(v => cycleAnnotationColorOrStyle(v, -1)) },
-      { key: "r", run: normal(v => cycleAnnotationColorOrStyle(v, +1)) },
+      { key: "e", run: normal(v => cycleAnnotationColorOrStyle(v, +1)) },
+      { key: "r", run: normal(() => { cycleAudioRate(); return true; }) },
+      { key: "f", run: normal(v => toggleFollowMode(v)) },
       { key: "i", run: normal(v => cycleAnnotationColorOrStyle(v, -1)) },
       { key: "o", run: normal(v => cycleAnnotationColorOrStyle(v, +1)) },
       { any: (v, event) => handleCapsLockNavigation(v, event) },
@@ -3779,14 +3880,14 @@ ${body}
       },
 
       // Normal-mode only: Navigation
-      { key: "ArrowLeft",        run: normal(v => { cursorCharLeft(v);  return true; }) },
-      { key: "ArrowRight",       run: normal(v => { cursorCharRight(v); return true; }) },
-      { key: "ArrowUp",          run: normal(v => moveLineSkippingSrt(v, "up")) },
-      { key: "ArrowDown",        run: normal(v => moveLineSkippingSrt(v, "down")) },
-      { key: "Shift-ArrowLeft",  run: normal(v => { selectCharLeft(v);  return true; }) },
-      { key: "Shift-ArrowRight", run: normal(v => { selectCharRight(v); return true; }) },
-      { key: "Shift-ArrowUp",    run: normal(v => moveLineSkippingSrt(v, "up", true)) },
-      { key: "Shift-ArrowDown",  run: normal(v => moveLineSkippingSrt(v, "down", true)) },
+      { key: "ArrowLeft",        run: normal(v => runLeftWithCursorScroll(v, cursorCharLeft)) },
+      { key: "ArrowRight",       run: normal(v => runWithCursorScroll(v, cursorCharRight)) },
+      { key: "ArrowUp",          run: normal(v => moveVisualLineSkippingSrt(v, "up")) },
+      { key: "ArrowDown",        run: normal(v => moveVisualLineSkippingSrt(v, "down")) },
+      { key: "Shift-ArrowLeft",  run: normal(v => runLeftWithCursorScroll(v, selectCharLeft)) },
+      { key: "Shift-ArrowRight", run: normal(v => runWithCursorScroll(v, selectCharRight)) },
+      { key: "Shift-ArrowUp",    run: normal(v => moveVisualLineSkippingSrt(v, "up", true)) },
+      { key: "Shift-ArrowDown",  run: normal(v => moveVisualLineSkippingSrt(v, "down", true)) },
       { key: "Ctrl-ArrowLeft",        run: normal(v => moveByWordCount(v, false, 1)) },
       { key: "Ctrl-ArrowRight",       run: normal(v => moveByWordCount(v, true, 1)) },
       { key: "Ctrl-ArrowUp",          run: normal(v => paragraphBoundary(v, "start")) },
@@ -3795,39 +3896,39 @@ ${body}
       { key: "Shift-Ctrl-ArrowRight", run: normal(v => moveByWordCount(v, true, 1, true)) },
       { key: "Shift-Ctrl-ArrowUp",    run: normal(v => paragraphBoundary(v, "start", true)) },
       { key: "Shift-Ctrl-ArrowDown",  run: normal(v => paragraphBoundary(v, "end", true)) },
-      { key: "h", run: normal(v => { cursorCharLeft(v);  return true; }) },
-      { key: "j", run: normal(v => moveLineSkippingSrt(v, "down")) },
-      { key: "k", run: normal(v => moveLineSkippingSrt(v, "up")) },
-      { key: "l", run: normal(v => { cursorCharRight(v); return true; }) },
-      { key: "Ctrl-h", run: normal(v => moveByWordCount(v, false, 1)) },
+      { key: "h", run: normal(v => runLeftWithCursorScroll(v, cursorCharLeft)) },
+      { key: "j", run: normal(v => moveVisualLineSkippingSrt(v, "down")) },
+      { key: "k", run: normal(v => moveVisualLineSkippingSrt(v, "up")) },
+      { key: "l", run: normal(v => runWithCursorScroll(v, cursorCharRight)) },
+      { key: "Ctrl-h", run: normal(v => visualLineBoundary(v, "start")) },
       { key: "Ctrl-j", run: normal(v => paragraphBoundary(v, "end")) },
       { key: "Ctrl-k", run: normal(v => paragraphBoundary(v, "start")) },
-      { key: "Ctrl-l", run: normal(v => moveByWordCount(v, true, 1)) },
-      { key: "w", run: normal(v => moveLineSkippingSrt(v, "up")) },
-      { key: "s", run: normal(v => moveLineSkippingSrt(v, "down")) },
-      { key: "a", run: normal(v => { cursorCharLeft(v);  return true; }) },
-      { key: "d", run: normal(v => { cursorCharRight(v); return true; }) },
+      { key: "Ctrl-l", run: normal(v => visualLineBoundary(v, "end")) },
+      { key: "w", run: normal(v => moveVisualLineSkippingSrt(v, "up")) },
+      { key: "s", run: normal(v => moveVisualLineSkippingSrt(v, "down")) },
+      { key: "a", run: normal(v => moveByWordCount(v, false, 1)) },
+      { key: "d", run: normal(v => moveByWordCount(v, true, 1)) },
       { key: "Ctrl-w", run: normal(v => paragraphBoundary(v, "start")) },
       { key: "Ctrl-s", run: normal(v => paragraphBoundary(v, "end")) },
-      { key: "Ctrl-a", run: normal(v => moveByWordCount(v, false, 1)) },
-      { key: "Ctrl-d", run: normal(v => moveByWordCount(v, true, 1)) },
+      { key: "Ctrl-a", run: normal(v => visualLineBoundary(v, "start")) },
+      { key: "Ctrl-d", run: normal(v => visualLineBoundary(v, "end")) },
       // Shift variants extend selection
-      { key: "H", run: normal(v => { selectCharLeft(v);  return true; }) },
-      { key: "J", run: normal(v => moveLineSkippingSrt(v, "down", true)) },
-      { key: "K", run: normal(v => moveLineSkippingSrt(v, "up", true)) },
-      { key: "L", run: normal(v => { selectCharRight(v); return true; }) },
-      { key: "Shift-Ctrl-h", run: normal(v => moveByWordCount(v, false, 1, true)) },
+      { key: "H", run: normal(v => runLeftWithCursorScroll(v, selectCharLeft)) },
+      { key: "J", run: normal(v => moveVisualLineSkippingSrt(v, "down", true)) },
+      { key: "K", run: normal(v => moveVisualLineSkippingSrt(v, "up", true)) },
+      { key: "L", run: normal(v => runWithCursorScroll(v, selectCharRight)) },
+      { key: "Shift-Ctrl-h", run: normal(v => visualLineBoundary(v, "start", true)) },
       { key: "Shift-Ctrl-j", run: normal(v => paragraphBoundary(v, "end", true)) },
       { key: "Shift-Ctrl-k", run: normal(v => paragraphBoundary(v, "start", true)) },
-      { key: "Shift-Ctrl-l", run: normal(v => moveByWordCount(v, true, 1, true)) },
-      { key: "W", run: normal(v => moveLineSkippingSrt(v, "up", true)) },
-      { key: "S", run: normal(v => moveLineSkippingSrt(v, "down", true)) },
-      { key: "A", run: normal(v => { selectCharLeft(v);  return true; }) },
-      { key: "D", run: normal(v => { selectCharRight(v); return true; }) },
+      { key: "Shift-Ctrl-l", run: normal(v => visualLineBoundary(v, "end", true)) },
+      { key: "W", run: normal(v => moveVisualLineSkippingSrt(v, "up", true)) },
+      { key: "S", run: normal(v => moveVisualLineSkippingSrt(v, "down", true)) },
+      { key: "A", run: normal(v => moveByWordCount(v, false, 1, true)) },
+      { key: "D", run: normal(v => moveByWordCount(v, true, 1, true)) },
       { key: "Shift-Ctrl-w", run: normal(v => paragraphBoundary(v, "start", true)) },
       { key: "Shift-Ctrl-s", run: normal(v => paragraphBoundary(v, "end", true)) },
-      { key: "Shift-Ctrl-a", run: normal(v => moveByWordCount(v, false, 1, true)) },
-      { key: "Shift-Ctrl-d", run: normal(v => moveByWordCount(v, true, 1, true)) },
+      { key: "Shift-Ctrl-a", run: normal(v => visualLineBoundary(v, "start", true)) },
+      { key: "Shift-Ctrl-d", run: normal(v => visualLineBoundary(v, "end", true)) },
       // Normal-mode only: Annotation actions
       {
         any: (_v, event) => {
@@ -3851,18 +3952,16 @@ ${body}
       { key: "Alt-Space",  run: () => { toggleMediaPlayback(); return true; } },
       { key: "Alt-ArrowLeft",  run: () => { seekAudio(-mediaSeekSeconds); return true; } },
       { key: "Alt-ArrowRight", run: () => { seekAudio(mediaSeekSeconds); return true; } },
-      { key: "Alt-ArrowUp",  run: () => { toggleMediaPlayback(); return true; } },
-      { key: "Alt-ArrowDown", run: () => { cycleAudioRate(); return true; } },
       { key: "Alt-a", run: () => { seekAudio(-mediaSeekSeconds); return true; } },
       { key: "Alt-h", run: () => { seekAudio(-mediaSeekSeconds); return true; } },
       { key: "Alt-d", run: () => { seekAudio(mediaSeekSeconds); return true; } },
       { key: "Alt-l", run: () => { seekAudio(mediaSeekSeconds); return true; } },
       { key: "Alt-n", run: () => { jumpToAdjacentAnnotation(1); return true; } },
       { key: "Alt-p", run: () => { jumpToAdjacentAnnotation(-1); return true; } },
-      { key: "Alt-w", run: () => { scrollEditorViewport(-1); return true; } },
-      { key: "Alt-k", run: () => { scrollEditorViewport(-1); return true; } },
-      { key: "Alt-s", run: () => { scrollEditorViewport(1); return true; } },
-      { key: "Alt-j", run: () => { scrollEditorViewport(1); return true; } },
+      { key: "Alt-w", run: v => { toggleAssociatedSrtPlayback(v); return true; } },
+      { key: "Alt-k", run: v => { toggleAssociatedSrtPlayback(v); return true; } },
+      { key: "Alt-s", run: () => { toggleMediaPlayback(); return true; } },
+      { key: "Alt-j", run: () => { toggleMediaPlayback(); return true; } },
       {
         any: (_view, event) =>
           editorMode === "normal" &&
@@ -3877,6 +3976,9 @@ ${body}
   function baseExtensions(): Extension[] {
     return [
       dblClickBehavior,
+      capsLockNavigationBehavior,
+      tabScrollBehavior,
+      centerCurrentLinePlugin,
       EditorView.lineWrapping,
       lineNumbers({
         formatNumber: formatEditorLineNumber,
@@ -3952,6 +4054,8 @@ ${body}
       window.removeEventListener("keydown", onWindowKeydown);
       synth?.removeEventListener("voiceschanged", onVoicesChanged);
       finishSummaryResize?.();
+      finishRightPaddingDrag?.();
+      if (followTimer) clearInterval(followTimer);
       editorResizeObserver.disconnect();
       resetTtsState();
       clearAudioTarget();
@@ -3978,8 +4082,210 @@ ${body}
   <div class="toolbar">
     <div class="title">textAnnotate</div>
     <span class="subtitle">paste or load .srt, .txt, .md, .docx, .pdf</span>
+    <button
+      class="toolbar-btn settings-btn"
+      class:active={settingsOpen}
+      on:click={() => settingsOpen = !settingsOpen}
+      title="Settings"
+      aria-label="Settings"
+      aria-expanded={settingsOpen}
+    >⚙</button>
     <button class="toolbar-btn help-btn" on:click={() => showHelp = !showHelp} title="Keyboard shortcuts (?)">?</button>
   </div>
+
+  {#if settingsOpen}
+    <div class="settings-popover" role="dialog" aria-label="Settings">
+      <div class="settings-tabs" role="tablist" aria-label="Settings sections">
+        <button type="button" class:active={settingsTab === "display"} on:click={() => settingsTab = "display"}>Display</button>
+        <button type="button" class:active={settingsTab === "styles"} on:click={() => settingsTab = "styles"}>Styles</button>
+        <button type="button" class:active={settingsTab === "layout"} on:click={() => settingsTab = "layout"}>Layout</button>
+      </div>
+
+      {#if settingsTab === "display"}
+        <div class="settings-panel">
+          <label class="mode-switch" aria-label="Switch between Annotate and Edit mode">
+            <span class:active={editorMode === "normal"}>Annotate</span>
+            <input
+              type="checkbox"
+              checked={editorMode === "insert"}
+              on:change={e => setMode((e.target as HTMLInputElement).checked ? "insert" : "normal")}
+            />
+            <span class="mode-track" aria-hidden="true">
+              <span class="mode-thumb"></span>
+            </span>
+            <span class:active={editorMode === "insert"}>Edit</span>
+          </label>
+          <button class="sidebar-label load-btn theme-toggle" on:click={toggleThemeMode}>Theme: {activeThemeName}</button>
+          <div class="settings-radio-group" aria-label="Display mode">
+            <label class="sidebar-toggle">
+              <input type="radio" name="annotationMode" value="clean"
+                checked={annotationMode === "clean"}
+                on:change={() => { annotationMode = "clean"; view?.dispatch({}); view?.focus(); }} />
+              Clean
+            </label>
+            <label class="sidebar-toggle">
+              <input type="radio" name="annotationMode" value="raw"
+                checked={annotationMode === "raw"}
+                on:change={() => { annotationMode = "raw"; view?.dispatch({}); view?.focus(); }} />
+              Raw (current)
+            </label>
+            <label class="sidebar-toggle">
+              <input type="radio" name="annotationMode" value="all"
+                checked={annotationMode === "all"}
+                on:change={() => { annotationMode = "all"; view?.dispatch({}); view?.focus(); }} />
+              Raw (all)
+            </label>
+          </div>
+        </div>
+      {:else if settingsTab === "styles"}
+        <div class="settings-panel">
+          <div class="style-list settings-style-list">
+            <div class="style-row style-row-plain">
+              <span class="style-swatch" style={`background: ${styleColor(0)}`}></span>
+              <span class="style-name">0. plain</span>
+            </div>
+            {#each orderedHighlightStyles as style, index}
+              <div
+                class="style-row reorderable"
+                role="listitem"
+                class:drag-over={reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name}
+                class:drop-after={reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name && reorderDropTarget.after}
+                class:drop-before={reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name && !reorderDropTarget.after}
+                on:dragover={event => updateReorderDropTarget("style", style.name, event)}
+                on:drop={event => {
+                  if (reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name) {
+                    event.preventDefault();
+                    commitStyleReorder(style.name, reorderDropTarget.after);
+                  }
+                  finishReorderDrag();
+                }}
+                on:dragend={finishReorderDrag}
+              >
+                <span class="style-swatch" style={`background: ${style.color}`}></span>
+                <span class="style-name">{index + 1}. {style.name}</span>
+                <span class="style-key-badge" title={`Shortcut key for ${style.name}`}>{styleKeyForName(style.name)}</span>
+                <button
+                  class="reorder-handle"
+                  type="button"
+                  draggable="true"
+                  aria-label={`Drag ${style.name} to reorder`}
+                  title={`Drag ${style.name} to reorder`}
+                  on:mousedown={event => event.stopPropagation()}
+                  on:click={event => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                  on:dragstart={event => setReorderDragState("style", style.name, event)}
+                >↕</button>
+              </div>
+            {/each}
+          </div>
+          <div class="style-footer-actions">
+            <button class="style-reset-btn" type="button" on:click={resetStyleOrder}>Reset order</button>
+          </div>
+        </div>
+      {:else}
+        <div class="settings-panel">
+          <div class="layout-list">
+            <section class="layout-panel-section">
+              <div class="layout-panel-heading"><span class="font-icon" aria-hidden="true">Aa</span><span>Typography</span></div>
+              <div class="layout-stepper-grid">
+                <div class="layout-stepper">
+                  <span class="layout-control-icon" aria-hidden="true">↕</span>
+                  <span class="layout-stepper-label">Line height</span>
+                  <span class="layout-stepper-value">{lineHeight.toFixed(2)}</span>
+                  <span class="layout-stepper-buttons">
+                    <button type="button" on:click={() => adjustLayoutValue("lineHeight", -1)} aria-label="Decrease line height">−</button>
+                    <button type="button" on:click={() => adjustLayoutValue("lineHeight", 1)} aria-label="Increase line height">+</button>
+                  </span>
+                </div>
+                <div class="layout-stepper">
+                  <span class="layout-control-icon" aria-hidden="true">T</span>
+                  <span class="layout-stepper-label">Font size</span>
+                  <span class="layout-stepper-value">{fontSize}px</span>
+                  <span class="layout-stepper-buttons">
+                    <button type="button" on:click={() => adjustLayoutValue("fontSize", -1)} aria-label="Decrease font size">−</button>
+                    <button type="button" on:click={() => adjustLayoutValue("fontSize", 1)} aria-label="Increase font size">+</button>
+                  </span>
+                </div>
+                <div class="layout-stepper">
+                  <span class="layout-control-icon" aria-hidden="true">¶</span>
+                  <span class="layout-stepper-label">Paragraph gap</span>
+                  <span class="layout-stepper-value">{paragraphSpacing.toFixed(2)}</span>
+                  <span class="layout-stepper-buttons">
+                    <button type="button" on:click={() => adjustLayoutValue("paragraphSpacing", -1)} aria-label="Decrease paragraph spacing">−</button>
+                    <button type="button" on:click={() => adjustLayoutValue("paragraphSpacing", 1)} aria-label="Increase paragraph spacing">+</button>
+                  </span>
+                </div>
+              </div>
+            </section>
+
+            <section class="layout-panel-section">
+              <div class="layout-panel-heading"><span class="font-icon" aria-hidden="true">▣</span><span>Editor Frame</span></div>
+              <label class="layout-toggle-row">
+                <span class="layout-control-icon" aria-hidden="true">◎</span>
+                <span>Center current line</span>
+                <input
+                  type="checkbox"
+                  bind:checked={centerCurrentLine}
+                  on:change={() => view && scrollCursorIntoView(view)}
+                />
+              </label>
+              <label class="layout-range-row">
+                <span class="layout-control-icon" aria-hidden="true">⇤</span>
+                <span class="layout-range-label">Left margin</span>
+                <input type="range" min="0" max="400" step="2" bind:value={padLeft} class="slider" aria-label="Left padding" />
+                <span class="layout-range-value">{padLeft}px</span>
+              </label>
+              <label class="layout-range-row">
+                <span class="layout-control-icon" aria-hidden="true">⇥</span>
+                <span class="layout-range-label">Right border</span>
+                <input type="range" min="0" max="720" step="2" bind:value={padRight} class="slider" aria-label="Right padding" />
+                <span class="layout-range-value">{padRight}px</span>
+              </label>
+              <label class="layout-range-row">
+                <span class="layout-control-icon" aria-hidden="true">↥</span>
+                <span class="layout-range-label">Top margin</span>
+                <input type="range" min="0" max="400" step="2" bind:value={padTop} class="slider" aria-label="Top padding" />
+                <span class="layout-range-value">{padTop}px</span>
+              </label>
+            </section>
+
+            <section class="layout-panel-section">
+              <div class="layout-panel-heading"><span class="font-icon" aria-hidden="true">◫</span><span>Notes</span></div>
+              <div class="layout-segment-row">
+                <span class="layout-control-icon" aria-hidden="true">≡</span>
+                <span class="layout-range-label">Alignment</span>
+                <div class="layout-segment-control" role="group" aria-label="Notes alignment">
+                  <button type="button" class:active={blockquoteAlign === "left"} disabled={!blockquoteActive} on:click={() => view && updateCurrentBlockquote(view, { align: "left" })} aria-label="Align notes left">⇤</button>
+                  <button type="button" class:active={blockquoteAlign === "center"} disabled={!blockquoteActive} on:click={() => view && updateCurrentBlockquote(view, { align: "center" })} aria-label="Align notes center">↔</button>
+                  <button type="button" class:active={blockquoteAlign === "right"} disabled={!blockquoteActive} on:click={() => view && updateCurrentBlockquote(view, { align: "right" })} aria-label="Align notes right">⇥</button>
+                </div>
+              </div>
+              <label class="layout-range-row">
+                <span class="layout-control-icon" aria-hidden="true">▰</span>
+                <span class="layout-range-label">Background width</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  class="slider"
+                  aria-label="Notes width"
+                  disabled={!blockquoteActive}
+                  value={blockquoteBgWidth}
+                  on:input={e => {
+                    if (view) updateCurrentBlockquote(view, { width: +(e.target as HTMLInputElement).value });
+                  }}
+                />
+                <span class="layout-range-value">{blockquoteBgWidth}%</span>
+              </label>
+            </section>
+          </div>
+        </div>
+      {/if}
+    </div>
+  {/if}
 
   <div
     class="main"
@@ -3993,7 +4299,7 @@ ${body}
       --summary-content-pad-left: ${summaryFullscreen ? padLeft : 0}px;
       --summary-content-pad-right: ${summaryFullscreen ? padRight : 0}px;
       --summary-content-pad-top: ${summaryFullscreen ? padTop : 0}px;
-      --summary-content-pad-bottom: ${summaryFullscreen ? padBottom : 0}px;
+      --summary-content-pad-bottom: ${summaryFullscreen ? editorBottomPadding : 0}px;
       --summary-line-height: ${summaryFullscreen ? lineHeight : 1.28};
       --summary-paragraph-spacing: ${summaryFullscreen ? paragraphSpacing : 0}em;
     `}
@@ -4008,152 +4314,17 @@ ${body}
         </div>
       </div>
 
-      <div class="sidebar-section style-section">
-        <div class="style-controls">
-          <label class="mode-switch" aria-label="Switch between Annotate and Edit mode">
-            <span class:active={editorMode === "normal"}>Annotate</span>
-            <input
-              type="checkbox"
-              checked={editorMode === "insert"}
-              on:change={e => setMode((e.target as HTMLInputElement).checked ? "insert" : "normal")}
-            />
-            <span class="mode-track" aria-hidden="true">
-              <span class="mode-thumb"></span>
-            </span>
-            <span class:active={editorMode === "insert"}>Edit</span>
-          </label>
-          <button class="sidebar-label load-btn theme-toggle" on:click={toggleThemeMode}>Theme: {activeThemeName}</button>
-          <button
-            class="style-dropdown-toggle"
-            type="button"
-            aria-expanded={styleSettingsOpen}
-            on:click={() => styleSettingsOpen = !styleSettingsOpen}
-          >
-            Styles
-          </button>
-          {#if styleSettingsOpen}
-            <div class="style-list">
-              <div class="style-row style-row-plain">
-                <span class="style-swatch" style={`background: ${styleColor(0)}`}></span>
-                <span class="style-name">0. plain</span>
-              </div>
-              {#each orderedHighlightStyles as style, index}
-                <div
-                  class="style-row reorderable"
-                  role="listitem"
-                  class:drag-over={reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name}
-                  class:drop-after={reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name && reorderDropTarget.after}
-                  class:drop-before={reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name && !reorderDropTarget.after}
-                  on:dragover={event => updateReorderDropTarget("style", style.name, event)}
-                  on:drop={event => {
-                    if (reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name) {
-                      event.preventDefault();
-                      commitStyleReorder(style.name, reorderDropTarget.after);
-                    }
-                    finishReorderDrag();
-                  }}
-                  on:dragend={finishReorderDrag}
-                >
-                  <span class="style-swatch" style={`background: ${style.color}`}></span>
-                  <span class="style-name">{index + 1}. {style.name}</span>
-                  <input
-                    class="style-key-input"
-                    value={styleKeyForName(style.name)}
-                    aria-label={`Shortcut key for ${style.name}`}
-                    title={`Shortcut key for ${style.name}`}
-                    on:keydown={event => handleStyleKeydown(event, style.name)}
-                    on:input={event => assignStyleKey(style.name, (event.target as HTMLInputElement).value.slice(-1))}
-                    on:click={event => event.stopPropagation()}
-                  />
-                  <button
-                    class="reorder-handle"
-                    type="button"
-                    draggable="true"
-                    aria-label={`Drag ${style.name} to reorder`}
-                    title={`Drag ${style.name} to reorder`}
-                    on:mousedown={event => event.stopPropagation()}
-                    on:click={event => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                    }}
-                    on:dragstart={event => setReorderDragState("style", style.name, event)}
-                  >↕</button>
-                </div>
-              {/each}
-            </div>
-            <div class="style-footer-actions">
-              <button class="style-reset-btn" type="button" on:click={resetStyleOrder}>Reset order</button>
-              <button class="style-reset-btn" type="button" on:click={resetStyleKeys}>Reset keys</button>
-            </div>
-          {/if}
-        </div>
-      </div>
-
-      <div class="sidebar-section">
-        <div class="sidebar-label">Layout</div>
-        <div class="slider-row" data-tooltip="Left padding"><span class="slider-lbl">L</span><input type="range" min="0" max="400" step="2" bind:value={padLeft}   class="slider" aria-label="Left padding" /><span class="slider-val">{padLeft}</span></div>
-        <div class="slider-row" data-tooltip="Right padding"><span class="slider-lbl">R</span><input type="range" min="0" max="400" step="2" bind:value={padRight}  class="slider" aria-label="Right padding" /><span class="slider-val">{padRight}</span></div>
-        <div class="slider-row" data-tooltip="Top padding"><span class="slider-lbl">T</span><input type="range" min="0" max="400" step="2" bind:value={padTop}    class="slider" aria-label="Top padding" /><span class="slider-val">{padTop}</span></div>
-        <div class="slider-row" data-tooltip="Bottom padding"><span class="slider-lbl">B</span><input type="range" min="0" max={Math.max(0, editorViewportHeight - 48)} step="2" bind:value={padBottom} class="slider" aria-label="Bottom padding" /><span class="slider-val">{padBottom}</span></div>
-        <div class="slider-row" data-tooltip="Line height"><span class="slider-lbl">LH</span><input type="range" min="1" max="3" step="0.05" bind:value={lineHeight} class="slider" aria-label="Line height" /><span class="slider-val">{lineHeight.toFixed(2)}</span></div>
-        <div class="slider-row" data-tooltip="Spacing after each line"><span class="slider-lbl">PS</span><input type="range" min="0" max="2" step="0.05" bind:value={paragraphSpacing} class="slider" aria-label="Paragraph spacing" /><span class="slider-val">{paragraphSpacing.toFixed(2)}</span></div>
-        <div class="slider-row" data-tooltip="Font size"><span class="slider-lbl">FS</span><input type="range" min="10" max="28" step="1" bind:value={fontSize} class="slider" aria-label="Font size" /><span class="slider-val">{fontSize}</span></div>
-        <div class="slider-row" data-tooltip="Notes alignment">
-          <span class="slider-lbl">A</span>
-          <input type="range" min="0" max="2" step="1" class="slider"
-            aria-label="Notes alignment"
-            disabled={!blockquoteActive}
-            value={blockquoteAlign === "left" ? 0 : blockquoteAlign === "center" ? 1 : 2}
-            on:input={e => {
-              const align = ["left", "center", "right"][+(e.target as HTMLInputElement).value] as BlockquoteAlign;
-              if (view) updateCurrentBlockquote(view, { align });
-            }} />
-          <span class="slider-val">{blockquoteAlign[0].toUpperCase()}</span>
-        </div>
-        <div class="slider-row" data-tooltip="Notes width">
-          <span class="slider-lbl">BG</span>
-          <input
-            type="range"
-            min="0"
-            max="100"
-            step="1"
-            class="slider"
-            aria-label="Notes width"
-            disabled={!blockquoteActive}
-            value={blockquoteBgWidth}
-            on:input={e => {
-              if (view) updateCurrentBlockquote(view, { width: +(e.target as HTMLInputElement).value });
-            }}
-          />
-          <span class="slider-val">{blockquoteBgWidth}</span>
-        </div>
-      </div>
-
-      <div class="sidebar-section">
-        <div class="sidebar-label">Display</div>
-        <label class="sidebar-toggle">
-          <input type="radio" name="annotationMode" value="clean"
-            checked={annotationMode === "clean"}
-            on:change={() => { annotationMode = "clean"; view?.dispatch({}); view?.focus(); }} />
-          Clean
-        </label>
-        <label class="sidebar-toggle">
-          <input type="radio" name="annotationMode" value="raw"
-            checked={annotationMode === "raw"}
-            on:change={() => { annotationMode = "raw"; view?.dispatch({}); view?.focus(); }} />
-          Raw (current)
-        </label>
-        <label class="sidebar-toggle">
-          <input type="radio" name="annotationMode" value="all"
-            checked={annotationMode === "all"}
-            on:change={() => { annotationMode = "all"; view?.dispatch({}); view?.focus(); }} />
-          Raw (all)
-        </label>
-      </div>
-
     </div>
 
-    <div class="editor" bind:this={editorEl}></div>
+    <div class="editor" bind:this={editorEl} style={`--editor-right-padding: ${padRight}px;`}>
+      <button
+        class="right-padding-handle"
+        type="button"
+        aria-label="Drag right text border"
+        title="Drag right text border"
+        on:pointerdown={startRightPaddingDrag}
+      ></button>
+    </div>
 
     <aside class="summary-sidebar" class:collapsed={summaryCollapsed} class:fullscreen={summaryFullscreen} class:resizing={resizingSummarySidebar} aria-label="Annotation summary">
       {#if !summaryCollapsed && !summaryFullscreen}
@@ -4428,11 +4599,11 @@ ${body}
           <div class="audio-widget">
             <span class="audio-name">{audioFileName}</span>
             <span class="audio-sep">|</span>
-            <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(-mediaSeekSeconds)} title={`Back ${mediaSeekSeconds} seconds (Alt+Left or Alt+A/H)`} aria-label={`Back ${mediaSeekSeconds} seconds`}>&lt;&lt;</button>
-            <button class="audio-glyph play" type="button" on:click={toggleAudioPlayback} title="Play / pause (Alt+Up)" aria-label="Play / pause">{audioPlaying ? "⏸" : "▶"}</button>
-            <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(mediaSeekSeconds)} title={`Forward ${mediaSeekSeconds} seconds (Alt+Right or Alt+D/L)`} aria-label={`Forward ${mediaSeekSeconds} seconds`}>&gt;&gt;</button>
+            <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(-mediaSeekSeconds)} title={`Back ${mediaSeekSeconds} seconds (Alt+A/H)`} aria-label={`Back ${mediaSeekSeconds} seconds`}>&lt;&lt;</button>
+            <button class="audio-glyph play" type="button" on:click={toggleAudioPlayback} title="Play / pause (Alt+Space)" aria-label="Play / pause">{audioPlaying ? "⏸" : "▶"}</button>
+            <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(mediaSeekSeconds)} title={`Forward ${mediaSeekSeconds} seconds (Alt+D/L)`} aria-label={`Forward ${mediaSeekSeconds} seconds`}>&gt;&gt;</button>
             <span class="audio-sep">|</span>
-            <button class="audio-rate-text" type="button" on:click={cycleAudioRate} aria-label="Playback speed" title="Playback speed (Alt+Down or Alt+R)">{audioRateText}</button>
+            <button class="audio-rate-text" type="button" on:click={cycleAudioRate} aria-label="Playback speed" title="Playback speed (Alt+R)">{audioRateText}</button>
             <span class="audio-sep">|</span>
             <span class="audio-time">{formatAudioTime(audioCurrentTime)} / {formatAudioTime(audioDuration)}</span>
           </div>
@@ -4440,11 +4611,11 @@ ${body}
           <div class="audio-widget">
             <span class="audio-name">TTS</span>
             <span class="audio-sep">|</span>
-            <button class="audio-glyph" type="button" on:click={() => stepTts(-1)} title="Previous spoken chunk (Alt+Left or Alt+A/H)" aria-label="Previous spoken chunk">&lt;&lt;</button>
-            <button class="audio-glyph play" type="button" on:click={toggleTtsPlayback} title="Play / pause TTS (Alt+Up)" aria-label="Play / pause TTS">{ttsSpeaking && !ttsPaused ? "⏸" : "▶"}</button>
-            <button class="audio-glyph" type="button" on:click={() => stepTts(1)} title="Next spoken chunk (Alt+Right or Alt+D/L)" aria-label="Next spoken chunk">&gt;&gt;</button>
+            <button class="audio-glyph" type="button" on:click={() => stepTts(-1)} title="Previous spoken chunk (Alt+A/H)" aria-label="Previous spoken chunk">&lt;&lt;</button>
+            <button class="audio-glyph play" type="button" on:click={toggleTtsPlayback} title="Play / pause TTS (Alt+Space)" aria-label="Play / pause TTS">{ttsSpeaking && !ttsPaused ? "⏸" : "▶"}</button>
+            <button class="audio-glyph" type="button" on:click={() => stepTts(1)} title="Next spoken chunk (Alt+D/L)" aria-label="Next spoken chunk">&gt;&gt;</button>
             <span class="audio-sep">|</span>
-            <button class="audio-rate-text" type="button" on:click={cycleAudioRate} aria-label="TTS speed" title="TTS speed (Alt+Down or Alt+R)">{audioRateText}</button>
+            <button class="audio-rate-text" type="button" on:click={cycleAudioRate} aria-label="TTS speed" title="TTS speed (Alt+R)">{audioRateText}</button>
             <span class="audio-sep">|</span>
             <span class="audio-time">{ttsProgressText}</span>
           </div>
@@ -4553,6 +4724,7 @@ ${body}
   :global(body) { background: var(--bg); font-family: "Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, monospace; }
 
   .app {
+    position: relative;
     height: 100vh;
     display: grid;
     grid-template-rows: auto 1fr auto auto;
@@ -4582,6 +4754,89 @@ ${body}
     color: var(--fg-muted);
     margin-left: auto;
     margin-right: 10px;
+  }
+
+  .settings-btn {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    font-size: 14px;
+    line-height: 1;
+  }
+
+  .settings-btn.active {
+    border-color: var(--orange);
+    color: var(--orange);
+  }
+
+  .settings-popover {
+    position: absolute;
+    top: 42px;
+    left: 12px;
+    z-index: 80;
+    width: min(420px, calc(100vw - 24px));
+    max-height: calc(100vh - 58px);
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-hard);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.36);
+    overflow: hidden;
+  }
+
+  .settings-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-alt);
+  }
+
+  .settings-tabs button {
+    height: 32px;
+    border: none;
+    border-right: 1px solid var(--border);
+    background: transparent;
+    color: var(--fg-muted);
+    font: inherit;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    cursor: pointer;
+  }
+
+  .settings-tabs button:last-child {
+    border-right: none;
+  }
+
+  .settings-tabs button.active,
+  .settings-tabs button:hover,
+  .settings-tabs button:focus-visible {
+    color: var(--orange);
+    background: var(--bg-hard);
+    outline: none;
+  }
+
+  .settings-panel {
+    display: grid;
+    gap: 12px;
+    min-height: 0;
+    overflow: auto;
+    padding: 12px;
+  }
+
+  .settings-radio-group {
+    display: grid;
+    gap: 6px;
+  }
+
+  .settings-style-list {
+    position: static;
+    inset: auto;
+    z-index: auto;
+    margin-top: 0;
+    box-shadow: none;
   }
 
   .main {
@@ -5028,17 +5283,6 @@ ${body}
     gap: 6px;
   }
 
-  .style-controls {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .style-section {
-    padding-bottom: 8px;
-  }
-
   .sidebar-label {
     font-size: 10px;
     text-transform: uppercase;
@@ -5122,30 +5366,6 @@ ${body}
 
   .load-btn:hover {
     color: var(--orange);
-  }
-
-  .style-dropdown-toggle {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    width: 100%;
-    padding: 0;
-    background: none;
-    border: none;
-    color: var(--fg-muted);
-    font: inherit;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-weight: 600;
-    cursor: pointer;
-  }
-
-  .style-dropdown-toggle:hover,
-  .style-dropdown-toggle:focus-visible {
-    color: var(--orange);
-    outline: none;
   }
 
   .file-actions {
@@ -5314,7 +5534,7 @@ ${body}
     font-size: 10px;
   }
 
-  .style-key-input {
+  .style-key-badge {
     width: 28px;
     height: 20px;
     box-sizing: border-box;
@@ -5329,12 +5549,7 @@ ${body}
     line-height: 18px;
     text-align: center;
     text-transform: lowercase;
-    outline: none;
-  }
-
-  .style-key-input:focus {
-    border-color: var(--orange);
-    color: var(--orange);
+    user-select: none;
   }
 
   .reorder-handle {
@@ -5547,55 +5762,222 @@ ${body}
     opacity: 0.7;
   }
 
-  .slider-row {
-    position: relative;
-    display: flex;
-    align-items: center;
+  .layout-list {
+    display: grid;
+    gap: 10px;
+    margin-top: 6px;
+  }
+
+  .layout-panel-section {
+    display: grid;
     gap: 6px;
   }
 
-  .slider-row::after {
-    content: attr(data-tooltip);
-    position: absolute;
-    right: 0;
-    bottom: calc(100% + 4px);
-    z-index: 20;
-    max-width: 180px;
-    padding: 4px 7px;
-    border: 1px solid color-mix(in srgb, var(--border) 68%, transparent);
-    border-radius: 5px;
-    background: color-mix(in srgb, var(--bg-hard) 92%, transparent);
-    color: var(--fg);
+  .layout-panel-heading {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--orange);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.1;
+    text-transform: uppercase;
+  }
+
+  .font-icon,
+  .layout-control-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    font-family: "Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .font-icon {
+    width: 18px;
+    height: 18px;
+    border: 1px solid color-mix(in srgb, var(--orange) 42%, transparent);
+    border-radius: 4px;
+    color: var(--orange);
     font-size: 10px;
-    line-height: 1.25;
-    white-space: nowrap;
-    pointer-events: none;
-    opacity: 0;
-    transform: translateY(1px);
   }
 
-  .slider-row:hover::after,
-  .slider-row:focus-within::after {
-    opacity: 1;
-    transform: translateY(0);
+  .layout-control-icon {
+    width: 18px;
+    height: 18px;
+    color: var(--fg-muted);
+    font-size: 12px;
   }
 
-  .slider-lbl {
+  .layout-stepper-grid {
+    display: grid;
+    gap: 5px;
+  }
+
+  .layout-stepper {
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr) 42px auto;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
     color: var(--fg-muted);
     font-size: 11px;
-    width: 14px;
-    flex-shrink: 0;
   }
 
-  .slider-val {
-    color: var(--fg-muted);
+  .layout-stepper-label {
+    min-width: 0;
+    color: var(--fg);
     font-size: 11px;
-    width: 30px;
+  }
+
+  .layout-stepper-value {
+    color: var(--fg-muted);
+    font-size: 10px;
     text-align: right;
-    flex-shrink: 0;
   }
 
-  .editor { min-height: 0; height: 100%; overflow: hidden; }
+  .layout-stepper-buttons {
+    display: flex;
+    gap: 2px;
+  }
+
+  .layout-stepper-buttons button {
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: var(--bg-alt);
+    color: var(--fg-muted);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .layout-stepper-buttons button:hover,
+  .layout-stepper-buttons button:focus-visible {
+    border-color: var(--orange);
+    color: var(--orange);
+    outline: none;
+  }
+
+  .layout-toggle-row,
+  .layout-range-row,
+  .layout-segment-row {
+    display: grid;
+    align-items: center;
+    gap: 6px;
+    color: var(--fg);
+    font-size: 11px;
+  }
+
+  .layout-toggle-row {
+    grid-template-columns: 18px minmax(0, 1fr) auto;
+  }
+
+  .layout-toggle-row input {
+    accent-color: #7c6f64;
+  }
+
+  .layout-range-row {
+    grid-template-columns: 18px minmax(68px, 0.8fr) minmax(0, 1fr) 44px;
+  }
+
+  .layout-segment-row {
+    grid-template-columns: 18px minmax(68px, 0.8fr) minmax(0, 1fr);
+  }
+
+  .layout-range-label {
+    min-width: 0;
+    color: var(--fg);
+  }
+
+  .layout-range-value {
+    color: var(--fg-muted);
+    font-size: 10px;
+    text-align: right;
+  }
+
+  .layout-segment-control {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    background: var(--bg-alt);
+  }
+
+  .layout-segment-control button {
+    height: 22px;
+    padding: 0;
+    border: 0;
+    border-right: 1px solid var(--border);
+    background: transparent;
+    color: var(--fg-muted);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .layout-segment-control button:last-child {
+    border-right: 0;
+  }
+
+  .layout-segment-control button.active {
+    background: color-mix(in srgb, var(--orange) 16%, transparent);
+    color: var(--orange);
+  }
+
+  .layout-segment-control button:hover:not(:disabled),
+  .layout-segment-control button:focus-visible {
+    color: var(--orange);
+    outline: none;
+  }
+
+  .layout-segment-control button:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+
+  .editor { position: relative; min-height: 0; height: 100%; overflow: hidden; }
+  .right-padding-handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: calc(var(--editor-right-padding, 40px) - 1px);
+    z-index: 40;
+    width: 9px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    cursor: ew-resize;
+  }
+
+  .right-padding-handle::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 4px;
+    width: 1px;
+    background: color-mix(in srgb, var(--fg-muted) 30%, transparent);
+  }
+
+  .right-padding-handle:hover::after,
+  .right-padding-handle:focus-visible::after {
+    background: var(--orange);
+  }
+
+  .right-padding-handle:focus-visible {
+    outline: 1px solid var(--orange);
+    outline-offset: 1px;
+  }
+
   :global(.editor .cm-editor) { width: 100%; height: 100%; }
   :global(.cm-editor.cm-focused) { outline: none; }
   :global(.cm-scroller) { position: relative; }
