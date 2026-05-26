@@ -46,6 +46,10 @@ markdown instead of a proprietary document format.
 - **Transcript media playback** - load a media file beside an SRT transcript,
   click gutter timestamps, press `Enter` on transcript text, or use keyboard
   shortcuts to play and seek while reviewing.
+- **Bring-your-own-key transcription** - load an audio or video file, enter an
+  OpenAI API key in the Transcribe settings, and transcribe with `whisper-1`,
+  `gpt-4o-transcribe`, or `gpt-4o-mini-transcribe`. `whisper-1` transcripts
+  are loaded with timestamp cues for gutter playback.
 - **Browser text-to-speech** - for non-SRT documents without loaded media, the
   same compact player strip reads selected text or continues from the current
   cursor line using the browser or OS speech engine, preferring English voices
@@ -104,6 +108,18 @@ markdown editors and rendered comments stay hidden in normal markdown output.
 | `.docx` | Extracts raw text with `mammoth` and clears any previous media session unless new media is selected too. |
 | `.pdf` | Extracts text with `pdfjs-dist`, opens the review modal before loading, and clears any previous media session unless new media is selected too. |
 | Media | Loads `.mp3`, `.wav`, `.m4a`, `.ogg`, `.oga`, `.webm`, `.aac`, `.flac`, `.mp4`, `.mov`, or `.mkv` for transcript playback. |
+
+## OpenAI Transcription
+
+The app calls OpenAI's `/v1/audio/transcriptions` endpoint directly from the
+browser using the API key entered in Settings -> Transcribe. The key is kept in
+memory unless "Remember key on this device" is enabled, in which case it is
+stored in the browser's local storage.
+
+Choose `whisper-1` when you want timestamp cues that work with the transcript
+gutter and media playback. Choose `gpt-4o-transcribe` or
+`gpt-4o-mini-transcribe` when you want plain-text transcription from the newer
+models.
 
 ## Keyboard Shortcuts
 

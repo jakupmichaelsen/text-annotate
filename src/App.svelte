@@ -53,6 +53,7 @@
   let autosaveWriting = false;
   let audioUrl = "";
   let audioFileName = "";
+  let audioSourceFile: File | null = null;
   let audioElement: HTMLAudioElement | null = null;
   let audioCurrentTime = 0;
   let audioDuration = 0;
@@ -64,8 +65,17 @@
   const mediaSeekSeconds = 5;
   const audioDbName = "textAnnotate-state";
   const audioStoreName = "audio";
+  const openAiApiKeyStorageKey = "textAnnotate-openai-api-key";
   const mediaExtensions = [".mp3", ".wav", ".m4a", ".ogg", ".oga", ".webm", ".aac", ".flac", ".mp4", ".mov", ".mkv"];
   let loadedFileType = "Markdown";
+  type TranscriptionModel = "gpt-4o-transcribe" | "gpt-4o-mini-transcribe" | "whisper-1";
+  let openAiApiKey = "";
+  let rememberOpenAiApiKey = false;
+  let transcriptionModel: TranscriptionModel = "whisper-1";
+  let transcriptionPrompt = "";
+  let transcriptionBusy = false;
+  let transcriptionStatus = "";
+  let transcriptionError = "";
   type TtsSegment = { text: string; from: number; to: number };
   let ttsAvailable = false;
   let ttsSpeaking = false;
@@ -127,10 +137,12 @@
   let reorderDragState: ReorderDragState = null;
   let reorderDropTarget: ReorderDropTarget = null;
   let settingsOpen = false;
-  let settingsTab: "display" | "styles" | "layout" = "display";
+  let settingsTab: "display" | "styles" | "layout" | "transcribe" = "display";
   let followTimer: ReturnType<typeof setInterval> | null = null;
+  let lastAnnotateRightRepeatAt = 0;
   const summarySidebarMinWidth = 240;
   const summarySidebarMaxWidth = 720;
+  const annotateRightRepeatIntervalMs = 240;
   const themeStorageKey = "cm6-theme";
   const themeCompartment = new Compartment();
   const editableCompartment = new Compartment();
@@ -215,6 +227,7 @@
     if (audioUrl) URL.revokeObjectURL(audioUrl);
     audioUrl = "";
     audioFileName = "";
+    audioSourceFile = null;
     audioCurrentTime = 0;
     audioDuration = 0;
     audioPlaying = false;
@@ -307,6 +320,7 @@
     clearAudioTarget();
     audioUrl = URL.createObjectURL(file);
     audioFileName = file.name;
+    audioSourceFile = file;
     loadedFileType = file.name.split(".").pop()?.toUpperCase() || "MP3";
     if (audioElement) {
       audioElement.src = audioUrl;
@@ -624,6 +638,33 @@
     return event.key === " " || event.key === "Spacebar" || event.code === "Space";
   }
 
+  function isPlainRightArrow(event: KeyboardEvent) {
+    return !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey &&
+      (event.key === "ArrowRight" || event.key === "Right");
+  }
+
+  function throttleAnnotateRightRepeat(event: KeyboardEvent) {
+    if (editorMode !== "normal" || !isPlainRightArrow(event)) {
+      if (!event.repeat) lastAnnotateRightRepeatAt = 0;
+      return false;
+    }
+
+    if (!event.repeat) {
+      lastAnnotateRightRepeatAt = 0;
+      return false;
+    }
+
+    const now = performance.now();
+    if (lastAnnotateRightRepeatAt && now - lastAnnotateRightRepeatAt < annotateRightRepeatIntervalMs) {
+      event.preventDefault();
+      event.stopPropagation();
+      return true;
+    }
+
+    lastAnnotateRightRepeatAt = now;
+    return false;
+  }
+
   function isAudioShortcut(event: KeyboardEvent) {
     return event.altKey && !event.ctrlKey && !event.metaKey &&
       (
@@ -782,6 +823,7 @@
     if (isEditorEventTarget(event.target) || shouldDeferWindowShortcut(event)) return;
     handleAudioKeydown(event);
     if (event.defaultPrevented || !view || !isAppShortcutCandidate(event)) return;
+    if (throttleAnnotateRightRepeat(event)) return;
     if (!runScopeHandlers(view, event, "editor")) return;
     event.preventDefault();
     event.stopPropagation();
@@ -924,6 +966,124 @@
 
   function normalizeSrtTimestamp(timestamp: string) {
     return timestamp.trim().replace(",", ".");
+  }
+
+  function loadOpenAiApiKey() {
+    if (typeof localStorage === "undefined") return "";
+    return localStorage.getItem(openAiApiKeyStorageKey) ?? "";
+  }
+
+  function persistOpenAiApiKey() {
+    if (typeof localStorage === "undefined") return;
+    if (rememberOpenAiApiKey && openAiApiKey.trim()) {
+      localStorage.setItem(openAiApiKeyStorageKey, openAiApiKey.trim());
+    } else {
+      localStorage.removeItem(openAiApiKeyStorageKey);
+    }
+  }
+
+  function handleOpenAiKeyInput(event: Event) {
+    openAiApiKey = (event.target as HTMLInputElement).value;
+    persistOpenAiApiKey();
+  }
+
+  function toggleRememberOpenAiKey(event: Event) {
+    rememberOpenAiApiKey = (event.target as HTMLInputElement).checked;
+    persistOpenAiApiKey();
+  }
+
+  async function transcribeLoadedAudio() {
+    transcriptionError = "";
+    transcriptionStatus = "";
+    const apiKey = openAiApiKey.trim();
+    if (!audioSourceFile) {
+      transcriptionError = "Load an audio or video file first.";
+      return;
+    }
+    if (!apiKey) {
+      transcriptionError = "Enter an OpenAI API key in Transcribe settings.";
+      return;
+    }
+
+    transcriptionBusy = true;
+    transcriptionStatus = `Uploading ${audioFileName || "media"}...`;
+
+    try {
+      const formData = new FormData();
+      formData.append("file", audioSourceFile, audioSourceFile.name);
+      formData.append("model", transcriptionModel);
+      if (transcriptionPrompt.trim()) formData.append("prompt", transcriptionPrompt.trim());
+      if (transcriptionModel === "whisper-1") {
+        formData.append("response_format", "verbose_json");
+        formData.append("timestamp_granularities[]", "segment");
+      } else {
+        formData.append("response_format", "text");
+      }
+
+      const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: formData
+      });
+
+      const contentType = response.headers.get("content-type") ?? "";
+      const payload = contentType.includes("application/json") ? await response.json() : await response.text();
+
+      if (!response.ok) {
+        throw new Error(openAiErrorMessage(payload, response.status));
+      }
+
+      const transcript = transcriptionPayloadToText(payload);
+      if (!transcript.trim()) throw new Error("The transcription completed, but no text was returned.");
+
+      loadedFileType = transcriptionModel === "whisper-1" && transcript.includes("-->") ? "SRT" : "TRANSCRIPT";
+      replaceDocument(transcript, loadedFileType === "SRT");
+      transcriptionStatus = `Loaded transcript from ${audioFileName || "media"}.`;
+      persistOpenAiApiKey();
+    } catch (error) {
+      transcriptionError = error instanceof Error ? error.message : "Transcription failed.";
+      transcriptionStatus = "";
+    } finally {
+      transcriptionBusy = false;
+    }
+  }
+
+  function transcriptionPayloadToText(payload: unknown) {
+    if (typeof payload === "string") return stripEmptyLines(payload);
+    if (!payload || typeof payload !== "object") return "";
+
+    const data = payload as { text?: string; segments?: { start?: number; end?: number; text?: string }[] };
+    if (Array.isArray(data.segments) && data.segments.length) {
+      return data.segments
+        .map(segment => {
+          const text = (segment.text ?? "").replace(/\s+/g, " ").trim();
+          if (!text) return "";
+          return `[${formatSrtTime(segment.start ?? 0)} --> ${formatSrtTime(segment.end ?? segment.start ?? 0)}]\n${text}`;
+        })
+        .filter(Boolean)
+        .join("\n");
+    }
+
+    return stripEmptyLines(data.text ?? "");
+  }
+
+  function formatSrtTime(seconds: number) {
+    const value = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
+    const totalMs = Math.round(value * 1000);
+    const hours = Math.floor(totalMs / 3_600_000);
+    const minutes = Math.floor((totalMs % 3_600_000) / 60_000);
+    const wholeSeconds = Math.floor((totalMs % 60_000) / 1000);
+    const milliseconds = totalMs % 1000;
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(wholeSeconds).padStart(2, "0")}.${String(milliseconds).padStart(3, "0")}`;
+  }
+
+  function openAiErrorMessage(payload: unknown, status: number) {
+    if (payload && typeof payload === "object" && "error" in payload) {
+      const error = (payload as { error?: { message?: string } }).error;
+      if (error?.message) return error.message;
+    }
+    if (typeof payload === "string" && payload.trim()) return payload.trim();
+    return `OpenAI transcription request failed (${status}).`;
   }
 
   function stripEmptyLines(text: string) {
@@ -3997,6 +4157,7 @@ ${body}
       drawSelection(),
       editableCompartment.of(EditorView.editable.of(editorMode === "insert")),
       EditorView.contentAttributes.of({ tabindex: "0" }),
+      Prec.high(EditorView.domEventHandlers({ keydown: event => throttleAnnotateRightRepeat(event) })),
       history(),
       indentOnInput(),
       bracketMatching(),
@@ -4031,6 +4192,8 @@ ${body}
       synth.addEventListener("voiceschanged", onVoicesChanged);
     }
     const editorResizeObserver = new ResizeObserver(() => updateEditorViewportHeight());
+    openAiApiKey = loadOpenAiApiKey();
+    rememberOpenAiApiKey = Boolean(openAiApiKey);
     const initialDoc = localStorage.getItem("cm6-buffer") ?? starterDoc();
     const initialCursor = firstVisibleDocumentPosition(initialDoc);
 
@@ -4099,6 +4262,7 @@ ${body}
         <button type="button" class:active={settingsTab === "display"} on:click={() => settingsTab = "display"}>Display</button>
         <button type="button" class:active={settingsTab === "styles"} on:click={() => settingsTab = "styles"}>Styles</button>
         <button type="button" class:active={settingsTab === "layout"} on:click={() => settingsTab = "layout"}>Layout</button>
+        <button type="button" class:active={settingsTab === "transcribe"} on:click={() => settingsTab = "transcribe"}>Transcribe</button>
       </div>
 
       {#if settingsTab === "display"}
@@ -4184,7 +4348,7 @@ ${body}
             <button class="style-reset-btn" type="button" on:click={resetStyleOrder}>Reset order</button>
           </div>
         </div>
-      {:else}
+      {:else if settingsTab === "layout"}
         <div class="settings-panel">
           <div class="layout-list">
             <section class="layout-panel-section">
@@ -4283,6 +4447,52 @@ ${body}
             </section>
           </div>
         </div>
+      {:else}
+        <div class="settings-panel">
+          <div class="transcribe-panel">
+            <label class="transcribe-field">
+              <span class="sidebar-label">OpenAI API key</span>
+              <input
+                class="transcribe-input"
+                type="password"
+                autocomplete="off"
+                placeholder="sk-..."
+                value={openAiApiKey}
+                on:input={handleOpenAiKeyInput}
+              />
+            </label>
+            <label class="sidebar-toggle transcribe-remember">
+              <input type="checkbox" checked={rememberOpenAiApiKey} on:change={toggleRememberOpenAiKey} />
+              Remember key on this device
+            </label>
+            <label class="transcribe-field">
+              <span class="sidebar-label">Model</span>
+              <select class="transcribe-input" bind:value={transcriptionModel}>
+                <option value="whisper-1">whisper-1 (timestamps)</option>
+                <option value="gpt-4o-transcribe">gpt-4o-transcribe</option>
+                <option value="gpt-4o-mini-transcribe">gpt-4o-mini-transcribe</option>
+              </select>
+            </label>
+            <label class="transcribe-field">
+              <span class="sidebar-label">Prompt</span>
+              <textarea
+                class="transcribe-input transcribe-prompt"
+                rows="3"
+                bind:value={transcriptionPrompt}
+                placeholder="Names, terms, or context"
+              ></textarea>
+            </label>
+            <button class="toolbar-btn transcribe-submit" type="button" on:click={transcribeLoadedAudio} disabled={transcriptionBusy || !audioSourceFile}>
+              {transcriptionBusy ? "Transcribing..." : "Transcribe loaded media"}
+            </button>
+            {#if transcriptionStatus}
+              <div class="transcribe-status">{transcriptionStatus}</div>
+            {/if}
+            {#if transcriptionError}
+              <div class="transcribe-error">{transcriptionError}</div>
+            {/if}
+          </div>
+        </div>
       {/if}
     </div>
   {/if}
@@ -4311,7 +4521,13 @@ ${body}
         <div class="file-actions">
           <button class="sidebar-label load-btn" on:click={saveDocument}>Save</button>
           <button class="sidebar-label load-btn" on:click={exportCleanHtml}>Export</button>
+          <button class="sidebar-label load-btn" on:click={() => { settingsOpen = true; settingsTab = "transcribe"; }}>Transcribe</button>
         </div>
+        {#if transcriptionBusy || transcriptionStatus || transcriptionError}
+          <div class:transcribe-error={Boolean(transcriptionError)} class:transcribe-status={!transcriptionError}>
+            {transcriptionError || transcriptionStatus}
+          </div>
+        {/if}
       </div>
 
     </div>
@@ -4787,7 +5003,7 @@ ${body}
 
   .settings-tabs {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     border-bottom: 1px solid var(--border);
     background: var(--bg-alt);
   }
@@ -4837,6 +5053,61 @@ ${body}
     z-index: auto;
     margin-top: 0;
     box-shadow: none;
+  }
+
+  .transcribe-panel {
+    display: grid;
+    gap: 10px;
+  }
+
+  .transcribe-field {
+    display: grid;
+    gap: 5px;
+  }
+
+  .transcribe-input {
+    width: 100%;
+    min-width: 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg);
+    color: var(--fg);
+    padding: 6px 8px;
+    font-size: 11px;
+    line-height: 1.35;
+    outline: none;
+  }
+
+  .transcribe-input:focus {
+    border-color: var(--orange);
+  }
+
+  .transcribe-prompt {
+    resize: vertical;
+    min-height: 68px;
+  }
+
+  .transcribe-remember {
+    font-size: 11px;
+    color: var(--fg-muted);
+  }
+
+  .transcribe-submit {
+    justify-self: start;
+  }
+
+  .transcribe-status,
+  .transcribe-error {
+    font-size: 10px;
+    line-height: 1.35;
+  }
+
+  .transcribe-status {
+    color: var(--fg-muted);
+  }
+
+  .transcribe-error {
+    color: var(--yellow);
   }
 
   .main {
