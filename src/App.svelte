@@ -30,9 +30,9 @@
   let editorEl: HTMLDivElement;
   let view: EditorView;
   let fileInput: HTMLInputElement;
-  let padLeft = 24;
-  let padRight = 40;
-  let padTop = 16;
+  let padLeft = 0;
+  let padRight = 24;
+  let padTop = 0;
   let padBottom = 64;
   let editorViewportHeight = 0;
   let lineHeight = 1.6;
@@ -334,6 +334,7 @@
     audioUrl = URL.createObjectURL(file);
     audioFileName = file.name;
     audioSourceFile = file;
+    loadedDocumentName = file.name;
     loadedFileType = file.name.split(".").pop()?.toUpperCase() || "MP3";
     if (audioElement) {
       audioElement.src = audioUrl;
@@ -1185,11 +1186,11 @@
 
   function adjustLayoutValue(kind: "lineHeight" | "fontSize" | "paragraphSpacing", delta: number) {
     if (kind === "lineHeight") {
-      lineHeight = Math.round(clampNumber(lineHeight + delta * 0.05, 1, 3) * 100) / 100;
+      lineHeight = Math.round(clampNumber(lineHeight + delta * 0.15, 1, 3) * 100) / 100;
     } else if (kind === "fontSize") {
       fontSize = Math.round(clampNumber(fontSize + delta, 10, 28));
     } else {
-      paragraphSpacing = Math.round(clampNumber(paragraphSpacing + delta * 0.05, 0, 2) * 100) / 100;
+      paragraphSpacing = Math.round(clampNumber(paragraphSpacing + delta * 0.15, 0, 2) * 100) / 100;
     }
   }
 
@@ -4586,53 +4587,6 @@ ${body}
               </label>
             </div>
           </section>
-          <section class="settings-section">
-            <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">#</span><span>Color Shortcuts</span></div>
-            <div class="settings-radio-group" aria-label="Color shortcut mode">
-              <label class="settings-choice-row">
-                <span class="settings-control-icon" aria-hidden="true">1</span>
-                <span>Hardcoded</span>
-                <input
-                  type="radio"
-                  name="styleShortcutMode"
-                  value="hardcoded"
-                  checked={styleShortcutMode === "hardcoded"}
-                  on:change={() => { styleShortcutMode = "hardcoded"; persistStyleShortcutMode(); }}
-                />
-              </label>
-              <label class="settings-choice-row">
-                <span class="settings-control-icon" aria-hidden="true">↕</span>
-                <span>Manual</span>
-                <input
-                  type="radio"
-                  name="styleShortcutMode"
-                  value="manual"
-                  checked={styleShortcutMode === "manual"}
-                  on:change={() => { styleShortcutMode = "manual"; persistStyleShortcutMode(); }}
-                />
-              </label>
-            </div>
-            <div class="settings-field">
-              <span class="settings-field-label">Manual color</span>
-              <div class="settings-color-row">
-                <input
-                  class="settings-color-picker"
-                  type="color"
-                  value={colorPickerManualColor()}
-                  aria-label="Manual annotation color picker"
-                  on:input={e => { manualAnnotationColor = (e.target as HTMLInputElement).value; persistManualAnnotationColor(); }}
-                />
-                <input
-                  class="settings-input settings-color-code"
-                  value={manualAnnotationColor}
-                  placeholder={activeTheme.orange}
-                  aria-label="Manual annotation color hex code"
-                  on:change={e => { manualAnnotationColor = (e.target as HTMLInputElement).value; persistManualAnnotationColor(); }}
-                />
-                <button class="settings-inline-btn" type="button" on:click={resetManualAnnotationColor}>Reset</button>
-              </div>
-            </div>
-          </section>
         </div>
       {:else if settingsTab === "layout"}
         <div class="settings-panel">
@@ -4660,7 +4614,7 @@ ${body}
                 </div>
                 <div class="layout-stepper">
                   <span class="layout-control-icon" aria-hidden="true">¶</span>
-                  <span class="layout-stepper-label">Paragraph gap</span>
+                  <span class="layout-stepper-label">Paragraph spacing</span>
                   <span class="layout-stepper-value">{paragraphSpacing.toFixed(2)}</span>
                   <span class="layout-stepper-buttons">
                     <button type="button" on:click={() => adjustLayoutValue("paragraphSpacing", -1)} aria-label="Decrease paragraph spacing">−</button>
@@ -4682,24 +4636,6 @@ ${body}
                 />
               </label>
               <label class="layout-range-row">
-                <span class="layout-control-icon" aria-hidden="true">⇤</span>
-                <span class="layout-range-label">Left margin</span>
-                <input type="range" min="0" max="400" step="2" bind:value={padLeft} class="slider" aria-label="Left padding" />
-                <span class="layout-range-value">{padLeft}px</span>
-              </label>
-              <label class="layout-range-row">
-                <span class="layout-control-icon" aria-hidden="true">⇥</span>
-                <span class="layout-range-label">Right border</span>
-                <input type="range" min="0" max="720" step="2" bind:value={padRight} class="slider" aria-label="Right padding" />
-                <span class="layout-range-value">{padRight}px</span>
-              </label>
-              <label class="layout-range-row">
-                <span class="layout-control-icon" aria-hidden="true">↥</span>
-                <span class="layout-range-label">Top margin</span>
-                <input type="range" min="0" max="400" step="2" bind:value={padTop} class="slider" aria-label="Top padding" />
-                <span class="layout-range-value">{padTop}px</span>
-              </label>
-              <label class="layout-range-row">
                 <span class="layout-control-icon" aria-hidden="true">→</span>
                 <span class="layout-range-label">Right hold delay</span>
                 <input
@@ -4716,36 +4652,6 @@ ${body}
               </label>
             </section>
 
-            <section class="layout-panel-section">
-              <div class="layout-panel-heading"><span class="font-icon" aria-hidden="true">◫</span><span>Notes</span></div>
-              <div class="layout-segment-row">
-                <span class="layout-control-icon" aria-hidden="true">≡</span>
-                <span class="layout-range-label">Alignment</span>
-                <div class="layout-segment-control" role="group" aria-label="Notes alignment">
-                  <button type="button" class:active={blockquoteAlign === "left"} disabled={!blockquoteActive} on:click={() => view && updateCurrentBlockquote(view, { align: "left" })} aria-label="Align notes left">⇤</button>
-                  <button type="button" class:active={blockquoteAlign === "center"} disabled={!blockquoteActive} on:click={() => view && updateCurrentBlockquote(view, { align: "center" })} aria-label="Align notes center">↔</button>
-                  <button type="button" class:active={blockquoteAlign === "right"} disabled={!blockquoteActive} on:click={() => view && updateCurrentBlockquote(view, { align: "right" })} aria-label="Align notes right">⇥</button>
-                </div>
-              </div>
-              <label class="layout-range-row">
-                <span class="layout-control-icon" aria-hidden="true">▰</span>
-                <span class="layout-range-label">Background width</span>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="1"
-                  class="slider"
-                  aria-label="Notes width"
-                  disabled={!blockquoteActive}
-                  value={blockquoteBgWidth}
-                  on:input={e => {
-                    if (view) updateCurrentBlockquote(view, { width: +(e.target as HTMLInputElement).value });
-                  }}
-                />
-                <span class="layout-range-value">{blockquoteBgWidth}%</span>
-              </label>
-            </section>
           </div>
         </div>
       {:else if settingsTab === "transcribe"}
@@ -4820,7 +4726,7 @@ ${body}
     <div class="sidebar">
       <div class="sidebar-section">
         <input type="file" accept=".srt,.txt,.md,.docx,.pdf,.mp3,.wav,.m4a,.ogg,.oga,.webm,.aac,.flac,.mp4,.mov,.mkv" multiple style="display:none" bind:this={fileInput} on:change={loadFile} />
-        <button class="sidebar-label load-btn" on:click={() => fileInput.click()}>LOAD FILE(S)...</button>
+        <button class="sidebar-label load-btn" on:click={() => fileInput.click()}>LOAD</button>
         <div class="file-actions">
           <button class="sidebar-label load-btn" on:click={saveDocument}>Save</button>
           <button class="sidebar-label load-btn" on:click={exportCleanHtml}>Export</button>
@@ -5206,15 +5112,12 @@ ${body}
   {#if !summaryFullscreen}
     <div class="statusbar">
       <div class="status-left">
-        <span class="segment mode" style="color: {editorMode === 'insert' ? activeTheme.green : activeTheme.orange}">{editorModeLabel}</span>
         <span class="segment">{selectionInfo}</span>
         <span class="segment">{wordCountInfo}</span>
       </div>
       <div class="status-center">
         {#if audioUrl}
           <div class="audio-widget">
-            <span class="audio-name">{audioFileName}</span>
-            <span class="audio-sep">|</span>
             <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(-mediaSeekSeconds)} title={`Back ${mediaSeekSeconds} seconds (Alt+A/H)`} aria-label={`Back ${mediaSeekSeconds} seconds`}>&lt;&lt;</button>
             <button class="audio-glyph play" type="button" on:click={toggleAudioPlayback} title="Play / pause (F, Alt+Space)" aria-label="Play / pause">{audioPlaying ? "⏸" : "▶"}</button>
             <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(mediaSeekSeconds)} title={`Forward ${mediaSeekSeconds} seconds (Alt+D/L)`} aria-label={`Forward ${mediaSeekSeconds} seconds`}>&gt;&gt;</button>
@@ -5225,8 +5128,6 @@ ${body}
           </div>
         {:else if showTtsWidget}
           <div class="audio-widget">
-            <span class="audio-name">{statusFileName}</span>
-            <span class="audio-sep">|</span>
             <span class="audio-name">TTS</span>
             <span class="audio-sep">|</span>
             <button class="audio-glyph" type="button" on:click={() => seekTtsAndPlay(-1)} title="Previous spoken chunk (Alt+A/H)" aria-label="Previous spoken chunk">&lt;&lt;</button>
@@ -5241,9 +5142,6 @@ ${body}
       </div>
       <div class="status-right">
         <span class="segment file-name" title={statusFileName}>{statusFileName}</span>
-        <span class="segment">Ln {line}</span>
-        <span class="segment">Col {column}</span>
-        <span class="segment syntax">{loadedFileType}</span>
       </div>
     </div>
   {/if}
@@ -5386,10 +5284,10 @@ ${body}
     font-size: 14px;
     line-height: 1;
     background: transparent;
+    border: 0;
   }
 
   .settings-btn.active {
-    border-color: var(--orange);
     color: var(--orange);
   }
 
@@ -5547,48 +5445,6 @@ ${body}
   .settings-textarea {
     resize: vertical;
     min-height: 68px;
-  }
-
-  .settings-color-row {
-    display: grid;
-    grid-template-columns: 28px minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .settings-color-picker {
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--bg);
-    cursor: pointer;
-  }
-
-  .settings-color-code {
-    font-family: "Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, monospace;
-  }
-
-  .settings-inline-btn {
-    height: 28px;
-    padding: 0 8px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--bg-alt);
-    color: var(--fg-muted);
-    font: inherit;
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    cursor: pointer;
-  }
-
-  .settings-inline-btn:hover,
-  .settings-inline-btn:focus-visible {
-    border-color: var(--orange);
-    color: var(--orange);
-    outline: none;
   }
 
   .transcribe-status,
@@ -6177,6 +6033,7 @@ ${body}
 
   .help-btn {
     background: transparent;
+    border: 0;
     font-size: 14px;
     font-weight: 700;
     width: 26px;
@@ -6187,9 +6044,19 @@ ${body}
     justify-content: center;
     border-radius: 50%;
     color: var(--fg-muted);
-    border-color: var(--border);
   }
-  .help-btn:hover { color: var(--orange); border-color: var(--orange); }
+  .help-btn:hover,
+  .help-btn:focus-visible {
+    color: var(--orange);
+    outline: none;
+  }
+
+  .toolbar-btn.settings-btn,
+  .toolbar-btn.help-btn {
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+  }
 
   .help-overlay {
     position: fixed;
@@ -6247,7 +6114,7 @@ ${body}
 
   .style-list {
     display: grid;
-    gap: 4px;
+    gap: 6px;
     margin-top: 0;
   }
 
@@ -6261,18 +6128,18 @@ ${body}
 
   .style-row {
     display: grid;
-    grid-template-columns: 10px minmax(0, 1fr);
-    gap: 6px;
+    grid-template-columns: 16px minmax(0, 1fr);
+    gap: 8px;
     align-items: center;
-    padding: 1px 0;
+    padding: 2px 0;
   }
 
   .style-row-plain {
-    grid-template-columns: 10px minmax(0, 1fr);
+    grid-template-columns: 16px minmax(0, 1fr);
   }
 
   .style-row.reorderable {
-    grid-template-columns: 10px minmax(0, 1fr) 28px 20px;
+    grid-template-columns: 16px minmax(0, 1fr) 28px 20px;
   }
 
   .style-row.reorderable.drop-before {
@@ -6284,9 +6151,9 @@ ${body}
   }
 
   .style-swatch {
-    width: 8px;
-    height: 8px;
-    border-radius: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
     border: 1px solid rgba(0, 0, 0, 0.2);
   }
 
@@ -6301,7 +6168,7 @@ ${body}
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--fg);
-    font-size: 10px;
+    font-size: 12px;
   }
 
   .style-title-action {
@@ -6310,7 +6177,7 @@ ${body}
     border: 0;
     background: transparent;
     font: inherit;
-    font-size: 10px;
+    font-size: 12px;
     text-align: left;
     cursor: text;
   }
@@ -6329,7 +6196,7 @@ ${body}
     background: var(--bg);
     color: var(--fg);
     font: inherit;
-    font-size: 10px;
+    font-size: 12px;
     outline: none;
   }
 
@@ -6669,8 +6536,7 @@ ${body}
   }
 
   .layout-toggle-row,
-  .layout-range-row,
-  .layout-segment-row {
+  .layout-range-row {
     display: grid;
     align-items: center;
     gap: 6px;
@@ -6690,10 +6556,6 @@ ${body}
     grid-template-columns: 18px minmax(68px, 0.8fr) minmax(0, 1fr) 44px;
   }
 
-  .layout-segment-row {
-    grid-template-columns: 18px minmax(68px, 0.8fr) minmax(0, 1fr);
-  }
-
   .layout-range-label {
     min-width: 0;
     color: var(--fg);
@@ -6703,47 +6565,6 @@ ${body}
     color: var(--fg-muted);
     font-size: 10px;
     text-align: right;
-  }
-
-  .layout-segment-control {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    overflow: hidden;
-    background: var(--bg-alt);
-  }
-
-  .layout-segment-control button {
-    height: 22px;
-    padding: 0;
-    border: 0;
-    border-right: 1px solid var(--border);
-    background: transparent;
-    color: var(--fg-muted);
-    font: inherit;
-    font-size: 12px;
-    cursor: pointer;
-  }
-
-  .layout-segment-control button:last-child {
-    border-right: 0;
-  }
-
-  .layout-segment-control button.active {
-    background: color-mix(in srgb, var(--orange) 16%, transparent);
-    color: var(--orange);
-  }
-
-  .layout-segment-control button:hover:not(:disabled),
-  .layout-segment-control button:focus-visible {
-    color: var(--orange);
-    outline: none;
-  }
-
-  .layout-segment-control button:disabled {
-    cursor: not-allowed;
-    opacity: 0.45;
   }
 
   .editor { position: relative; min-height: 0; height: 100%; overflow: hidden; }
@@ -6881,8 +6702,6 @@ ${body}
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .syntax { color: var(--orange); }
-  .mode { color: var(--orange); font-weight: 600; }
   .audio-widget {
     display: inline-flex;
     align-items: center;
