@@ -137,7 +137,7 @@
   let reorderDragState: ReorderDragState = null;
   let reorderDropTarget: ReorderDropTarget = null;
   let settingsOpen = false;
-  let settingsTab: "display" | "styles" | "layout" | "transcribe" = "display";
+  let settingsTab: "markup" | "styles" | "layout" | "transcribe" = "markup";
   let followTimer: ReturnType<typeof setInterval> | null = null;
   let lastAnnotateRightRepeatAt = 0;
   const summarySidebarMinWidth = 240;
@@ -995,14 +995,20 @@
   async function transcribeLoadedAudio() {
     transcriptionError = "";
     transcriptionStatus = "";
-    const apiKey = openAiApiKey.trim();
     if (!audioSourceFile) {
       transcriptionError = "Load an audio or video file first.";
       return;
     }
+    let apiKey = openAiApiKey.trim();
     if (!apiKey) {
-      transcriptionError = "Enter an OpenAI API key in Transcribe settings.";
-      return;
+      const enteredKey = prompt("OpenAI API key");
+      apiKey = enteredKey?.trim() ?? "";
+      if (!apiKey) {
+        transcriptionError = "OpenAI API key is required for transcription.";
+        return;
+      }
+      openAiApiKey = apiKey;
+      persistOpenAiApiKey();
     }
 
     transcriptionBusy = true;
@@ -4259,28 +4265,15 @@ ${body}
   {#if settingsOpen}
     <div class="settings-popover" role="dialog" aria-label="Settings">
       <div class="settings-tabs" role="tablist" aria-label="Settings sections">
-        <button type="button" class:active={settingsTab === "display"} on:click={() => settingsTab = "display"}>Display</button>
+        <button type="button" class:active={settingsTab === "markup"} on:click={() => settingsTab = "markup"}>Markup</button>
         <button type="button" class:active={settingsTab === "styles"} on:click={() => settingsTab = "styles"}>Styles</button>
         <button type="button" class:active={settingsTab === "layout"} on:click={() => settingsTab = "layout"}>Layout</button>
         <button type="button" class:active={settingsTab === "transcribe"} on:click={() => settingsTab = "transcribe"}>Transcribe</button>
       </div>
 
-      {#if settingsTab === "display"}
+      {#if settingsTab === "markup"}
         <div class="settings-panel">
-          <label class="mode-switch" aria-label="Switch between Annotate and Edit mode">
-            <span class:active={editorMode === "normal"}>Annotate</span>
-            <input
-              type="checkbox"
-              checked={editorMode === "insert"}
-              on:change={e => setMode((e.target as HTMLInputElement).checked ? "insert" : "normal")}
-            />
-            <span class="mode-track" aria-hidden="true">
-              <span class="mode-thumb"></span>
-            </span>
-            <span class:active={editorMode === "insert"}>Edit</span>
-          </label>
-          <button class="sidebar-label load-btn theme-toggle" on:click={toggleThemeMode}>Theme: {activeThemeName}</button>
-          <div class="settings-radio-group" aria-label="Display mode">
+          <div class="settings-radio-group" aria-label="Markup visibility">
             <label class="sidebar-toggle">
               <input type="radio" name="annotationMode" value="clean"
                 checked={annotationMode === "clean"}
@@ -4447,7 +4440,7 @@ ${body}
             </section>
           </div>
         </div>
-      {:else}
+      {:else if settingsTab === "transcribe"}
         <div class="settings-panel">
           <div class="transcribe-panel">
             <label class="transcribe-field">
@@ -4482,9 +4475,6 @@ ${body}
                 placeholder="Names, terms, or context"
               ></textarea>
             </label>
-            <button class="toolbar-btn transcribe-submit" type="button" on:click={transcribeLoadedAudio} disabled={transcriptionBusy || !audioSourceFile}>
-              {transcriptionBusy ? "Transcribing..." : "Transcribe loaded media"}
-            </button>
             {#if transcriptionStatus}
               <div class="transcribe-status">{transcriptionStatus}</div>
             {/if}
@@ -4516,12 +4506,30 @@ ${body}
   >
     <div class="sidebar">
       <div class="sidebar-section">
+        <label class="mode-switch" aria-label="Switch between Annotate and Edit mode">
+          <span class:active={editorMode === "normal"}>Annotate</span>
+          <input
+            type="checkbox"
+            checked={editorMode === "insert"}
+            on:change={e => setMode((e.target as HTMLInputElement).checked ? "insert" : "normal")}
+          />
+          <span class="mode-track" aria-hidden="true">
+            <span class="mode-thumb"></span>
+          </span>
+          <span class:active={editorMode === "insert"}>Edit</span>
+        </label>
+        <button class="sidebar-label load-btn theme-toggle" on:click={toggleThemeMode}>Theme: {activeThemeName}</button>
+      </div>
+
+      <div class="sidebar-section">
         <input type="file" accept=".srt,.txt,.md,.docx,.pdf,.mp3,.wav,.m4a,.ogg,.oga,.webm,.aac,.flac,.mp4,.mov,.mkv" multiple style="display:none" bind:this={fileInput} on:change={loadFile} />
         <button class="sidebar-label load-btn" on:click={() => fileInput.click()}>LOAD FILE(S)...</button>
         <div class="file-actions">
           <button class="sidebar-label load-btn" on:click={saveDocument}>Save</button>
           <button class="sidebar-label load-btn" on:click={exportCleanHtml}>Export</button>
-          <button class="sidebar-label load-btn" on:click={() => { settingsOpen = true; settingsTab = "transcribe"; }}>Transcribe</button>
+          <button class="sidebar-label load-btn" on:click={transcribeLoadedAudio} disabled={transcriptionBusy}>
+            {transcriptionBusy ? "Transcribing..." : "Transcribe"}
+          </button>
         </div>
         {#if transcriptionBusy || transcriptionStatus || transcriptionError}
           <div class:transcribe-error={Boolean(transcriptionError)} class:transcribe-status={!transcriptionError}>
@@ -5048,10 +5056,15 @@ ${body}
   }
 
   .settings-style-list {
+    display: grid;
     position: static;
     inset: auto;
     z-index: auto;
     margin-top: 0;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
     box-shadow: none;
   }
 
@@ -5068,6 +5081,7 @@ ${body}
   .transcribe-input {
     width: 100%;
     min-width: 0;
+    box-sizing: border-box;
     border: 1px solid var(--border);
     border-radius: 4px;
     background: var(--bg);
@@ -5090,10 +5104,6 @@ ${body}
   .transcribe-remember {
     font-size: 11px;
     color: var(--fg-muted);
-  }
-
-  .transcribe-submit {
-    justify-self: start;
   }
 
   .transcribe-status,
