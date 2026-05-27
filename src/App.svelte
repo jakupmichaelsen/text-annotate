@@ -1724,11 +1724,19 @@ ${body}
   const defaultStyleKeyOrder = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "z", "x", "c", "v", "b", "n", "m", ",", ".", "/"];
   const defaultStyleOrder = [...baseHighlightStyles.map(s => s.name), manualStyleName];
   let styleOrder = loadStyleOrder();
-  $: manualStyleColor = normalizedManualAnnotationColor(manualAnnotationColor) || activeTheme.orange;
-  $: highlightStyles = [...baseHighlightStyles, { name: manualStyleName, color: manualStyleColor }];
+  $: manualStyleColor = currentManualStyleColor(activeTheme);
+  $: highlightStyles = currentHighlightStyles(activeTheme);
   $: orderedHighlightStyles = (styleShortcutMode === "manual" ? styleOrder : defaultStyleOrder)
     .map(name => highlightStyles.find(s => s.name === name))
     .filter((style): style is typeof highlightStyles[number] => !!style);
+
+  function currentManualStyleColor(theme = activeTheme) {
+    return normalizedManualAnnotationColor(manualAnnotationColor) || theme.orange;
+  }
+
+  function currentHighlightStyles(theme = activeTheme) {
+    return [...baseHighlightStyles, { name: manualStyleName, color: currentManualStyleColor(theme) }];
+  }
 
   function cycleStyle(delta: number) {
     currentStyle = cycleStyleNumber(currentStyle, delta);
@@ -1777,10 +1785,11 @@ ${body}
     return index < 0 ? 1 : index + 1;
   }
 
-  function styleColorForName(name: string) {
+  function styleColorForName(name: string, theme = activeTheme) {
     const base = baseStyleName(name);
-    if (base === "plain") return activeTheme.orange;
-    return highlightStyles.find(s => s.name === base)?.color ?? activeTheme.yellow;
+    if (base === "plain") return theme.orange;
+    if (base === manualStyleName) return currentManualStyleColor(theme);
+    return baseHighlightStyles.find(s => s.name === base)?.color ?? theme.yellow;
   }
 
   function styleKeyForName(name: string) {
@@ -1832,6 +1841,14 @@ ${body}
     return normalizedManualAnnotationColor(localStorage.getItem(manualAnnotationColorStorageKey) ?? "");
   }
 
+  function colorPickerManualColor() {
+    const normalized = normalizedManualAnnotationColor(manualAnnotationColor) || activeTheme.orange;
+    if (/^#[0-9a-f]{3}$/i.test(normalized)) {
+      return `#${normalized.slice(1).split("").map(char => `${char}${char}`).join("")}`;
+    }
+    return normalized.slice(0, 7);
+  }
+
   function persistManualAnnotationColor() {
     const normalized = normalizedManualAnnotationColor(manualAnnotationColor);
     manualAnnotationColor = normalized;
@@ -1839,7 +1856,12 @@ ${body}
       if (normalized) localStorage.setItem(manualAnnotationColorStorageKey, normalized);
       else localStorage.removeItem(manualAnnotationColorStorageKey);
     }
-    view?.dispatch({});
+    view?.dispatch({ effects: themeCompartment.reconfigure(buildThemeExtensions(getTheme(themeMode))) });
+  }
+
+  function resetManualAnnotationColor() {
+    manualAnnotationColor = "";
+    persistManualAnnotationColor();
   }
 
   function loadStyleOrder() {
@@ -3314,8 +3336,8 @@ ${body}
 
   function buildHighlightDecorator(theme: ThemePalette): Extension {
     const colorTheme = EditorView.theme(Object.fromEntries(
-      highlightStyles.flatMap(s => {
-        const color = styleColorForName(s.name);
+      currentHighlightStyles(theme).flatMap(s => {
+        const color = styleColorForName(s.name, theme);
         return [
           [`.cm-annotation-${s.name}`, { backgroundColor: color, color: contrastColor(color, theme.bg, theme.fg), borderRadius: "3px", padding: "0 2px" }],
           [`.cm-annotation-${boxStyleName(s.name)}`, { backgroundColor: "transparent", color, border: `1px solid ${color}`, borderRadius: "3px", padding: "0 2px" }]
@@ -4490,15 +4512,26 @@ ${body}
                 />
               </label>
             </div>
-            <label class="settings-field">
+            <div class="settings-field">
               <span class="settings-field-label">Manual color</span>
-              <input
-                class="settings-input"
-                value={manualAnnotationColor || manualStyleColor}
-                placeholder={activeTheme.orange}
-                on:change={e => { manualAnnotationColor = (e.target as HTMLInputElement).value; persistManualAnnotationColor(); }}
-              />
-            </label>
+              <div class="settings-color-row">
+                <input
+                  class="settings-color-picker"
+                  type="color"
+                  value={colorPickerManualColor()}
+                  aria-label="Manual annotation color picker"
+                  on:input={e => { manualAnnotationColor = (e.target as HTMLInputElement).value; persistManualAnnotationColor(); }}
+                />
+                <input
+                  class="settings-input settings-color-code"
+                  value={manualAnnotationColor}
+                  placeholder={activeTheme.orange}
+                  aria-label="Manual annotation color hex code"
+                  on:change={e => { manualAnnotationColor = (e.target as HTMLInputElement).value; persistManualAnnotationColor(); }}
+                />
+                <button class="settings-inline-btn" type="button" on:click={resetManualAnnotationColor}>Reset</button>
+              </div>
+            </div>
           </section>
         </div>
       {:else if settingsTab === "layout"}
@@ -5389,6 +5422,48 @@ ${body}
   .settings-textarea {
     resize: vertical;
     min-height: 68px;
+  }
+
+  .settings-color-row {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .settings-color-picker {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg);
+    cursor: pointer;
+  }
+
+  .settings-color-code {
+    font-family: "Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+  }
+
+  .settings-inline-btn {
+    height: 28px;
+    padding: 0 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-alt);
+    color: var(--fg-muted);
+    font: inherit;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+
+  .settings-inline-btn:hover,
+  .settings-inline-btn:focus-visible {
+    border-color: var(--orange);
+    color: var(--orange);
+    outline: none;
   }
 
   .transcribe-status,
