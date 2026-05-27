@@ -48,6 +48,7 @@
   let pdfParseError = "";
   let activeSaveHandle: any = null;
   let activeSaveName = "";
+  let loadedDocumentName = "Untitled";
   let pendingAutosaveText: string | null = null;
   let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
   let autosaveWriting = false;
@@ -94,6 +95,7 @@
   $: audioRateText = formatPlaybackRate(audioPlaybackRate);
   $: showTtsWidget = ttsAvailable && !audioUrl && loadedFileType !== "SRT";
   $: ttsProgressText = ttsStatus || (ttsSegments.length ? `${Math.min(ttsIndex + 1, ttsSegments.length)}/${ttsSegments.length}` : "ready");
+  $: statusFileName = activeSaveName || loadedDocumentName || "Untitled";
 
   const styleShortcutModeStorageKey = "cm6-style-shortcut-mode";
   const manualAnnotationColorStorageKey = "cm6-manual-annotation-color";
@@ -933,6 +935,7 @@
     if (audioFile) await loadAudioFile(audioFile);
     else if (!srtFile) clearAudioSession();
     if (srtFile) {
+      loadedDocumentName = srtFile.name;
       loadedFileType = "SRT";
       replaceDocument(formatSrtTranscript(await srtFile.text()), true);
       return;
@@ -942,12 +945,14 @@
     if (!file) return;
 
     if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+      loadedDocumentName = file.name;
       loadedFileType = "PDF";
       await openPdfModal(file);
       return;
     }
 
     if (file.name.toLowerCase().endsWith(".docx")) {
+      loadedDocumentName = file.name;
       loadedFileType = "DOCX";
       const buffer = await file.arrayBuffer();
       const mammoth = await import("mammoth");
@@ -956,6 +961,7 @@
       return;
     }
 
+    loadedDocumentName = file.name;
     loadedFileType = file.name.split(".").pop()?.toUpperCase() || "TEXT";
     replaceDocument(stripEmptyLines(await file.text()));
   }
@@ -1082,6 +1088,7 @@
       const transcript = transcriptionPayloadToText(payload);
       if (!transcript.trim()) throw new Error("The transcription completed, but no text was returned.");
 
+      loadedDocumentName = audioFileName ? `${stripExtension(audioFileName)} transcript` : "Transcript";
       loadedFileType = transcriptionModel === "whisper-1" && transcript.includes("-->") ? "SRT" : "TRANSCRIPT";
       replaceDocument(transcript, loadedFileType === "SRT");
       transcriptionStatus = `Loaded transcript from ${audioFileName || "media"}.`;
@@ -2220,7 +2227,8 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
         opacity: "0 !important",
         visibility: "hidden !important"
       },
-      "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { backgroundColor: `${theme.orange} !important`, color: theme.bg, opacity: "50%" },
+      "&.mode-normal.cm-focused .cm-selectionBackground, &.mode-normal .cm-selectionBackground, &.mode-normal .cm-content ::selection": { backgroundColor: `${theme.orange} !important`, opacity: "50%" },
+      "&.mode-insert.cm-focused .cm-selectionBackground, &.mode-insert .cm-selectionBackground, &.mode-insert .cm-content ::selection": { backgroundColor: `${theme.selection} !important` },
       ".cm-gutters": { backgroundColor: theme.bgHard, color: theme.gutterText, borderRight: "none" },
       ".cm-activeLine": { backgroundColor: theme.activeLine },
       ".cm-activeLineGutter": { color: theme.gutterText, backgroundColor: theme.bgHard },
@@ -5217,6 +5225,8 @@ ${body}
           </div>
         {:else if showTtsWidget}
           <div class="audio-widget">
+            <span class="audio-name">{statusFileName}</span>
+            <span class="audio-sep">|</span>
             <span class="audio-name">TTS</span>
             <span class="audio-sep">|</span>
             <button class="audio-glyph" type="button" on:click={() => seekTtsAndPlay(-1)} title="Previous spoken chunk (Alt+A/H)" aria-label="Previous spoken chunk">&lt;&lt;</button>
@@ -5230,6 +5240,7 @@ ${body}
         {/if}
       </div>
       <div class="status-right">
+        <span class="segment file-name" title={statusFileName}>{statusFileName}</span>
         <span class="segment">Ln {line}</span>
         <span class="segment">Col {column}</span>
         <span class="segment syntax">{loadedFileType}</span>
@@ -6865,6 +6876,11 @@ ${body}
   }
   .segment:last-child { border-right: none; }
   .status-right .segment:first-child { border-left: 1px solid var(--internal-border); }
+  .file-name {
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
   .syntax { color: var(--orange); }
   .mode { color: var(--orange); font-weight: 600; }
   .audio-widget {
