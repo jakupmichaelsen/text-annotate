@@ -4374,30 +4374,40 @@ ${body}
 
       {#if settingsTab === "markup"}
         <div class="settings-panel">
-          <label class="sidebar-toggle">
-            <input type="checkbox" bind:checked={divideImportSentences} />
-            Divide imported sentences into lines
-          </label>
-          <div class="settings-radio-group" aria-label="Markup visibility">
-            <label class="sidebar-toggle">
-              <input type="radio" name="annotationMode" value="clean"
-                checked={annotationMode === "clean"}
-                on:change={() => { annotationMode = "clean"; view?.dispatch({}); view?.focus(); }} />
-              Clean
+          <section class="settings-section">
+            <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">↵</span><span>Import</span></div>
+            <label class="settings-toggle-row">
+              <span class="settings-control-icon" aria-hidden="true">¶</span>
+              <span>Divide imported sentences into lines</span>
+              <input type="checkbox" bind:checked={divideImportSentences} />
             </label>
-            <label class="sidebar-toggle">
-              <input type="radio" name="annotationMode" value="raw"
-                checked={annotationMode === "raw"}
-                on:change={() => { annotationMode = "raw"; view?.dispatch({}); view?.focus(); }} />
-              Raw (current)
-            </label>
-            <label class="sidebar-toggle">
-              <input type="radio" name="annotationMode" value="all"
-                checked={annotationMode === "all"}
-                on:change={() => { annotationMode = "all"; view?.dispatch({}); view?.focus(); }} />
-              Raw (all)
-            </label>
-          </div>
+          </section>
+          <section class="settings-section">
+            <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">`</span><span>Markup Visibility</span></div>
+            <div class="settings-radio-group" aria-label="Markup visibility">
+              <label class="settings-choice-row">
+                <span class="settings-control-icon" aria-hidden="true">✓</span>
+                <span>Clean</span>
+                <input type="radio" name="annotationMode" value="clean"
+                  checked={annotationMode === "clean"}
+                  on:change={() => { annotationMode = "clean"; view?.dispatch({}); view?.focus(); }} />
+              </label>
+              <label class="settings-choice-row">
+                <span class="settings-control-icon" aria-hidden="true">•</span>
+                <span>Raw (current)</span>
+                <input type="radio" name="annotationMode" value="raw"
+                  checked={annotationMode === "raw"}
+                  on:change={() => { annotationMode = "raw"; view?.dispatch({}); view?.focus(); }} />
+              </label>
+              <label class="settings-choice-row">
+                <span class="settings-control-icon" aria-hidden="true">≡</span>
+                <span>Raw (all)</span>
+                <input type="radio" name="annotationMode" value="all"
+                  checked={annotationMode === "all"}
+                  on:change={() => { annotationMode = "all"; view?.dispatch({}); view?.focus(); }} />
+              </label>
+            </div>
+          </section>
         </div>
       {:else if settingsTab === "layout"}
         <div class="settings-panel">
@@ -4515,11 +4525,12 @@ ${body}
         </div>
       {:else if settingsTab === "transcribe"}
         <div class="settings-panel">
-          <div class="transcribe-panel">
-            <label class="transcribe-field">
-              <span class="sidebar-label">OpenAI API key</span>
+          <section class="settings-section">
+            <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">⎋</span><span>Connection</span></div>
+            <label class="settings-field">
+              <span class="settings-field-label">OpenAI API key</span>
               <input
-                class="transcribe-input"
+                class="settings-input"
                 type="password"
                 autocomplete="off"
                 placeholder="sk-..."
@@ -4527,22 +4538,26 @@ ${body}
                 on:input={handleOpenAiKeyInput}
               />
             </label>
-            <label class="sidebar-toggle transcribe-remember">
+            <label class="settings-toggle-row">
+              <span class="settings-control-icon" aria-hidden="true">◎</span>
+              <span>Remember key on this device</span>
               <input type="checkbox" checked={rememberOpenAiApiKey} on:change={toggleRememberOpenAiKey} />
-              Remember key on this device
             </label>
-            <label class="transcribe-field">
-              <span class="sidebar-label">Model</span>
-              <select class="transcribe-input" bind:value={transcriptionModel}>
+          </section>
+          <section class="settings-section">
+            <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">▣</span><span>Transcription</span></div>
+            <label class="settings-field">
+              <span class="settings-field-label">Model</span>
+              <select class="settings-input" bind:value={transcriptionModel}>
                 <option value="whisper-1">whisper-1 (timestamps)</option>
                 <option value="gpt-4o-transcribe">gpt-4o-transcribe</option>
                 <option value="gpt-4o-mini-transcribe">gpt-4o-mini-transcribe</option>
               </select>
             </label>
-            <label class="transcribe-field">
-              <span class="sidebar-label">Prompt</span>
+            <label class="settings-field">
+              <span class="settings-field-label">Prompt</span>
               <textarea
-                class="transcribe-input transcribe-prompt"
+                class="settings-input settings-textarea"
                 rows="3"
                 bind:value={transcriptionPrompt}
                 placeholder="Names, terms, or context"
@@ -4554,7 +4569,7 @@ ${body}
             {#if transcriptionError}
               <div class="transcribe-error">{transcriptionError}</div>
             {/if}
-          </div>
+          </section>
         </div>
       {/if}
     </div>
@@ -5141,7 +5156,7 @@ ${body}
 
   .settings-tabs {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     border-bottom: 1px solid var(--border);
     background: var(--bg-alt);
   }
@@ -5185,17 +5200,78 @@ ${body}
     gap: 6px;
   }
 
-  .transcribe-panel {
+  .settings-section {
     display: grid;
-    gap: 10px;
+    gap: 6px;
   }
 
-  .transcribe-field {
+  .settings-section-heading {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--orange);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.1;
+    text-transform: uppercase;
+  }
+
+  .settings-section-icon,
+  .settings-control-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    font-family: "Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .settings-section-icon {
+    width: 18px;
+    height: 18px;
+    border: 1px solid color-mix(in srgb, var(--orange) 42%, transparent);
+    border-radius: 4px;
+    color: var(--orange);
+    font-size: 10px;
+  }
+
+  .settings-control-icon {
+    width: 18px;
+    height: 18px;
+    color: var(--fg-muted);
+    font-size: 12px;
+  }
+
+  .settings-toggle-row,
+  .settings-choice-row {
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px;
+    color: var(--fg);
+    font-size: 11px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .settings-toggle-row input,
+  .settings-choice-row input {
+    accent-color: #7c6f64;
+    cursor: pointer;
+  }
+
+  .settings-field {
     display: grid;
     gap: 5px;
   }
 
-  .transcribe-input {
+  .settings-field-label {
+    color: var(--fg);
+    font-size: 11px;
+  }
+
+  .settings-input {
     width: 100%;
     min-width: 0;
     box-sizing: border-box;
@@ -5209,18 +5285,13 @@ ${body}
     outline: none;
   }
 
-  .transcribe-input:focus {
+  .settings-input:focus {
     border-color: var(--orange);
   }
 
-  .transcribe-prompt {
+  .settings-textarea {
     resize: vertical;
     min-height: 68px;
-  }
-
-  .transcribe-remember {
-    font-size: 11px;
-    color: var(--fg-muted);
   }
 
   .transcribe-status,
@@ -5699,11 +5770,6 @@ ${body}
     color: var(--fg);
   }
 
-  .sidebar-toggle input[type="radio"] {
-    accent-color: var(--orange);
-    cursor: pointer;
-  }
-
   .mode-switch {
     display: flex;
     align-items: center;
@@ -6166,7 +6232,7 @@ ${body}
   .layout-list {
     display: grid;
     gap: 10px;
-    margin-top: 6px;
+    margin-top: 0;
   }
 
   .layout-panel-section {
