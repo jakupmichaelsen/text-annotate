@@ -94,6 +94,8 @@
   $: showTtsWidget = ttsAvailable && !audioUrl && loadedFileType !== "SRT";
   $: ttsProgressText = ttsStatus || (ttsSegments.length ? `${Math.min(ttsIndex + 1, ttsSegments.length)}/${ttsSegments.length}` : "ready");
 
+  const styleShortcutModeStorageKey = "cm6-style-shortcut-mode";
+  const manualAnnotationColorStorageKey = "cm6-manual-annotation-color";
   let currentStyle = 0;
   let themeMode = loadThemeMode();
   type StyleShortcutMode = "hardcoded" | "manual";
@@ -1718,8 +1720,6 @@ ${body}
   ];
   const manualStyleName = "manual";
   const styleOrderStorageKey = "cm6-style-order";
-  const styleShortcutModeStorageKey = "cm6-style-shortcut-mode";
-  const manualAnnotationColorStorageKey = "cm6-manual-annotation-color";
   const annotationBoxSuffix = "_box";
   const defaultStyleKeyOrder = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "z", "x", "c", "v", "b", "n", "m", ",", ".", "/"];
   const defaultStyleOrder = [...baseHighlightStyles.map(s => s.name), manualStyleName];
