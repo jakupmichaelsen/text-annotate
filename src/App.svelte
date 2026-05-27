@@ -97,6 +97,7 @@
   let currentStyle = 0;
   let themeMode = loadThemeMode();
   let annotationMode: "clean" | "raw" | "all" = "clean";
+  let divideImportSentences = false;
   let blockquoteAlign: "left" | "center" | "right" = "left";
   let blockquoteBgWidth = 100;
   let blockquoteActive = false;
@@ -140,9 +141,10 @@
   let settingsTab: "markup" | "styles" | "layout" | "transcribe" = "markup";
   let followTimer: ReturnType<typeof setInterval> | null = null;
   let lastAnnotateRightRepeatAt = 0;
+  const annotateRightRepeatStorageKey = "cm6-annotate-right-repeat-interval";
+  let annotateRightRepeatIntervalMs = loadAnnotateRightRepeatInterval();
   const summarySidebarMinWidth = 240;
   const summarySidebarMaxWidth = 720;
-  const annotateRightRepeatIntervalMs = 240;
   const themeStorageKey = "cm6-theme";
   const themeCompartment = new Compartment();
   const editableCompartment = new Compartment();
@@ -193,6 +195,7 @@
       title: "Annotations",
       items: [
         ["STYLE_KEYS", "select color / recolor annotation"],
+        ["0", "box annotation / toggle counterpart"],
         ["q/i, e/o", "style prev / next"],
         ["Space", "wrap word / selection"],
         ["Enter", "edit note / cue playback"],
@@ -605,13 +608,31 @@
     speakTtsSegment(ttsIndex);
   }
 
-  function stepTts(delta: number) {
+  function seekTts(delta: number, playAfterSeek = false) {
     if (!showTtsWidget) return;
     if ((!ttsSpeaking && !ttsPaused) || !ttsSegments.length) {
       if (!prepareTtsSegments()) return;
     }
     const nextIndex = Math.min(Math.max(ttsIndex + delta, 0), ttsSegments.length - 1);
-    speakTtsSegment(nextIndex);
+    const shouldPlay = playAfterSeek || (ttsSpeaking && !ttsPaused);
+    if (shouldPlay) {
+      speakTtsSegment(nextIndex);
+      return;
+    }
+
+    if (ttsSpeaking || ttsPaused || ttsUtterance) {
+      ttsRunId += 1;
+      speechSynth()?.cancel();
+      ttsUtterance = null;
+      ttsSpeaking = false;
+      ttsPaused = false;
+      ttsStatus = "";
+    }
+    ttsIndex = nextIndex;
+  }
+
+  function seekTtsAndPlay(delta: number) {
+    seekTts(delta, true);
   }
 
   function isTextEntryTarget(target: EventTarget | null) {
@@ -772,11 +793,11 @@
         return;
       }
       if (key === "a" || key === "h" || event.key === "ArrowLeft" || event.key === "Left") {
-        stepTts(-1);
+        seekTts(-1);
         return;
       }
       if (key === "d" || key === "l" || event.key === "ArrowRight" || event.key === "Right") {
-        stepTts(1);
+        seekTts(1);
         return;
       }
       if (key === "r") {
@@ -845,7 +866,7 @@
   function replaceDocument(text: string, preserveLineBreaks = false) {
     if (!view) return;
     resetTtsState();
-    const insert = preserveLineBreaks ? text.replace(/\r\n?/g, "\n").trim() : sentenceLineBreaks(text);
+    const insert = importTextForEditor(text, preserveLineBreaks);
     const initialCursor = firstVisibleDocumentPosition(insert);
     view.dispatch({
       changes: { from: 0, to: view.state.doc.length, insert },
@@ -853,6 +874,12 @@
       effects: EditorView.scrollIntoView(initialCursor, { y: "start", yMargin: 0 })
     });
     view.focus();
+  }
+
+  function importTextForEditor(text: string, preserveLineBreaks = false) {
+    const normalized = text.replace(/\r\n?/g, "\n").trim();
+    if (preserveLineBreaks || !divideImportSentences) return normalized;
+    return sentenceLineBreaks(normalized);
   }
 
   function firstVisibleDocumentPosition(text: string) {
@@ -1687,7 +1714,8 @@ ${body}
     { name: "purple",  color: "#d3869b" }
   ];
   const styleOrderStorageKey = "cm6-style-order";
-  const defaultStyleKeyOrder = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "z", "x", "c", "v", "b", "n", "m", ",", ".", "/"];
+  const annotationBoxSuffix = "_box";
+  const defaultStyleKeyOrder = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "z", "x", "c", "v", "b", "n", "m", ",", ".", "/"];
   const defaultStyleOrder = highlightStyles.map(s => s.name);
   let styleOrder = loadStyleOrder();
   $: orderedHighlightStyles = styleOrder
@@ -1713,23 +1741,42 @@ ${body}
     return style === 0 ? "" : orderedHighlightStyles[style - 1]?.name ?? "";
   }
 
+  function baseStyleName(name: string) {
+    return name.endsWith(annotationBoxSuffix) ? name.slice(0, -annotationBoxSuffix.length) : name;
+  }
+
+  function isBoxStyleName(name: string) {
+    return name.endsWith(annotationBoxSuffix);
+  }
+
+  function boxStyleName(name: string) {
+    const base = baseStyleName(name);
+    return base ? `${base}${annotationBoxSuffix}` : "";
+  }
+
+  function counterpartStyleName(name: string) {
+    return isBoxStyleName(name) ? baseStyleName(name) : boxStyleName(name);
+  }
+
   function styleColor(style: number) {
     return style === 0 ? activeTheme.orange : styleColorForName(orderedHighlightStyles[style - 1]?.name ?? "");
   }
 
   function styleNumberForName(name: string) {
-    if (name === "plain") return 0;
-    const index = orderedHighlightStyles.findIndex(s => s.name === name);
+    const base = baseStyleName(name);
+    if (base === "plain") return 0;
+    const index = orderedHighlightStyles.findIndex(s => s.name === base);
     return index < 0 ? 1 : index + 1;
   }
 
   function styleColorForName(name: string) {
-    if (name === "plain") return activeTheme.orange;
-    return highlightStyles.find(s => s.name === name)?.color ?? activeTheme.yellow;
+    const base = baseStyleName(name);
+    if (base === "plain") return activeTheme.orange;
+    return highlightStyles.find(s => s.name === base)?.color ?? activeTheme.yellow;
   }
 
   function styleKeyForName(name: string) {
-    const index = orderedHighlightStyles.findIndex(style => style.name === name);
+    const index = orderedHighlightStyles.findIndex(style => style.name === baseStyleName(name));
     return index < 0 ? "" : defaultStyleKeyOrder[index] ?? "";
   }
 
@@ -1898,6 +1945,19 @@ ${body}
   function loadThemeMode(): ThemeMode {
     const stored = typeof localStorage === "undefined" ? null : localStorage.getItem("cm6-theme");
     return stored === "gruvbox" ? "gruvbox" : "nord";
+  }
+
+  function loadAnnotateRightRepeatInterval() {
+    if (typeof localStorage === "undefined") return 240;
+    const stored = Number(localStorage.getItem(annotateRightRepeatStorageKey));
+    return Number.isFinite(stored) ? Math.round(clampNumber(stored, 80, 800)) : 240;
+  }
+
+  function persistAnnotateRightRepeatInterval() {
+    annotateRightRepeatIntervalMs = Math.round(clampNumber(Number(annotateRightRepeatIntervalMs), 80, 800));
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(annotateRightRepeatStorageKey, String(annotateRightRepeatIntervalMs));
+    }
   }
 
   function getTheme(mode: ThemeMode): ThemePalette {
@@ -2283,7 +2343,7 @@ ${body}
     while ((match = pattern.exec(text)) !== null) {
       html += renderPlainInlineHtml(text.slice(lastIndex, match.index));
       const color = styleColorForName(match[2]);
-      html += `<span class="annotation-token" style="background:${escapeHtml(color)};color:${escapeHtml(contrastColor(color))};">${escapeHtml(match[1])}</span>`;
+      html += `<span class="annotation-token" style="${escapeHtml(annotationTokenStyle(match[2], color))}">${escapeHtml(match[1])}</span>`;
       html += `<span class="annotation-timestamp" title="${escapeHtml(match[3])}">${escapeHtml(match[3])}</span>`;
       if (match[4]?.trim()) {
         html += `<span class="annotation-comment">${escapeHtml(match[4].trim())}</span>`;
@@ -2293,6 +2353,13 @@ ${body}
 
     html += renderPlainInlineHtml(text.slice(lastIndex));
     return html;
+  }
+
+  function annotationTokenStyle(styleName: string, color = styleColorForName(styleName)) {
+    if (isBoxStyleName(styleName)) {
+      return `background:transparent;color:${color};border-color:${color};`;
+    }
+    return `background:${color};color:${contrastColor(color)};`;
   }
 
   function renderPlainInlineHtml(text: string) {
@@ -2313,11 +2380,11 @@ ${body}
   }
 
   function summaryAnnotationTitle(item: SummaryAnnotationItem) {
-    return item.title || item.colorName.toUpperCase();
+    return item.title || baseStyleName(item.colorName).toUpperCase();
   }
 
   function annotationTitleKey(item: SummaryAnnotationItem) {
-    return item.title.trim() || item.colorName;
+    return item.title.trim() || baseStyleName(item.colorName);
   }
 
   function isSummaryAnnotationItem(item: SummaryItem): item is SummaryAnnotationItem {
@@ -2698,7 +2765,7 @@ ${body}
     event.preventDefault();
     event.stopPropagation();
     editingSummaryTitleKey = key;
-    summaryTitleDraft = item.title || item.colorName;
+    summaryTitleDraft = item.title || baseStyleName(item.colorName);
     void focusSummaryTitleInput();
   }
 
@@ -2708,7 +2775,7 @@ ${body}
     const firstAnnotation = summaryAnnotationItems(section.items)[0];
     if (!firstAnnotation) return;
     editingSummaryTitleKey = section.id;
-    summaryTitleDraft = firstAnnotation.title || firstAnnotation.colorName;
+    summaryTitleDraft = firstAnnotation.title || baseStyleName(firstAnnotation.colorName);
     void focusSummaryTitleInput();
   }
 
@@ -2720,7 +2787,7 @@ ${body}
 
   function normalizeSummaryTitle(title: string, colorName: string) {
     const normalized = title.trim().replace(/\s+/g, " ").replace(/"/g, "'").replace(/[<>]/g, "").replace(/--+/g, "-");
-    return normalized.toLowerCase() === colorName.toLowerCase() ? "" : normalized;
+    return normalized.toLowerCase() === baseStyleName(colorName).toLowerCase() ? "" : normalized;
   }
 
   function annotationMatchAt(docText: string, spanStart: number) {
@@ -3208,9 +3275,12 @@ ${body}
 
   function buildHighlightDecorator(theme: ThemePalette): Extension {
     const colorTheme = EditorView.theme(Object.fromEntries(
-      highlightStyles.map(s => {
+      highlightStyles.flatMap(s => {
         const color = styleColorForName(s.name);
-        return [`.cm-annotation-${s.name}`, { backgroundColor: color, color: contrastColor(color, theme.bg, theme.fg), borderRadius: "3px", padding: "0 2px" }];
+        return [
+          [`.cm-annotation-${s.name}`, { backgroundColor: color, color: contrastColor(color, theme.bg, theme.fg), borderRadius: "3px", padding: "0 2px" }],
+          [`.cm-annotation-${boxStyleName(s.name)}`, { backgroundColor: "transparent", color, border: `1px solid ${color}`, borderRadius: "3px", padding: "0 2px" }]
+        ];
       })
     ));
 
@@ -3416,15 +3486,19 @@ ${body}
     return [colorTheme, plugin, plainTheme, plainPlugin, atomicPlugin, srtPlugin, snapFilter, srtSnapFilter];
   }
 
-  function wrapSelectionOrWord(v: EditorView, style: number = 0) {
+  function selectedAnnotationColorName() {
+    return baseStyleName(styleName(currentStyle) || "orange");
+  }
+
+  function wrapSelectionOrWord(v: EditorView, style: number = 0, annotationStyleName = "") {
     const state = v.state;
     const range = state.selection.main;
     const cursorAfterInsert = (from: number, insert: string) => from + insert.length;
     const makeInsert = (text: string): string => {
-      if (style === 0) return `\`${text}\``;
+      if (style === 0 && !annotationStyleName) return `\`${text}\``;
       const now = new Date();
       const ts = now.toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).replace(/,/g, "");
-      const name = styleName(style);
+      const name = annotationStyleName || styleName(style);
       return `\`${text}\`<!-- ${name}, ${ts}: "" -->`;
     };
     if (!range.empty) {
@@ -3443,6 +3517,32 @@ ${body}
     return true;
   }
 
+  function applyBoxAnnotationStyle(v: EditorView) {
+    const cursor = v.state.selection.main.head;
+    const docText = v.state.doc.toString();
+    annotationPattern.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = annotationPattern.exec(docText)) !== null) {
+      const spanStart = m.index, spanEnd = spanStart + m[0].length;
+      if (cursor >= spanStart && cursor <= spanEnd) {
+        const tokenStart = spanStart + 1;
+        const updatedName = counterpartStyleName(m[2]);
+        const updated = m[0].replace(/^`([^`]+)`<!--\s*\w+,/, `\`$1\`<!-- ${updatedName},`);
+        currentStyle = styleNumberForName(updatedName);
+        v.dispatch({
+          changes: { from: spanStart, to: spanEnd, insert: updated },
+          selection: { anchor: tokenStart },
+          effects: cursorScrollEffect(v, tokenStart)
+        });
+        return true;
+      }
+    }
+
+    const baseName = selectedAnnotationColorName();
+    currentStyle = styleNumberForName(baseName);
+    return wrapSelectionOrWord(v, currentStyle, boxStyleName(baseName));
+  }
+
   function setAnnotationColorOrStyle(v: EditorView, style: number) {
     const name = styleName(style);
     if (!name) return true;
@@ -3455,7 +3555,8 @@ ${body}
       const spanStart = m.index, spanEnd = spanStart + m[0].length;
       if (cursor >= spanStart && cursor <= spanEnd) {
         const tokenStart = spanStart + 1;
-        const updated = m[0].replace(/^`([^`]+)`<!--\s*\w+,/, `\`$1\`<!-- ${name},`);
+        const updatedName = isBoxStyleName(m[2]) ? boxStyleName(name) : name;
+        const updated = m[0].replace(/^`([^`]+)`<!--\s*\w+,/, `\`$1\`<!-- ${updatedName},`);
         v.dispatch({
           changes: { from: spanStart, to: spanEnd, insert: updated },
           selection: { anchor: tokenStart },
@@ -4040,6 +4141,7 @@ ${body}
             event.metaKey ||
             event.altKey
           ) return false;
+          if (event.key === "0") return applyBoxAnnotationStyle(v);
           const style = styleNumberForKey(event.key);
           return style === null ? false : setAnnotationColorOrStyle(v, style);
         }
@@ -4273,6 +4375,10 @@ ${body}
 
       {#if settingsTab === "markup"}
         <div class="settings-panel">
+          <label class="sidebar-toggle">
+            <input type="checkbox" bind:checked={divideImportSentences} />
+            Divide imported sentences into lines
+          </label>
           <div class="settings-radio-group" aria-label="Markup visibility">
             <label class="sidebar-toggle">
               <input type="radio" name="annotationMode" value="clean"
@@ -4299,7 +4405,11 @@ ${body}
           <div class="style-list settings-style-list">
             <div class="style-row style-row-plain">
               <span class="style-swatch" style={`background: ${styleColor(0)}`}></span>
-              <span class="style-name">0. plain</span>
+              <span class="style-name">Space. plain</span>
+            </div>
+            <div class="style-row style-row-plain">
+              <span class="style-swatch style-swatch-box" style={`border-color: ${styleColor(currentStyle)}; color: ${styleColor(currentStyle)}`}></span>
+              <span class="style-name">0. box counterpart</span>
             </div>
             {#each orderedHighlightStyles as style, index}
               <div
@@ -4405,6 +4515,21 @@ ${body}
                 <span class="layout-range-label">Top margin</span>
                 <input type="range" min="0" max="400" step="2" bind:value={padTop} class="slider" aria-label="Top padding" />
                 <span class="layout-range-value">{padTop}px</span>
+              </label>
+              <label class="layout-range-row">
+                <span class="layout-control-icon" aria-hidden="true">→</span>
+                <span class="layout-range-label">Right hold delay</span>
+                <input
+                  type="range"
+                  min="80"
+                  max="800"
+                  step="20"
+                  bind:value={annotateRightRepeatIntervalMs}
+                  on:input={persistAnnotateRightRepeatInterval}
+                  class="slider"
+                  aria-label="Right arrow hold repeat delay"
+                />
+                <span class="layout-range-value">{annotateRightRepeatIntervalMs}ms</span>
               </label>
             </section>
 
@@ -4835,9 +4960,9 @@ ${body}
           <div class="audio-widget">
             <span class="audio-name">TTS</span>
             <span class="audio-sep">|</span>
-            <button class="audio-glyph" type="button" on:click={() => stepTts(-1)} title="Previous spoken chunk (Alt+A/H)" aria-label="Previous spoken chunk">&lt;&lt;</button>
+            <button class="audio-glyph" type="button" on:click={() => seekTtsAndPlay(-1)} title="Previous spoken chunk (Alt+A/H)" aria-label="Previous spoken chunk">&lt;&lt;</button>
             <button class="audio-glyph play" type="button" on:click={toggleTtsPlayback} title="Play / pause TTS (Alt+Space)" aria-label="Play / pause TTS">{ttsSpeaking && !ttsPaused ? "⏸" : "▶"}</button>
-            <button class="audio-glyph" type="button" on:click={() => stepTts(1)} title="Next spoken chunk (Alt+D/L)" aria-label="Next spoken chunk">&gt;&gt;</button>
+            <button class="audio-glyph" type="button" on:click={() => seekTtsAndPlay(1)} title="Next spoken chunk (Alt+D/L)" aria-label="Next spoken chunk">&gt;&gt;</button>
             <span class="audio-sep">|</span>
             <button class="audio-rate-text" type="button" on:click={cycleAudioRate} aria-label="TTS speed" title="TTS speed (Alt+R)">{audioRateText}</button>
             <span class="audio-sep">|</span>
@@ -4935,6 +5060,10 @@ ${body}
         </div>
 
         <div class="pdf-modal-footer">
+          <label class="sidebar-toggle">
+            <input type="checkbox" bind:checked={divideImportSentences} />
+            Divide sentences into lines
+          </label>
           <span>{pdfIsParsing ? "Extracting text..." : `${pdfDraftText.length} characters`}</span>
           <button class="toolbar-btn load-confirm-btn" on:click={loadPdfDraft} disabled={pdfIsParsing}>Load text</button>
         </div>
@@ -5804,6 +5933,11 @@ ${body}
     height: 8px;
     border-radius: 2px;
     border: 1px solid rgba(0, 0, 0, 0.2);
+  }
+
+  .style-swatch-box {
+    background: transparent !important;
+    border-width: 2px;
   }
 
   .style-name {
