@@ -138,7 +138,7 @@
   let reorderDragState: ReorderDragState = null;
   let reorderDropTarget: ReorderDropTarget = null;
   let settingsOpen = false;
-  let settingsTab: "markup" | "styles" | "layout" | "transcribe" = "markup";
+  let settingsTab: "markup" | "layout" | "transcribe" = "markup";
   let followTimer: ReturnType<typeof setInterval> | null = null;
   let lastAnnotateRightRepeatAt = 0;
   const annotateRightRepeatStorageKey = "cm6-annotate-right-repeat-interval";
@@ -4368,7 +4368,6 @@ ${body}
     <div class="settings-popover" role="dialog" aria-label="Settings">
       <div class="settings-tabs" role="tablist" aria-label="Settings sections">
         <button type="button" class:active={settingsTab === "markup"} on:click={() => settingsTab = "markup"}>Markup</button>
-        <button type="button" class:active={settingsTab === "styles"} on:click={() => settingsTab = "styles"}>Styles</button>
         <button type="button" class:active={settingsTab === "layout"} on:click={() => settingsTab = "layout"}>Layout</button>
         <button type="button" class:active={settingsTab === "transcribe"} on:click={() => settingsTab = "transcribe"}>Transcribe</button>
       </div>
@@ -4398,57 +4397,6 @@ ${body}
                 on:change={() => { annotationMode = "all"; view?.dispatch({}); view?.focus(); }} />
               Raw (all)
             </label>
-          </div>
-        </div>
-      {:else if settingsTab === "styles"}
-        <div class="settings-panel">
-          <div class="style-list settings-style-list">
-            <div class="style-row style-row-plain">
-              <span class="style-swatch" style={`background: ${styleColor(0)}`}></span>
-              <span class="style-name">Space. plain</span>
-            </div>
-            <div class="style-row style-row-plain">
-              <span class="style-swatch style-swatch-box" style={`border-color: ${styleColor(currentStyle)}; color: ${styleColor(currentStyle)}`}></span>
-              <span class="style-name">0. box counterpart</span>
-            </div>
-            {#each orderedHighlightStyles as style, index}
-              <div
-                class="style-row reorderable"
-                role="listitem"
-                class:drag-over={reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name}
-                class:drop-after={reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name && reorderDropTarget.after}
-                class:drop-before={reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name && !reorderDropTarget.after}
-                on:dragover={event => updateReorderDropTarget("style", style.name, event)}
-                on:drop={event => {
-                  if (reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name) {
-                    event.preventDefault();
-                    commitStyleReorder(style.name, reorderDropTarget.after);
-                  }
-                  finishReorderDrag();
-                }}
-                on:dragend={finishReorderDrag}
-              >
-                <span class="style-swatch" style={`background: ${style.color}`}></span>
-                <span class="style-name">{index + 1}. {style.name}</span>
-                <span class="style-key-badge" title={`Shortcut key for ${style.name}`}>{styleKeyForName(style.name)}</span>
-                <button
-                  class="reorder-handle"
-                  type="button"
-                  draggable="true"
-                  aria-label={`Drag ${style.name} to reorder`}
-                  title={`Drag ${style.name} to reorder`}
-                  on:mousedown={event => event.stopPropagation()}
-                  on:click={event => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                  }}
-                  on:dragstart={event => setReorderDragState("style", style.name, event)}
-                >↕</button>
-              </div>
-            {/each}
-          </div>
-          <div class="style-footer-actions">
-            <button class="style-reset-btn" type="button" on:click={resetStyleOrder}>Reset order</button>
           </div>
         </div>
       {:else if settingsTab === "layout"}
@@ -4661,6 +4609,58 @@ ${body}
             {transcriptionError || transcriptionStatus}
           </div>
         {/if}
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-label">Annotation styles</div>
+        <div class="style-list sidebar-style-list">
+          <div class="style-row style-row-plain">
+            <span class="style-swatch" style={`background: ${styleColor(0)}`}></span>
+            <span class="style-name">Space. plain</span>
+          </div>
+          <div class="style-row style-row-plain">
+            <span class="style-swatch style-swatch-box" style={`border-color: ${styleColor(currentStyle)}; color: ${styleColor(currentStyle)}`}></span>
+            <span class="style-name">0. box counterpart</span>
+          </div>
+          {#each orderedHighlightStyles as style, index}
+            <div
+              class="style-row reorderable"
+              role="listitem"
+              class:drag-over={reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name}
+              class:drop-after={reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name && reorderDropTarget.after}
+              class:drop-before={reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name && !reorderDropTarget.after}
+              on:dragover={event => updateReorderDropTarget("style", style.name, event)}
+              on:drop={event => {
+                if (reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name) {
+                  event.preventDefault();
+                  commitStyleReorder(style.name, reorderDropTarget.after);
+                }
+                finishReorderDrag();
+              }}
+              on:dragend={finishReorderDrag}
+            >
+              <span class="style-swatch" style={`background: ${style.color}`}></span>
+              <span class="style-name">{index + 1}. {style.name}</span>
+              <span class="style-key-badge" title={`Shortcut key for ${style.name}`}>{styleKeyForName(style.name)}</span>
+              <button
+                class="reorder-handle"
+                type="button"
+                draggable="true"
+                aria-label={`Drag ${style.name} to reorder`}
+                title={`Drag ${style.name} to reorder`}
+                on:mousedown={event => event.stopPropagation()}
+                on:click={event => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+                on:dragstart={event => setReorderDragState("style", style.name, event)}
+              >↕</button>
+            </div>
+          {/each}
+        </div>
+        <div class="style-footer-actions">
+          <button class="style-reset-btn" type="button" on:click={resetStyleOrder}>Reset order</button>
+        </div>
       </div>
 
     </div>
@@ -5115,6 +5115,7 @@ ${body}
     padding: 0;
     font-size: 14px;
     line-height: 1;
+    background: transparent;
   }
 
   .settings-btn.active {
@@ -5182,19 +5183,6 @@ ${body}
   .settings-radio-group {
     display: grid;
     gap: 6px;
-  }
-
-  .settings-style-list {
-    display: grid;
-    position: static;
-    inset: auto;
-    z-index: auto;
-    margin-top: 0;
-    padding: 0;
-    background: transparent;
-    border: 0;
-    border-radius: 0;
-    box-shadow: none;
   }
 
   .transcribe-panel {
@@ -5819,6 +5807,7 @@ ${body}
   }
 
   .help-btn {
+    background: transparent;
     font-size: 14px;
     font-weight: 700;
     width: 26px;
@@ -5888,20 +5877,17 @@ ${body}
   .help-close:hover { color: var(--orange); background: var(--bg-alt); }
 
   .style-list {
-    display: flex;
-    flex-direction: column;
+    display: grid;
     gap: 4px;
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
-    right: 0;
-    z-index: 20;
     margin-top: 0;
-    padding: 6px 8px 8px;
-    background: var(--bg-hard);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
+  }
+
+  .sidebar-style-list {
+    padding: 0;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
   }
 
   .style-row {
