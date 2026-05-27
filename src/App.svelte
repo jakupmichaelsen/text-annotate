@@ -3,7 +3,7 @@
   import { Compartment, EditorState, Prec, type Extension } from "@codemirror/state";
   import {
     EditorView, keymap, lineNumbers, drawSelection, runScopeHandlers,
-    highlightActiveLineGutter, ViewPlugin, Decoration,
+    ViewPlugin, Decoration,
     GutterMarker, lineNumberMarkers,
     WidgetType, showTooltip, type Tooltip,
     type DecorationSet, type ViewUpdate
@@ -1970,8 +1970,6 @@ ${body}
     blockquoteBg: string;
     blockquoteFg: string;
     plainCodeBg: string;
-    activeLineEdit: string;
-    activeGutterEdit: string;
   };
 
   const themes: Record<ThemeMode, ThemePalette> = {
@@ -1986,7 +1984,7 @@ ${body}
       cursor: "#fe8019", comment: "#928374",
       searchMatch: "#665c54", searchMatchSelected: "#7c6f64",
       blockquoteBg: "#4a3520", blockquoteFg: "#fabd2f",
-      plainCodeBg: "#32302f", activeLineEdit: "#2f4a3aaa", activeGutterEdit: "#2f4a3a"
+      plainCodeBg: "#32302f"
     },
     nord: {
       dark: false,
@@ -1999,7 +1997,7 @@ ${body}
       cursor: "#5e81ac", comment: "#4c566a",
       searchMatch: "#d8dee9", searchMatchSelected: "#cfd7e3",
       blockquoteBg: "#e5e9f0", blockquoteFg: "#5e81ac",
-      plainCodeBg: "#e5e9f0", activeLineEdit: "#d8dee9", activeGutterEdit: "#d8dee9"
+      plainCodeBg: "#e5e9f0"
     }
   };
 
@@ -2125,7 +2123,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
       "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { backgroundColor: `${theme.orange} !important`, color: theme.bg, opacity: "50%" },
       ".cm-gutters": { backgroundColor: theme.bgHard, color: theme.gutterText, borderRight: "none" },
       ".cm-activeLine": { backgroundColor: theme.activeLine },
-      ".cm-activeLineGutter": { color: theme.yellow },
+      ".cm-activeLineGutter": { color: theme.gutterText, backgroundColor: theme.bgHard },
       ".cm-panels": { backgroundColor: theme.bgSoft, color: theme.fg },
       ".cm-searchMatch": { backgroundColor: theme.searchMatch, outline: `1px solid ${theme.yellow}` },
       ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: theme.searchMatchSelected },
@@ -3841,6 +3839,7 @@ ${body}
       this.scheduled = true;
       this.view.requestMeasure({
         read: view => {
+          if (editorMode === "insert") return null;
           const head = view.state.selection.main.head;
           const scroller = view.scrollDOM;
           const scrollerRect = scroller.getBoundingClientRect();
@@ -3850,8 +3849,7 @@ ${body}
             top: coords.top - scrollerRect.top + scroller.scrollTop,
             left: scroller.scrollLeft,
             width: scroller.clientWidth,
-            height: Math.max(1, coords.bottom - coords.top),
-            isEdit: editorMode === "insert"
+            height: Math.max(1, coords.bottom - coords.top)
           };
         },
         write: data => {
@@ -3860,7 +3858,6 @@ ${body}
             this.marker.style.display = "none";
             return;
           }
-          this.marker.classList.toggle("is-edit", data.isEdit);
           this.marker.style.display = "block";
           this.marker.style.top = `${data.top}px`;
           this.marker.style.left = `${data.left}px`;
@@ -4347,7 +4344,6 @@ ${body}
       history(),
       indentOnInput(),
       bracketMatching(),
-      highlightActiveLineGutter(),
       themeCompartment.of(buildThemeExtensions(getTheme(themeMode))),
       buildKeymap(),
       keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
@@ -4423,9 +4419,6 @@ ${body}
     --blue: ${activeTheme.blue}; --orange: ${activeTheme.orange}; --selection: ${activeTheme.selection};
     --active-style-color: ${currentStyleColor};
     --active-line-annotate: color-mix(in srgb, var(--active-style-color) 34%, transparent);
-    --active-line-edit: ${activeTheme.activeLineEdit};
-    --active-gutter-annotate: color-mix(in srgb, var(--active-style-color) 58%, var(--bg-hard));
-    --active-gutter-edit: ${activeTheme.activeGutterEdit};
   `}
 >
   <div class="toolbar">
@@ -4719,31 +4712,17 @@ ${body}
   >
     <div class="sidebar">
       <div class="sidebar-section">
-        <label class="mode-switch" aria-label="Switch between Annotate and Edit mode">
-          <span class:active={editorMode === "normal"}>Annotate</span>
-          <input
-            type="checkbox"
-            checked={editorMode === "insert"}
-            on:change={e => setMode((e.target as HTMLInputElement).checked ? "insert" : "normal")}
-          />
-          <span class="mode-track" aria-hidden="true">
-            <span class="mode-thumb"></span>
-          </span>
-          <span class:active={editorMode === "insert"}>Edit</span>
-        </label>
-        <button class="sidebar-label load-btn theme-toggle" on:click={toggleThemeMode}>Theme: {activeThemeName}</button>
-      </div>
-
-      <div class="sidebar-section">
         <input type="file" accept=".srt,.txt,.md,.docx,.pdf,.mp3,.wav,.m4a,.ogg,.oga,.webm,.aac,.flac,.mp4,.mov,.mkv" multiple style="display:none" bind:this={fileInput} on:change={loadFile} />
         <button class="sidebar-label load-btn" on:click={() => fileInput.click()}>LOAD FILE(S)...</button>
         <div class="file-actions">
           <button class="sidebar-label load-btn" on:click={saveDocument}>Save</button>
           <button class="sidebar-label load-btn" on:click={exportCleanHtml}>Export</button>
+        </div>
+        {#if audioSourceFile}
           <button class="sidebar-label load-btn" on:click={transcribeLoadedAudio} disabled={transcriptionBusy}>
             {transcriptionBusy ? "Transcribing..." : "Transcribe"}
           </button>
-        </div>
+        {/if}
         {#if transcriptionBusy || transcriptionStatus || transcriptionError}
           <div class:transcribe-error={Boolean(transcriptionError)} class:transcribe-status={!transcriptionError}>
             {transcriptionError || transcriptionStatus}
@@ -4806,6 +4785,22 @@ ${body}
             <button class="style-reset-btn" type="button" on:click={resetStyleOrder}>Reset order</button>
           </div>
         {/if}
+      </div>
+
+      <div class="sidebar-section sidebar-bottom">
+        <label class="mode-switch" aria-label="Switch between Annotate and Edit mode">
+          <span class:active={editorMode === "normal"}>Annotate</span>
+          <input
+            type="checkbox"
+            checked={editorMode === "insert"}
+            on:change={e => setMode((e.target as HTMLInputElement).checked ? "insert" : "normal")}
+          />
+          <span class="mode-track" aria-hidden="true">
+            <span class="mode-thumb"></span>
+          </span>
+          <span class:active={editorMode === "insert"}>Edit</span>
+        </label>
+        <button class="sidebar-label load-btn theme-toggle" on:click={toggleThemeMode}>Theme: {activeThemeName}</button>
       </div>
 
     </div>
@@ -5924,6 +5919,12 @@ ${body}
     gap: 6px;
   }
 
+  .sidebar-bottom {
+    margin-top: auto;
+    border-top: 1px solid var(--internal-border);
+    border-bottom: 0;
+  }
+
   .sidebar-label {
     font-size: 10px;
     text-transform: uppercase;
@@ -6650,9 +6651,6 @@ ${body}
     pointer-events: none;
     background: var(--active-line-annotate);
   }
-  :global(.cm-visual-line-marker.is-edit) {
-    background: var(--active-line-edit);
-  }
   :global(.cm-column-guide) {
     position: absolute;
     z-index: 2;
@@ -6676,12 +6674,6 @@ ${body}
       box-shadow: 0 0 0 0 rgba(250, 189, 47, 0);
       background: transparent;
     }
-  }
-  :global(.mode-normal .cm-activeLineGutter) {
-    background: var(--active-gutter-annotate) !important;
-  }
-  :global(.mode-insert .cm-activeLineGutter) {
-    background: var(--active-gutter-edit) !important;
   }
   :global(.cm-content),
   :global(.cm-gutters) {
