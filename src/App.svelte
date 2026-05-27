@@ -96,6 +96,9 @@
 
   let currentStyle = 0;
   let themeMode = loadThemeMode();
+  type StyleShortcutMode = "hardcoded" | "manual";
+  let styleShortcutMode = loadStyleShortcutMode();
+  let manualAnnotationColor = loadManualAnnotationColor();
   let annotationMode: "clean" | "raw" | "all" = "clean";
   let divideImportSentences = false;
   let blockquoteAlign: "left" | "center" | "right" = "left";
@@ -659,13 +662,13 @@
     return event.key === " " || event.key === "Spacebar" || event.code === "Space";
   }
 
-  function isPlainRightArrow(event: KeyboardEvent) {
+  function isPlainRightNavigation(event: KeyboardEvent) {
     return !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey &&
-      (event.key === "ArrowRight" || event.key === "Right");
+      (event.key === "ArrowRight" || event.key === "Right" || event.key.toLowerCase() === "d" || event.key.toLowerCase() === "l");
   }
 
   function throttleAnnotateRightRepeat(event: KeyboardEvent) {
-    if (editorMode !== "normal" || !isPlainRightArrow(event)) {
+    if (editorMode !== "normal" || !isPlainRightNavigation(event)) {
       if (!event.repeat) lastAnnotateRightRepeatAt = 0;
       return false;
     }
@@ -1696,7 +1699,7 @@ ${body}
   // Trigger CM6 decoration rebuild when annotationMode changes
   $: annotationMode, view && view.dispatch({});
 
-  const highlightStyles = [
+  const baseHighlightStyles = [
     { name: "green",   color: "#b8bb26" },
     { name: "red",     color: "#fb4934" },
     { name: "steel",   color: "#83a598" },
@@ -1713,12 +1716,17 @@ ${body}
     { name: "rosewood", color: "#8f3f4d" },
     { name: "purple",  color: "#d3869b" }
   ];
+  const manualStyleName = "manual";
   const styleOrderStorageKey = "cm6-style-order";
+  const styleShortcutModeStorageKey = "cm6-style-shortcut-mode";
+  const manualAnnotationColorStorageKey = "cm6-manual-annotation-color";
   const annotationBoxSuffix = "_box";
   const defaultStyleKeyOrder = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "z", "x", "c", "v", "b", "n", "m", ",", ".", "/"];
-  const defaultStyleOrder = highlightStyles.map(s => s.name);
+  const defaultStyleOrder = [...baseHighlightStyles.map(s => s.name), manualStyleName];
   let styleOrder = loadStyleOrder();
-  $: orderedHighlightStyles = styleOrder
+  $: manualStyleColor = normalizedManualAnnotationColor(manualAnnotationColor) || activeTheme.orange;
+  $: highlightStyles = [...baseHighlightStyles, { name: manualStyleName, color: manualStyleColor }];
+  $: orderedHighlightStyles = (styleShortcutMode === "manual" ? styleOrder : defaultStyleOrder)
     .map(name => highlightStyles.find(s => s.name === name))
     .filter((style): style is typeof highlightStyles[number] => !!style);
 
@@ -1801,6 +1809,37 @@ ${body}
   function normalizeStyleKey(key: string) {
     if (key.length !== 1 || /\s/.test(key)) return "";
     return key.toLowerCase();
+  }
+
+  function normalizedManualAnnotationColor(value: string) {
+    const color = value.trim();
+    return /^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(color) ? color : "";
+  }
+
+  function loadStyleShortcutMode(): StyleShortcutMode {
+    const stored = typeof localStorage === "undefined" ? null : localStorage.getItem(styleShortcutModeStorageKey);
+    return stored === "manual" ? "manual" : "hardcoded";
+  }
+
+  function persistStyleShortcutMode() {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(styleShortcutModeStorageKey, styleShortcutMode);
+    }
+  }
+
+  function loadManualAnnotationColor() {
+    if (typeof localStorage === "undefined") return "";
+    return normalizedManualAnnotationColor(localStorage.getItem(manualAnnotationColorStorageKey) ?? "");
+  }
+
+  function persistManualAnnotationColor() {
+    const normalized = normalizedManualAnnotationColor(manualAnnotationColor);
+    manualAnnotationColor = normalized;
+    if (typeof localStorage !== "undefined") {
+      if (normalized) localStorage.setItem(manualAnnotationColorStorageKey, normalized);
+      else localStorage.removeItem(manualAnnotationColorStorageKey);
+    }
+    view?.dispatch({});
   }
 
   function loadStyleOrder() {
@@ -4008,6 +4047,22 @@ ${body}
     return true;
   }
 
+  function visibleLineTargetPosition(v: EditorView, line: Text, measuredHead: number) {
+    if (annotationMode !== "clean") return measuredHead;
+    const lineText = line.text;
+    annotationPattern.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = annotationPattern.exec(lineText)) !== null) {
+      const spanStart = line.from + match.index;
+      const wordStart = spanStart + 1;
+      const wordEnd = wordStart + match[1].length;
+      const spanEnd = spanStart + match[0].length;
+      if (measuredHead >= spanStart && measuredHead < wordStart) return wordStart;
+      if (measuredHead > wordEnd && measuredHead <= spanEnd) return wordStart;
+    }
+    return measuredHead;
+  }
+
   function moveVisualLineSkippingSrt(v: EditorView, direction: "up" | "down", extend = false) {
     const selection = v.state.selection.main;
     const isSkippableLine = (text: string) => isSrtTimestampLine(text) || text.trimStart().startsWith(">");
@@ -4030,9 +4085,10 @@ ${body}
         targetY = maxY - linePx * 0.5;
       }
 
-      const head = visualLineStartAtY(v, targetY);
-      if (head === null) break;
-      const line = v.state.doc.lineAt(head);
+      const measuredHead = visualLineStartAtY(v, targetY);
+      if (measuredHead === null) break;
+      const line = v.state.doc.lineAt(measuredHead);
+      const head = visibleLineTargetPosition(v, line, measuredHead);
       if (!isSkippableLine(line.text) && line.text.trim()) {
         v.dispatch({
           selection: { anchor: extend ? selection.anchor : head, head },
@@ -4408,6 +4464,42 @@ ${body}
               </label>
             </div>
           </section>
+          <section class="settings-section">
+            <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">#</span><span>Color Shortcuts</span></div>
+            <div class="settings-radio-group" aria-label="Color shortcut mode">
+              <label class="settings-choice-row">
+                <span class="settings-control-icon" aria-hidden="true">1</span>
+                <span>Hardcoded</span>
+                <input
+                  type="radio"
+                  name="styleShortcutMode"
+                  value="hardcoded"
+                  checked={styleShortcutMode === "hardcoded"}
+                  on:change={() => { styleShortcutMode = "hardcoded"; persistStyleShortcutMode(); }}
+                />
+              </label>
+              <label class="settings-choice-row">
+                <span class="settings-control-icon" aria-hidden="true">↕</span>
+                <span>Manual</span>
+                <input
+                  type="radio"
+                  name="styleShortcutMode"
+                  value="manual"
+                  checked={styleShortcutMode === "manual"}
+                  on:change={() => { styleShortcutMode = "manual"; persistStyleShortcutMode(); }}
+                />
+              </label>
+            </div>
+            <label class="settings-field">
+              <span class="settings-field-label">Manual color</span>
+              <input
+                class="settings-input"
+                value={manualAnnotationColor || manualStyleColor}
+                placeholder={activeTheme.orange}
+                on:change={e => { manualAnnotationColor = (e.target as HTMLInputElement).value; persistManualAnnotationColor(); }}
+              />
+            </label>
+          </section>
         </div>
       {:else if settingsTab === "layout"}
         <div class="settings-panel">
@@ -4639,14 +4731,15 @@ ${body}
           </div>
           {#each orderedHighlightStyles as style, index}
             <div
-              class="style-row reorderable"
+              class="style-row"
+              class:reorderable={styleShortcutMode === "manual"}
               role="listitem"
-              class:drag-over={reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name}
-              class:drop-after={reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name && reorderDropTarget.after}
-              class:drop-before={reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name && !reorderDropTarget.after}
-              on:dragover={event => updateReorderDropTarget("style", style.name, event)}
+              class:drag-over={styleShortcutMode === "manual" && reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name}
+              class:drop-after={styleShortcutMode === "manual" && reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name && reorderDropTarget.after}
+              class:drop-before={styleShortcutMode === "manual" && reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name && !reorderDropTarget.after}
+              on:dragover={event => styleShortcutMode === "manual" && updateReorderDropTarget("style", style.name, event)}
               on:drop={event => {
-                if (reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name) {
+                if (styleShortcutMode === "manual" && reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name) {
                   event.preventDefault();
                   commitStyleReorder(style.name, reorderDropTarget.after);
                 }
@@ -4655,27 +4748,31 @@ ${body}
               on:dragend={finishReorderDrag}
             >
               <span class="style-swatch" style={`background: ${style.color}`}></span>
-              <span class="style-name">{index + 1}. {style.name}</span>
-              <span class="style-key-badge" title={`Shortcut key for ${style.name}`}>{styleKeyForName(style.name)}</span>
-              <button
-                class="reorder-handle"
-                type="button"
-                draggable="true"
-                aria-label={`Drag ${style.name} to reorder`}
-                title={`Drag ${style.name} to reorder`}
-                on:mousedown={event => event.stopPropagation()}
-                on:click={event => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                }}
-                on:dragstart={event => setReorderDragState("style", style.name, event)}
-              >↕</button>
+              <span class="style-name">{styleKeyForName(style.name)}. {style.name}</span>
+              {#if styleShortcutMode === "manual"}
+                <span class="style-key-badge" title={`Shortcut key for ${style.name}`}>{styleKeyForName(style.name)}</span>
+                <button
+                  class="reorder-handle"
+                  type="button"
+                  draggable="true"
+                  aria-label={`Drag ${style.name} to reorder`}
+                  title={`Drag ${style.name} to reorder`}
+                  on:mousedown={event => event.stopPropagation()}
+                  on:click={event => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                  on:dragstart={event => setReorderDragState("style", style.name, event)}
+                >↕</button>
+              {/if}
             </div>
           {/each}
         </div>
-        <div class="style-footer-actions">
-          <button class="style-reset-btn" type="button" on:click={resetStyleOrder}>Reset order</button>
-        </div>
+        {#if styleShortcutMode === "manual"}
+          <div class="style-footer-actions">
+            <button class="style-reset-btn" type="button" on:click={resetStyleOrder}>Reset order</button>
+          </div>
+        {/if}
       </div>
 
     </div>
@@ -5958,7 +6055,7 @@ ${body}
 
   .style-row {
     display: grid;
-    grid-template-columns: 10px minmax(0, 1fr) auto;
+    grid-template-columns: 10px minmax(0, 1fr);
     gap: 6px;
     align-items: center;
     padding: 1px 0;
