@@ -4034,6 +4034,11 @@ ${body}
           if (head === view.state.doc.lineAt(head).from) return null;
           const coords = view.coordsAtPos(head);
           if (!coords) return null;
+          const contentRect = view.contentDOM.getBoundingClientRect();
+          const visualLineY = coords.top + Math.max(1, (coords.bottom - coords.top) / 2);
+          const visualLineStart = view.posAtCoords({ x: contentRect.left + 1, y: visualLineY });
+          const visualLineStartCoords = visualLineStart === null ? null : view.coordsAtPos(visualLineStart);
+          if (visualLineStartCoords && Math.abs(coords.left - visualLineStartCoords.left) < 2) return null;
           const scroller = view.scrollDOM;
           const scrollerRect = scroller.getBoundingClientRect();
           return {
@@ -4356,6 +4361,10 @@ ${body}
       if (measuredHead === null) break;
       const line = v.state.doc.lineAt(measuredHead);
       const head = visibleLineTargetPosition(v, line, measuredHead);
+      if (head === selection.head) {
+        targetY += step * linePx;
+        continue;
+      }
       if (!isSkippableLine(line.text) && line.text.trim()) {
         v.dispatch({
           selection: { anchor: extend ? selection.anchor : head, head },
@@ -6271,7 +6280,7 @@ ${body}
 
   .style-list {
     display: grid;
-    gap: 2px;
+    gap: 4px;
     margin-top: 0;
   }
 
@@ -6285,14 +6294,14 @@ ${body}
 
   .style-row {
     display: grid;
-    grid-template-columns: 16px max-content max-content minmax(0, 1fr);
-    column-gap: 2px;
+    grid-template-columns: 16px 22px max-content minmax(0, 1fr);
+    column-gap: 3px;
     align-items: center;
     padding: 0;
   }
 
   .style-row.reorderable {
-    grid-template-columns: 16px max-content max-content minmax(0, 1fr) 20px;
+    grid-template-columns: 16px 22px max-content minmax(0, 1fr) 20px;
   }
 
   .style-row.reorderable.drop-before {
@@ -6321,12 +6330,12 @@ ${body}
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--fg);
-    font-size: 12px;
+    font-size: 13px;
   }
 
   .style-separator {
     color: var(--fg);
-    font-size: 12px;
+    font-size: 13px;
     line-height: inherit;
     user-select: none;
   }
@@ -6337,7 +6346,7 @@ ${body}
     border: 0;
     background: transparent;
     font: inherit;
-    font-size: 12px;
+    font-size: 13px;
     text-align: left;
     cursor: text;
   }
@@ -6356,7 +6365,7 @@ ${body}
     background: var(--bg);
     color: var(--fg);
     font: inherit;
-    font-size: 12px;
+    font-size: 13px;
     outline: none;
   }
 
@@ -6371,10 +6380,10 @@ ${body}
     background: transparent;
     color: var(--fg);
     font: inherit;
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 400;
     line-height: inherit;
-    text-align: left;
+    text-align: right;
     text-transform: lowercase;
     user-select: none;
   }
@@ -6392,6 +6401,7 @@ ${body}
 
   .style-key-input {
     height: 20px;
+    width: 22px;
     padding: 1px 3px;
     border: 1px solid var(--border);
     background: var(--bg);
