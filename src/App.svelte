@@ -141,6 +141,9 @@
   let editingStyleTitleName: string | null = null;
   let styleTitleDraft = "";
   let styleTitleInput: HTMLInputElement | null = null;
+  let editingStyleKeyName: string | null = null;
+  let styleKeyDraft = "";
+  let styleKeyInput: HTMLInputElement | null = null;
   let resizingSummarySidebar = false;
   let finishSummaryResize: (() => void) | null = null;
   let finishRightPaddingDrag: (() => void) | null = null;
@@ -1737,11 +1740,13 @@ ${body}
   const manualStyleName = "manual";
   const styleOrderStorageKey = "cm6-style-order";
   const styleTitlesStorageKey = "cm6-style-titles";
+  const styleKeysStorageKey = "cm6-style-keys";
   const annotationBoxSuffix = "_box";
   const defaultStyleKeyOrder = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "z", "x", "c", "v", "b", "n", "m", ",", ".", "/"];
   const defaultStyleOrder = [...baseHighlightStyles.map(s => s.name), manualStyleName];
   let styleOrder = loadStyleOrder();
   let styleTitles = loadStyleTitles();
+  let styleKeys = loadStyleKeys();
   $: manualStyleColor = currentManualStyleColor(activeTheme);
   $: highlightStyles = currentHighlightStyles(activeTheme);
   $: orderedHighlightStyles = (styleShortcutMode === "manual" ? styleOrder : defaultStyleOrder)
@@ -1811,8 +1816,8 @@ ${body}
   }
 
   function styleKeyForName(name: string) {
-    const index = orderedHighlightStyles.findIndex(style => style.name === baseStyleName(name));
-    return index < 0 ? "" : defaultStyleKeyOrder[index] ?? "";
+    const base = baseStyleName(name);
+    return styleKeys[base] || defaultStyleKeyForName(base);
   }
 
   function styleKeyForStyle(style: number) {
@@ -1820,18 +1825,32 @@ ${body}
   }
 
   function defaultStyleTitle(name: string) {
-    return baseStyleName(name).toUpperCase();
+    return baseStyleName(name);
   }
 
   function styleDisplayTitle(name: string) {
     return styleTitles[baseStyleName(name)] || defaultStyleTitle(name);
   }
 
+  function customStyleTitle(name: string) {
+    return styleTitles[baseStyleName(name)] || "";
+  }
+
+  function annotationTitlePartForStyle(name: string) {
+    const title = customStyleTitle(name);
+    return title ? `, title: "${title}"` : "";
+  }
+
+  function annotationWithStoredTitle(match: RegExpExecArray, title: string) {
+    const titlePart = title ? `, title: "${title}"` : "";
+    return `\`${match[1]}\`<!-- ${match[2]}, ${match[3]}: "${match[4]}"${titlePart} -->`;
+  }
+
   function styleNumberForKey(key: string) {
     const normalized = normalizeStyleKey(key);
     if (!normalized) return null;
-    const index = defaultStyleKeyOrder.indexOf(normalized);
-    return index < 0 || index >= orderedHighlightStyles.length ? null : index + 1;
+    const index = orderedHighlightStyles.findIndex(style => styleKeyForName(style.name) === normalized);
+    return index < 0 ? null : index + 1;
   }
 
   function styleShortcutSummary() {
@@ -1844,6 +1863,11 @@ ${body}
   function normalizeStyleKey(key: string) {
     if (key.length !== 1 || /\s/.test(key)) return "";
     return key.toLowerCase();
+  }
+
+  function defaultStyleKeyForName(name: string) {
+    const index = orderedHighlightStyles.findIndex(style => style.name === baseStyleName(name));
+    return index < 0 ? "" : defaultStyleKeyOrder[index] ?? "";
   }
 
   function normalizedManualAnnotationColor(value: string) {
@@ -1921,7 +1945,34 @@ ${body}
             entry[1].trim().length > 0
           )
           .map(([name, title]) => [name, normalizeStyleTitle(title)])
-          .filter(([, title]) => title.length > 0)
+          .filter(([name, title]) => title.length > 0 && title.toLowerCase() !== defaultStyleTitle(name).toLowerCase())
+      );
+    } catch {
+      return {};
+    }
+  }
+
+  function loadStyleKeys() {
+    const stored = typeof localStorage === "undefined" ? null : localStorage.getItem(styleKeysStorageKey);
+    if (!stored) return {};
+
+    try {
+      const parsed = JSON.parse(stored);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+      const used = new Set<string>();
+      return Object.fromEntries(
+        Object.entries(parsed)
+          .filter((entry): entry is [string, string] =>
+            typeof entry[0] === "string" &&
+            defaultStyleOrder.includes(entry[0]) &&
+            typeof entry[1] === "string"
+          )
+          .map(([name, key]) => [name, normalizeStyleKey(key)])
+          .filter(([, key]) => {
+            if (!key || used.has(key)) return false;
+            used.add(key);
+            return true;
+          })
       );
     } catch {
       return {};
@@ -1929,7 +1980,7 @@ ${body}
   }
 
   function normalizeStyleTitle(title: string) {
-    return title.trim().replace(/\s+/g, " ").replace(/[<>]/g, "");
+    return title.trim().replace(/\s+/g, " ").replace(/"/g, "'").replace(/[<>]/g, "").replace(/--+/g, "-");
   }
 
   function persistStyleTitles(titles: Record<string, string>) {
@@ -1939,6 +1990,16 @@ ${body}
       localStorage.setItem(styleTitlesStorageKey, JSON.stringify(titles));
     } else {
       localStorage.removeItem(styleTitlesStorageKey);
+    }
+  }
+
+  function persistStyleKeys(keys: Record<string, string>) {
+    styleKeys = keys;
+    if (typeof localStorage === "undefined") return;
+    if (Object.keys(keys).length) {
+      localStorage.setItem(styleKeysStorageKey, JSON.stringify(keys));
+    } else {
+      localStorage.removeItem(styleKeysStorageKey);
     }
   }
 
@@ -2014,17 +2075,108 @@ ${body}
   function saveStyleTitle() {
     if (!editingStyleTitleName) return;
     const name = editingStyleTitleName;
-    const normalized = normalizeStyleTitle(styleTitleDraft);
-    const defaultTitle = defaultStyleTitle(name);
-    const nextTitles = { ...styleTitles };
-    if (!normalized || normalized.toLowerCase() === defaultTitle.toLowerCase()) {
-      delete nextTitles[name];
-    } else {
-      nextTitles[name] = normalized;
-    }
     editingStyleTitleName = null;
+    persistStyleTitle(name, styleTitleDraft);
+  }
+
+  function startStyleKeyEdit(event: MouseEvent, name: string) {
+    event.preventDefault();
+    event.stopPropagation();
+    editingStyleKeyName = baseStyleName(name);
+    styleKeyDraft = styleKeyForName(name);
+    void focusStyleKeyInput();
+  }
+
+  async function focusStyleKeyInput() {
+    await tick();
+    styleKeyInput?.focus();
+    styleKeyInput?.select();
+  }
+
+  function saveStyleKey() {
+    if (!editingStyleKeyName) return;
+    const name = editingStyleKeyName;
+    editingStyleKeyName = null;
+    persistStyleKey(name, styleKeyDraft);
+  }
+
+  function persistStyleKey(name: string, key: string) {
+    const normalized = normalizeStyleKey(key) || defaultStyleKeyForName(name);
+    const oldKey = styleKeyForName(name);
+    if (!normalized) return;
+
+    const nextKeys = { ...styleKeys };
+    const otherStyle = orderedHighlightStyles.find(style =>
+      style.name !== name && styleKeyForName(style.name) === normalized
+    );
+    if (otherStyle && oldKey) {
+      nextKeys[otherStyle.name] = oldKey;
+    }
+    nextKeys[name] = normalized;
+    persistStyleKeys(nextKeys);
+  }
+
+  function cancelStyleKeyEdit() {
+    editingStyleKeyName = null;
+  }
+
+  function handleStyleKeyKeydown(event: KeyboardEvent) {
+    event.stopPropagation();
+    if (event.key === "Enter") {
+      event.preventDefault();
+      saveStyleKey();
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancelStyleKeyEdit();
+      return;
+    }
+    if (event.key === "Backspace" || event.key === "Delete") {
+      event.preventDefault();
+      styleKeyDraft = "";
+      return;
+    }
+    if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      const key = normalizeStyleKey(event.key);
+      if (!key) return;
+      event.preventDefault();
+      styleKeyDraft = key;
+      saveStyleKey();
+    }
+  }
+
+  function persistStyleTitle(name: string, title: string) {
+    const normalized = normalizeStyleTitle(title);
+    const defaultTitle = defaultStyleTitle(name);
+    const customTitle = normalized && normalized.toLowerCase() !== defaultTitle.toLowerCase() ? normalized : "";
+    const nextTitles = { ...styleTitles };
+    if (customTitle) nextTitles[name] = customTitle;
+    else delete nextTitles[name];
+
     persistStyleTitles(nextTitles);
-    if (view) updateSummaryFromView(view);
+    if (!view) return;
+    syncStyleTitleAnnotations(view, name, customTitle);
+    updateSummaryFromView(view);
+  }
+
+  function syncStyleTitleAnnotations(v: EditorView, name: string, customTitle: string) {
+    const docText = v.state.doc.toString();
+    const changes: { from: number; to: number; insert: string }[] = [];
+
+    annotationPattern.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = annotationPattern.exec(docText)) !== null) {
+      if (baseStyleName(match[2]) !== name) continue;
+
+      const insert = annotationWithStoredTitle(match, customTitle);
+      if (insert === match[0]) continue;
+      changes.push({ from: match.index, to: match.index + match[0].length, insert });
+    }
+    annotationPattern.lastIndex = 0;
+
+    if (changes.length) v.dispatch({ changes });
+    else v.dispatch({});
   }
 
   function cancelStyleTitleEdit() {
@@ -2088,7 +2240,7 @@ ${body}
       fgMuted: "#a89984", yellow: "#fabd2f", green: "#b8bb26",
       blue: "#83a598", aqua: "#8ec07c", orange: "#fe8019",
       red: "#fb4934", purple: "#d3869b", selection: "#665c54",
-      activeLine: "#3c3836aa", gutterText: "#7c6f64",
+      activeLine: "transparent", gutterText: "#7c6f64",
       cursor: "#fe8019", comment: "#928374",
       searchMatch: "#665c54", searchMatchSelected: "#7c6f64",
       blockquoteBg: "#4a3520", blockquoteFg: "#fabd2f",
@@ -2101,7 +2253,7 @@ ${body}
       fgMuted: "#4c566a", yellow: "#ebcb8b", green: "#a3be8c",
       blue: "#81a1c1", aqua: "#8fbcbb", orange: "#d08770",
       red: "#bf616a", purple: "#b48ead", selection: "#d8dee9",
-      activeLine: "#e5e9f0", gutterText: "#5e6472",
+      activeLine: "transparent", gutterText: "#5e6472",
       cursor: "#5e81ac", comment: "#4c566a",
       searchMatch: "#d8dee9", searchMatchSelected: "#cfd7e3",
       blockquoteBg: "#e5e9f0", blockquoteFg: "#5e81ac",
@@ -2548,11 +2700,11 @@ ${body}
   }
 
   function summaryAnnotationTitle(item: SummaryAnnotationItem) {
-    return item.title || styleDisplayTitle(item.colorName);
+    return styleDisplayTitle(item.colorName);
   }
 
   function annotationTitleKey(item: SummaryAnnotationItem) {
-    return item.title.trim() || styleDisplayTitle(item.colorName);
+    return styleDisplayTitle(item.colorName);
   }
 
   function isSummaryAnnotationItem(item: SummaryItem): item is SummaryAnnotationItem {
@@ -2933,7 +3085,7 @@ ${body}
     event.preventDefault();
     event.stopPropagation();
     editingSummaryTitleKey = key;
-    summaryTitleDraft = item.title || styleDisplayTitle(item.colorName);
+    summaryTitleDraft = styleDisplayTitle(item.colorName);
     void focusSummaryTitleInput();
   }
 
@@ -2943,7 +3095,7 @@ ${body}
     const firstAnnotation = summaryAnnotationItems(section.items)[0];
     if (!firstAnnotation) return;
     editingSummaryTitleKey = section.id;
-    summaryTitleDraft = firstAnnotation.title || styleDisplayTitle(firstAnnotation.colorName);
+    summaryTitleDraft = styleDisplayTitle(firstAnnotation.colorName);
     void focusSummaryTitleInput();
   }
 
@@ -2953,51 +3105,16 @@ ${body}
     summaryTitleInput?.select();
   }
 
-  function normalizeSummaryTitle(title: string, colorName: string) {
-    const normalized = title.trim().replace(/\s+/g, " ").replace(/"/g, "'").replace(/[<>]/g, "").replace(/--+/g, "-");
-    const defaultTitle = styleDisplayTitle(colorName);
-    return normalized.toLowerCase() === defaultTitle.toLowerCase() ? "" : normalized;
-  }
-
-  function annotationMatchAt(docText: string, spanStart: number) {
-    annotationPattern.lastIndex = spanStart;
-    const match = annotationPattern.exec(docText);
-    annotationPattern.lastIndex = 0;
-    return match?.index === spanStart ? match : null;
-  }
-
-  function annotationWithTitle(match: RegExpExecArray, title: string) {
-    const colorName = match[2];
-    const normalizedTitle = normalizeSummaryTitle(title, colorName);
-    const titlePart = normalizedTitle ? `, title: "${normalizedTitle}"` : "";
-    return `\`${match[1]}\`<!-- ${colorName}, ${match[3]}: "${match[4]}"${titlePart} -->`;
-  }
-
   function saveSummaryTitle(items: SummaryAnnotationItem[]) {
     if (!editingSummaryTitleKey) return;
-    if (!view || items.length === 0) {
+    if (items.length === 0) {
       editingSummaryTitleKey = null;
       return;
     }
 
-    const docText = view.state.doc.toString();
-    const changes = items
-      .map(item => {
-        const match = annotationMatchAt(docText, item.spanStart);
-        if (!match) return null;
-        return {
-          from: item.spanStart,
-          to: item.spanStart + match[0].length,
-          insert: annotationWithTitle(match, summaryTitleDraft)
-        };
-      })
-      .filter((change): change is { from: number; to: number; insert: string } => !!change)
-      .sort((a, b) => a.from - b.from);
-
+    const styleName = baseStyleName(items[0].colorName);
     editingSummaryTitleKey = null;
-    if (changes.length) {
-      view.dispatch({ changes });
-    }
+    persistStyleTitle(styleName, summaryTitleDraft);
   }
 
   function cancelSummaryTitleEdit() {
@@ -3126,6 +3243,7 @@ ${body}
           const colorName = m[2];
           const timestamp = m[3] || "";
           const comment   = m[4] || "";
+          const title = styleDisplayTitle(colorName);
           const color = styleColorForName(colorName);
           return [{
             pos: wordStart, above: true, strictSide: true, arrow: false,
@@ -3135,7 +3253,7 @@ ${body}
               dom.style.cssText = `background:${activeTheme.bgAlt};border:1px solid ${activeTheme.border};border-left:3px solid ${color};border-radius:4px;padding:4px 10px;font-size:11px;color:${activeTheme.fg};line-height:1.6;white-space:nowrap;pointer-events:none;`;
               const meta = document.createElement("div");
               meta.style.color = activeTheme.fgMuted;
-              meta.textContent = `${colorName}  ${timestamp}`;
+              meta.textContent = `${title}  ${timestamp}`;
               dom.appendChild(meta);
               const line2 = document.createElement("div");
               line2.textContent = comment || "Enter to add note";
@@ -3668,7 +3786,7 @@ ${body}
       const now = new Date();
       const ts = now.toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).replace(/,/g, "");
       const name = annotationStyleName || styleName(style);
-      return `\`${text}\`<!-- ${name}, ${ts}: "" -->`;
+      return `\`${text}\`<!-- ${name}, ${ts}: ""${annotationTitlePartForStyle(name)} -->`;
     };
     if (!range.empty) {
       const trimmedRange = trimTrailingWhitespaceRange(state.doc.toString(), range.from, range.to);
@@ -4306,13 +4424,6 @@ ${body}
       { key: "F2", run: v => { setMode(editorMode === "insert" ? "normal" : "insert"); return true; } },
       { key: "F1", run: () => { showHelp = !showHelp; return true; } },
       { key: "Tab", run: normal(v => handleEnterInAnnotationMode(v)) },
-      { key: "q", run: normal(v => cycleAnnotationColorOrStyle(v, -1)) },
-      { key: "e", run: normal(v => cycleAnnotationColorOrStyle(v, +1)) },
-      { key: "r", run: normal(() => { cycleAudioRate(); return true; }) },
-      { key: "f", run: normal(() => { toggleMediaPlayback(); return true; }) },
-      { key: "i", run: normal(v => cycleAnnotationColorOrStyle(v, -1)) },
-      { key: "o", run: normal(v => cycleAnnotationColorOrStyle(v, +1)) },
-      { any: (v, event) => handleCapsLockNavigation(v, event) },
       {
         any: (v, event) => {
           if (
@@ -4327,6 +4438,13 @@ ${body}
           return style === null ? false : setAnnotationColorOrStyle(v, style);
         }
       },
+      { key: "q", run: normal(v => cycleAnnotationColorOrStyle(v, -1)) },
+      { key: "e", run: normal(v => cycleAnnotationColorOrStyle(v, +1)) },
+      { key: "r", run: normal(() => { cycleAudioRate(); return true; }) },
+      { key: "f", run: normal(() => { toggleMediaPlayback(); return true; }) },
+      { key: "i", run: normal(v => cycleAnnotationColorOrStyle(v, -1)) },
+      { key: "o", run: normal(v => cycleAnnotationColorOrStyle(v, +1)) },
+      { any: (v, event) => handleCapsLockNavigation(v, event) },
 
       // Normal-mode only: Navigation
       { key: "ArrowLeft",        run: normal(v => runLeftWithCursorScroll(v, cursorCharLeft)) },
@@ -4526,7 +4644,7 @@ ${body}
     --fg-muted: ${activeTheme.fgMuted}; --yellow: ${activeTheme.yellow}; --green: ${activeTheme.green};
     --blue: ${activeTheme.blue}; --orange: ${activeTheme.orange}; --selection: ${activeTheme.selection};
     --active-style-color: ${currentStyleColor};
-    --active-line-annotate: color-mix(in srgb, var(--active-style-color) 34%, transparent);
+    --active-line-annotate: color-mix(in srgb, var(--active-style-color) 14%, transparent);
   `}
 >
   <div class="toolbar">
@@ -4746,17 +4864,10 @@ ${body}
       <div class="sidebar-section">
         <div class="sidebar-label">Annotation styles</div>
         <div class="style-list sidebar-style-list">
-          <div class="style-row style-row-plain">
-            <span class="style-swatch" style={`background: ${styleColor(0)}`}></span>
-            <span class="style-name">Space. plain</span>
-          </div>
-          <div class="style-row style-row-plain">
-            <span class="style-swatch style-swatch-box" style={`border-color: ${styleColor(currentStyle)}; color: ${styleColor(currentStyle)}`}></span>
-            <span class="style-name">0. box counterpart</span>
-          </div>
           {#each orderedHighlightStyles as style, index}
             <div
               class="style-row"
+              class:active-style={style.name === baseStyleName(styleName(currentStyle))}
               class:reorderable={styleShortcutMode === "manual"}
               role="listitem"
               class:drag-over={styleShortcutMode === "manual" && reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name}
@@ -4773,6 +4884,27 @@ ${body}
               on:dragend={finishReorderDrag}
             >
               <span class="style-swatch" style={`background: ${style.color}`}></span>
+              {#if editingStyleKeyName === style.name}
+                <input
+                  class="style-key-badge style-key-input"
+                  bind:this={styleKeyInput}
+                  bind:value={styleKeyDraft}
+                  aria-label={`Shortcut key for ${styleDisplayTitle(style.name)}`}
+                  on:click={event => event.stopPropagation()}
+                  on:blur={saveStyleKey}
+                  on:keydown={handleStyleKeyKeydown}
+                />
+              {:else}
+                <button
+                  class="style-key-badge style-key-action"
+                  type="button"
+                  title={`Edit shortcut key for ${styleDisplayTitle(style.name)}`}
+                  on:click={event => startStyleKeyEdit(event, style.name)}
+                  on:keydown={event => event.stopPropagation()}
+                >
+                  {styleKeyForName(style.name)}
+                </button>
+              {/if}
               {#if editingStyleTitleName === style.name}
                 <input
                   class="style-name style-title-input"
@@ -4792,11 +4924,10 @@ ${body}
                   on:click={event => startStyleTitleEdit(event, style.name)}
                   on:keydown={event => event.stopPropagation()}
                 >
-                  {styleKeyForName(style.name)}. {styleDisplayTitle(style.name)}
+                  {styleDisplayTitle(style.name)}
                 </button>
               {/if}
               {#if styleShortcutMode === "manual"}
-                <span class="style-key-badge" title={`Shortcut key for ${styleDisplayTitle(style.name)}`}>{styleKeyForName(style.name)}</span>
                 <button
                   class="reorder-handle"
                   type="button"
@@ -6128,18 +6259,14 @@ ${body}
 
   .style-row {
     display: grid;
-    grid-template-columns: 16px minmax(0, 1fr);
+    grid-template-columns: 16px 28px minmax(0, 1fr);
     gap: 8px;
     align-items: center;
     padding: 2px 0;
   }
 
-  .style-row-plain {
-    grid-template-columns: 16px minmax(0, 1fr);
-  }
-
   .style-row.reorderable {
-    grid-template-columns: 16px minmax(0, 1fr) 28px 20px;
+    grid-template-columns: 16px 28px minmax(0, 1fr) 20px;
   }
 
   .style-row.reorderable.drop-before {
@@ -6157,9 +6284,9 @@ ${body}
     border: 1px solid rgba(0, 0, 0, 0.2);
   }
 
-  .style-swatch-box {
-    background: transparent !important;
-    border-width: 2px;
+  .style-row.active-style .style-swatch {
+    width: 16px;
+    height: 16px;
   }
 
   .style-name {
@@ -6220,6 +6347,24 @@ ${body}
     text-align: center;
     text-transform: lowercase;
     user-select: none;
+  }
+
+  .style-key-action,
+  .style-key-input {
+    cursor: text;
+  }
+
+  .style-key-action:hover,
+  .style-key-action:focus-visible,
+  .style-key-input:focus {
+    border-color: var(--orange);
+    color: var(--orange);
+    outline: none;
+  }
+
+  .style-key-input {
+    padding: 0 2px;
+    outline: none;
   }
 
   .reorder-handle {
