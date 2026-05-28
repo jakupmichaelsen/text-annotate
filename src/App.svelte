@@ -744,6 +744,10 @@
     return event.key === "Tab" && !event.ctrlKey && !event.metaKey && !event.altKey;
   }
 
+  function isBlockquoteEditShortcut(event: KeyboardEvent) {
+    return editorMode === "normal" && event.code === "IntlBackslash" && !event.ctrlKey && !event.metaKey && !event.altKey;
+  }
+
   function isHelpCloseShortcut(event: KeyboardEvent) {
     return (showHelp || settingsOpen) && !event.ctrlKey && !event.metaKey && !event.altKey && (event.key === "Escape" || event.key === "?");
   }
@@ -761,6 +765,7 @@
     if (isModeShortcut(event) || isAudioShortcut(event) || isAudioRateShortcut(event) || isPlaybackShortcut(event) || isViewportScrollShortcut(event) || isAnnotationJumpShortcut(event)) return true;
     if (event.ctrlKey && !event.altKey && (event.key === "z" || event.key === "y" || event.key === "Z")) return true;
     if (editorMode !== "normal" || event.altKey) return false;
+    if (isBlockquoteEditShortcut(event)) return true;
     if (!event.ctrlKey && styleNumberForKey(event.key) !== null) return true;
 
     if (event.ctrlKey) {
@@ -3859,6 +3864,18 @@ ${body}
     return wrapSelectionOrWord(v, style);
   }
 
+  function enterBlockquoteEditMode(v: EditorView) {
+    const head = v.state.selection.main.head;
+    const insert = "\n> ";
+    setMode("insert");
+    v.dispatch({
+      changes: { from: head, to: head, insert },
+      selection: { anchor: head + insert.length },
+      effects: cursorScrollEffect(v, head + insert.length)
+    });
+    return true;
+  }
+
   function cycleAnnotationColorOrStyle(v: EditorView, delta: number) {
     const cursor = v.state.selection.main.head;
     const docText = v.state.doc.toString();
@@ -4430,6 +4447,7 @@ ${body}
       { key: "Tab", run: normal(v => handleEnterInAnnotationMode(v)) },
       {
         any: (v, event) => {
+          if (isBlockquoteEditShortcut(event)) return enterBlockquoteEditMode(v);
           if (
             editorMode !== "normal" ||
             event.key.length !== 1 ||
