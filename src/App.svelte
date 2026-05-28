@@ -4030,7 +4030,9 @@ ${body}
       this.view.requestMeasure({
         read: view => {
           if (!view.hasFocus || editorMode === "insert") return null;
-          const coords = view.coordsAtPos(view.state.selection.main.head);
+          const head = view.state.selection.main.head;
+          if (head === view.state.doc.lineAt(head).from) return null;
+          const coords = view.coordsAtPos(head);
           if (!coords) return null;
           const scroller = view.scrollDOM;
           const scrollerRect = scroller.getBoundingClientRect();
@@ -4928,6 +4930,7 @@ ${body}
                   {styleKeyForName(style.name)}
                 </button>
               {/if}
+              <span class="style-separator" aria-hidden="true">:</span>
               {#if editingStyleTitleName === style.name}
                 <input
                   class="style-name style-title-input"
@@ -6268,7 +6271,7 @@ ${body}
 
   .style-list {
     display: grid;
-    gap: 6px;
+    gap: 2px;
     margin-top: 0;
   }
 
@@ -6282,14 +6285,14 @@ ${body}
 
   .style-row {
     display: grid;
-    grid-template-columns: 16px 28px minmax(0, 1fr);
-    gap: 1px;
+    grid-template-columns: 16px max-content max-content minmax(0, 1fr);
+    column-gap: 2px;
     align-items: center;
     padding: 0;
   }
 
   .style-row.reorderable {
-    grid-template-columns: 16px 28px minmax(0, 1fr) 20px;
+    grid-template-columns: 16px max-content max-content minmax(0, 1fr) 20px;
   }
 
   .style-row.reorderable.drop-before {
@@ -6319,6 +6322,13 @@ ${body}
     white-space: nowrap;
     color: var(--fg);
     font-size: 12px;
+  }
+
+  .style-separator {
+    color: var(--fg);
+    font-size: 12px;
+    line-height: inherit;
+    user-select: none;
   }
 
   .style-title-action {
@@ -6355,7 +6365,6 @@ ${body}
   }
 
   .style-key-badge {
-    width: 28px;
     box-sizing: border-box;
     padding: 0;
     border: 0;
@@ -6365,7 +6374,7 @@ ${body}
     font-size: 12px;
     font-weight: 400;
     line-height: inherit;
-    text-align: center;
+    text-align: left;
     text-transform: lowercase;
     user-select: none;
   }
