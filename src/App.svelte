@@ -2068,8 +2068,14 @@ ${body}
 
   async function focusStyleTitleInput() {
     await tick();
-    styleTitleInput?.focus();
-    styleTitleInput?.select();
+    focusInputAtEnd(styleTitleInput);
+  }
+
+  function focusInputAtEnd(input: HTMLInputElement | null) {
+    if (!input) return;
+    input.focus();
+    const end = input.value.length;
+    input.setSelectionRange(end, end);
   }
 
   function saveStyleTitle() {
@@ -2089,8 +2095,7 @@ ${body}
 
   async function focusStyleKeyInput() {
     await tick();
-    styleKeyInput?.focus();
-    styleKeyInput?.select();
+    focusInputAtEnd(styleKeyInput);
   }
 
   function saveStyleKey() {
@@ -3101,8 +3106,7 @@ ${body}
 
   async function focusSummaryTitleInput() {
     await tick();
-    summaryTitleInput?.focus();
-    summaryTitleInput?.select();
+    focusInputAtEnd(summaryTitleInput);
   }
 
   function saveSummaryTitle(items: SummaryAnnotationItem[]) {
@@ -4007,7 +4011,7 @@ ${body}
       this.scheduled = true;
       this.view.requestMeasure({
         read: view => {
-          if (!view.hasFocus || !view.state.selection.main.empty) return null;
+          if (!view.hasFocus || editorMode === "insert") return null;
           const coords = view.coordsAtPos(view.state.selection.main.head);
           if (!coords) return null;
           const scroller = view.scrollDOM;
@@ -4912,7 +4916,7 @@ ${body}
                   bind:value={styleTitleDraft}
                   aria-label={`Title for ${style.name}`}
                   on:click={event => event.stopPropagation()}
-                  on:focus={event => (event.target as HTMLInputElement).select()}
+                  on:focus={event => focusInputAtEnd(event.target as HTMLInputElement)}
                   on:blur={saveStyleTitle}
                   on:keydown={handleStyleTitleKeydown}
                 />
@@ -5061,7 +5065,7 @@ ${body}
                           bind:value={summaryTitleDraft}
                           aria-label="Annotation title"
                           on:click={event => event.stopPropagation()}
-                          on:focus={event => (event.target as HTMLInputElement).select()}
+                          on:focus={event => focusInputAtEnd(event.target as HTMLInputElement)}
                           on:blur={() => saveSummaryTitle([section.item])}
                           on:keydown={event => handleSummaryTitleKeydown(event, [section.item])}
                         />
@@ -5136,7 +5140,7 @@ ${body}
                     bind:value={summaryTitleDraft}
                     aria-label="Annotation group title"
                     on:click={event => event.stopPropagation()}
-                    on:focus={event => (event.target as HTMLInputElement).select()}
+                    on:focus={event => focusInputAtEnd(event.target as HTMLInputElement)}
                     on:blur={() => saveSummaryTitle(summaryAnnotationItems(section.items))}
                     on:keydown={event => handleSummaryTitleKeydown(event, summaryAnnotationItems(section.items))}
                   />
@@ -5190,7 +5194,7 @@ ${body}
                               bind:value={summaryTitleDraft}
                               aria-label="Annotation title"
                               on:click={event => event.stopPropagation()}
-                              on:focus={event => (event.target as HTMLInputElement).select()}
+                              on:focus={event => focusInputAtEnd(event.target as HTMLInputElement)}
                               on:blur={() => saveSummaryTitle([item])}
                               on:keydown={event => handleSummaryTitleKeydown(event, [item])}
                             />
@@ -6260,9 +6264,9 @@ ${body}
   .style-row {
     display: grid;
     grid-template-columns: 16px 28px minmax(0, 1fr);
-    gap: 8px;
+    gap: 3px;
     align-items: center;
-    padding: 2px 0;
+    padding: 0;
   }
 
   .style-row.reorderable {
@@ -6353,14 +6357,21 @@ ${body}
   }
 
   .style-key-action:hover,
-  .style-key-action:focus-visible,
-  .style-key-input:focus {
+  .style-key-action:focus-visible {
     color: var(--orange);
     outline: none;
   }
 
   .style-key-input {
+    height: 20px;
+    padding: 1px 3px;
+    border: 1px solid var(--border);
+    background: var(--bg);
     outline: none;
+  }
+
+  .style-key-input:focus {
+    border-color: var(--orange);
   }
 
   .reorder-handle {
