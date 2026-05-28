@@ -6333,17 +6333,15 @@ ${body}
 
   .style-key-badge {
     width: 28px;
-    height: 20px;
     box-sizing: border-box;
-    padding: 0 2px;
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    background: var(--bg-alt);
+    padding: 0;
+    border: 0;
+    background: transparent;
     color: var(--fg);
     font: inherit;
-    font-size: 10px;
-    font-weight: 700;
-    line-height: 18px;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: inherit;
     text-align: center;
     text-transform: lowercase;
     user-select: none;
@@ -6357,13 +6355,11 @@ ${body}
   .style-key-action:hover,
   .style-key-action:focus-visible,
   .style-key-input:focus {
-    border-color: var(--orange);
     color: var(--orange);
     outline: none;
   }
 
   .style-key-input {
-    padding: 0 2px;
     outline: none;
   }
 
