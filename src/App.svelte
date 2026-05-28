@@ -2404,7 +2404,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
       ".cm-formatting": { color: theme.fgMuted },
       ".cm-blockquote-line": {
         borderLeft: `3px solid ${theme.orange}`,
-        paddingLeft: "0.75em",
+        paddingLeft: "0.35em",
         paddingRight: "0.35em",
         backgroundColor: theme.blockquoteBg,
         color: theme.blockquoteFg
