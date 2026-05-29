@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { EditorState, Prec, type Extension } from "@codemirror/state";
   import {
     EditorView, keymap, lineNumbers, drawSelection, runScopeHandlers,
@@ -120,10 +120,15 @@
   let summarySidebarWidth = 320;
   let editingSummaryTitleKey: string | null = null;
   let summaryTitleDraft = "";
+  let editingStyleTitleName: string | null = null;
+  let styleTitleDraft = "";
+  let styleTitleInput: HTMLInputElement | null = null;
   let resizingSummarySidebar = false;
   let finishSummaryResize: (() => void) | null = null;
   const summarySidebarMinWidth = 240;
   const summarySidebarMaxWidth = 720;
+  const styleTitlesStorageKey = "cm6-style-titles";
+  let styleTitles = loadStyleTitles();
   $: editorModeLabel = editorMode === "insert" ? "EDIT" : "ANNOTATE";
   $: summaryFontSize = Math.round((11 + ((summarySidebarWidth - summarySidebarMinWidth) / 110)) * 10) / 10;
   $: clampedSummaryFontSize = Math.max(11, Math.min(15, summaryFontSize));
@@ -826,6 +831,108 @@
   function styleNumberForName(name: string) {
     const index = highlightStyles.findIndex(s => s.name === name);
     return index < 0 ? 1 : index + 1;
+  }
+
+  function defaultStyleTitle(name: string) {
+    return name;
+  }
+
+  function styleDisplayTitle(name: string) {
+    return styleTitles[name] || defaultStyleTitle(name);
+  }
+
+  function customStyleTitle(name: string) {
+    return styleTitles[name] || "";
+  }
+
+  function normalizeStyleTitle(title: string) {
+    return title.trim().replace(/\s+/g, " ").replace(/"/g, "'").replace(/[<>]/g, "").replace(/--+/g, "-");
+  }
+
+  function loadStyleTitles() {
+    const stored = typeof localStorage === "undefined" ? null : localStorage.getItem(styleTitlesStorageKey);
+    if (!stored) return {};
+
+    try {
+      const parsed = JSON.parse(stored);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+      return Object.fromEntries(
+        Object.entries(parsed)
+          .filter((entry): entry is [string, string] =>
+            typeof entry[0] === "string" &&
+            highlightStyles.some(style => style.name === entry[0]) &&
+            typeof entry[1] === "string" &&
+            entry[1].trim().length > 0
+          )
+          .map(([name, title]) => [name, normalizeStyleTitle(title)])
+          .filter(([name, title]) => title.length > 0 && title.toLowerCase() !== defaultStyleTitle(name).toLowerCase())
+      );
+    } catch {
+      return {};
+    }
+  }
+
+  function persistStyleTitles(titles: Record<string, string>) {
+    styleTitles = titles;
+    if (typeof localStorage === "undefined") return;
+    if (Object.keys(titles).length) {
+      localStorage.setItem(styleTitlesStorageKey, JSON.stringify(titles));
+    } else {
+      localStorage.removeItem(styleTitlesStorageKey);
+    }
+  }
+
+  function persistStyleTitle(name: string, title: string) {
+    const normalized = normalizeStyleTitle(title);
+    const nextTitles = { ...styleTitles };
+    if (!normalized || normalized.toLowerCase() === defaultStyleTitle(name).toLowerCase()) {
+      delete nextTitles[name];
+    } else {
+      nextTitles[name] = normalized;
+    }
+    persistStyleTitles(nextTitles);
+  }
+
+  function startStyleTitleEdit(event: MouseEvent, name: string) {
+    event.preventDefault();
+    event.stopPropagation();
+    editingStyleTitleName = name;
+    styleTitleDraft = styleDisplayTitle(name);
+    void focusStyleTitleInput();
+  }
+
+  async function focusStyleTitleInput() {
+    await tick();
+    focusInputAtEnd(styleTitleInput);
+  }
+
+  function focusInputAtEnd(input: HTMLInputElement | null) {
+    if (!input) return;
+    input.focus();
+    const end = input.value.length;
+    input.setSelectionRange(end, end);
+  }
+
+  function saveStyleTitle() {
+    if (!editingStyleTitleName) return;
+    const name = editingStyleTitleName;
+    editingStyleTitleName = null;
+    persistStyleTitle(name, styleTitleDraft);
+  }
+
+  function cancelStyleTitleEdit() {
+    editingStyleTitleName = null;
+  }
+
+  function handleStyleTitleKeydown(event: KeyboardEvent) {
+    event.stopPropagation();
+    if (event.key === "Enter") {
+      event.preventDefault();
+      saveStyleTitle();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      cancelStyleTitleEdit();
+    }
   }
 
   function starterDoc() {
@@ -2008,7 +2115,9 @@ ${body}
       const now = new Date();
       const ts = now.toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).replace(/,/g, "");
       const name = styleName(style);
-      return `\`${text}\`<!-- ${name}, ${ts}: "" -->`;
+      const title = customStyleTitle(name);
+      const titlePart = title ? `, title: "${title}"` : "";
+      return `\`${text}\`<!-- ${name}, ${ts}: ""${titlePart} -->`;
     };
     if (!range.empty) {
       const insert = makeInsert(state.doc.sliceString(range.from, range.to));
@@ -2546,6 +2655,52 @@ ${body}
           </span>
           <span class:active={editorMode === "insert"}>Edit</span>
         </label>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-label">Annotation styles</div>
+        <div class="style-list sidebar-style-list">
+          {#each highlightStyles as style, index}
+            <div
+              class="style-row"
+              class:active-style={currentStyle === index + 1}
+              role="listitem"
+            >
+              <button
+                class="style-swatch"
+                style={`background: ${style.color}`}
+                type="button"
+                title={`Use ${styleDisplayTitle(style.name)}`}
+                aria-label={`Use ${styleDisplayTitle(style.name)}`}
+                on:click={() => { currentStyle = index + 1; view?.focus(); }}
+              ></button>
+              <span class="style-key-badge">{index + 1}</span>
+              <span class="style-separator" aria-hidden="true">:</span>
+              {#if editingStyleTitleName === style.name}
+                <input
+                  class="style-name style-title-input"
+                  bind:this={styleTitleInput}
+                  bind:value={styleTitleDraft}
+                  aria-label={`Title for ${style.name}`}
+                  on:click={event => event.stopPropagation()}
+                  on:focus={event => focusInputAtEnd(event.target as HTMLInputElement)}
+                  on:blur={saveStyleTitle}
+                  on:keydown={handleStyleTitleKeydown}
+                />
+              {:else}
+                <button
+                  class="style-name style-title-action"
+                  type="button"
+                  title={`Edit ${styleDisplayTitle(style.name)} title`}
+                  on:click={event => startStyleTitleEdit(event, style.name)}
+                  on:keydown={event => event.stopPropagation()}
+                >
+                  {styleDisplayTitle(style.name)}
+                </button>
+              {/if}
+            </div>
+          {/each}
+        </div>
       </div>
 
       <div class="sidebar-section">
