@@ -166,6 +166,28 @@
     outline: none;
   }
 
+  .summary-export-btn {
+    min-width: 0;
+    padding: 0 8px;
+    height: 24px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--fg-muted);
+    font: inherit;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+
+  .summary-export-btn:hover,
+  .summary-export-btn:focus-visible {
+    color: var(--yellow);
+    border-color: var(--border);
+    outline: none;
+  }
+
   .summary-collapsed-count {
     margin-top: 10px;
     color: var(--fg-muted);

@@ -551,6 +551,28 @@
     if (fallbackName) downloadText(fallbackName, html, "text/html;charset=utf-8");
   }
 
+  async function exportSummaryHtml() {
+    const suggestedName = `${stripExtension(activeSaveName || "annotations")}-summary.html`;
+    const html = buildSummaryExportHtml();
+    const picker = (window as any).showSaveFilePicker;
+
+    if (picker) {
+      try {
+        const handle = await picker({
+          suggestedName,
+          types: [{ description: "HTML", accept: { "text/html": [".html"] } }]
+        });
+        await writeTextToHandle(handle, html);
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) console.error(error);
+      }
+      return;
+    }
+
+    const fallbackName = prompt("Export summary filename", suggestedName);
+    if (fallbackName) downloadText(fallbackName, html, "text/html;charset=utf-8");
+  }
+
   function stripExtension(name: string) {
     return name.replace(/\.[^.]+$/, "") || "annotations";
   }
@@ -1122,6 +1144,93 @@ ${body}
 </body>
 </html>
 `;
+  }
+
+  function buildSummaryExportHtml() {
+    const body = buildSummaryExportBody();
+    return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapeHtml(stripExtension(activeSaveName || "Annotation summary"))} summary</title>
+  <style>
+    body {
+      margin: 0;
+      background: ${gruvbox.bg};
+      color: ${gruvbox.fg};
+      font-family: "Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      line-height: 1.5;
+      font-size: 14px;
+    }
+    main {
+      box-sizing: border-box;
+      max-width: 960px;
+      min-height: 100vh;
+      margin: 0 auto;
+      padding: 32px 28px 64px;
+    }
+    h1 { color: ${gruvbox.yellow}; font-size: 20px; margin: 0 0 8px; }
+    h2 { color: ${gruvbox.fg}; font-size: 14px; margin: 28px 0 10px; text-transform: uppercase; letter-spacing: 0.08em; }
+    .summary-export-source { color: ${gruvbox.fgMuted}; margin: 0 0 24px; font-size: 12px; }
+    .summary-export-entry { border-top: 1px solid ${gruvbox.border}; padding: 12px 0; }
+    .summary-export-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .summary-export-swatch { width: 10px; height: 10px; border-radius: 2px; border: 1px solid rgba(0, 0, 0, 0.25); flex: 0 0 auto; }
+    .summary-export-title { color: ${gruvbox.fg}; font-weight: 700; }
+    .summary-export-meta { color: ${gruvbox.fgMuted}; font-size: 11px; }
+    .summary-export-context { margin: 0; color: ${gruvbox.fgMuted}; }
+    .summary-export-context mark { border-radius: 3px; padding: 0 2px; }
+    .summary-export-comment { margin: 6px 0 0; color: ${gruvbox.yellow}; }
+  </style>
+</head>
+<body>
+  <main>
+${body}
+  </main>
+</body>
+</html>`;
+  }
+
+  function buildSummaryExportBody() {
+    const blocks = [
+      `    <h1>Summary</h1>`,
+      `    <p class="summary-export-source">Source: ${escapeHtml(activeSaveName || "annotations.md")}</p>`
+    ];
+
+    for (const section of summarySections) {
+      if (section.kind === "group") {
+        blocks.push(`    <h2>${escapeHtml(section.label)} (${section.count})</h2>`);
+        for (const item of section.items) blocks.push(buildSummaryExportEntry(item));
+      } else {
+        blocks.push(buildSummaryExportEntry(section.item));
+      }
+    }
+
+    return blocks.join("\n");
+  }
+
+  function buildSummaryExportEntry(item: SummaryItem) {
+    if (item.type === "blockquote") {
+      return `    <article class="summary-export-entry">
+      <div class="summary-export-head">
+        <span class="summary-export-title">Notes</span>
+        <span class="summary-export-meta">Ln ${item.line}</span>
+      </div>
+      <p class="summary-export-context">${escapeHtml(item.text)}</p>
+    </article>`;
+    }
+
+    const comment = item.comment.trim();
+    return `    <article class="summary-export-entry">
+      <div class="summary-export-head">
+        <span class="summary-export-swatch" style="background:${escapeHtml(item.color)}"></span>
+        <span class="summary-export-title">${escapeHtml(summaryAnnotationTitle(item))}</span>
+        <span class="summary-export-meta">Ln ${item.line}</span>
+        <span class="summary-export-meta">${escapeHtml(summaryTimestamp(item.timestamp))}</span>
+      </div>
+      <p class="summary-export-context"><span>${escapeHtml(item.context.before)}</span><mark style="background:${escapeHtml(item.color)};color:${escapeHtml(contrastColor(item.color))}">${escapeHtml(item.context.text)}</mark><span>${escapeHtml(item.context.after)}</span></p>
+      ${comment ? `<p class="summary-export-comment">${escapeHtml(comment)}</p>` : ""}
+    </article>`;
   }
 
   function renderCleanHtmlBody(markdownText: string) {
@@ -2806,6 +2915,9 @@ ${body}
           >
             {summaryCollapsed ? "‹" : "›"}
           </button>
+          {#if !summaryCollapsed}
+            <button class="summary-export-btn" type="button" on:click={exportSummaryHtml}>EXPORT</button>
+          {/if}
         </div>
       </div>
       {#if summaryCollapsed}
