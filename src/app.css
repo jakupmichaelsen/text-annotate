@@ -253,7 +253,7 @@
     width: 100%;
     min-width: 0;
     display: grid;
-    grid-template-columns: 16px minmax(0, 1fr) auto auto;
+    grid-template-columns: 16px minmax(0, 1fr) auto auto auto;
     gap: 8px;
     align-items: center;
     padding: 9px 12px;
@@ -266,10 +266,22 @@
     cursor: pointer;
   }
 
+  .summary-group-header.reorderable {
+    cursor: default;
+  }
+
   .summary-group-header:hover,
   .summary-group-header:focus-visible {
     background: var(--bg-alt);
     outline: none;
+  }
+
+  .summary-group-header.drop-before {
+    box-shadow: inset 0 2px 0 var(--yellow);
+  }
+
+  .summary-group-header.drop-after {
+    box-shadow: inset 0 -2px 0 var(--yellow);
   }
 
   .summary-group-label {
@@ -751,6 +763,30 @@
     text-align: right;
     text-transform: lowercase;
     user-select: none;
+  }
+
+  .reorder-handle {
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 1px solid var(--border);
+    background: var(--bg-alt);
+    color: var(--fg-muted);
+    cursor: grab;
+    font: inherit;
+    font-size: 12px;
+    line-height: 1;
+  }
+
+  .reorder-handle:hover,
+  .reorder-handle:focus-visible {
+    color: var(--yellow);
+    border-color: var(--yellow);
+    outline: none;
+  }
+
+  .reorder-handle[draggable="true"]:active {
+    cursor: grabbing;
   }
 
   .pdf-modal-overlay {

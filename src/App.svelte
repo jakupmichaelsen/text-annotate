@@ -112,11 +112,20 @@
   type SummarySection =
     | { kind: "item"; id: string; item: SummaryItem }
     | { kind: "group"; id: string; label: string; count: number; color: string; itemType: SummaryItem["type"]; items: SummaryItem[] };
+  type ReorderDragState = { kind: "summary"; id: string } | null;
+  type ReorderDropTarget = { kind: "summary"; id: string; after: boolean } | null;
   let summaryItems: SummaryItem[] = [];
   let summarySections: SummarySection[] = [];
+  let summaryCategoryOrder: string[] = [];
   let expandedSummaryCategories: Record<string, boolean> = {};
-  $: summaryGroupIds = summarySections.filter(section => section.kind === "group").map(section => section.id);
+  $: orderedSummarySections = orderSummarySections(summarySections, summaryCategoryOrder);
+  $: summaryGroupIds = orderedSummarySections.filter(section => section.kind === "group").map(section => section.id);
+  $: summaryAnnotationGroupIds = orderedSummarySections
+    .filter(section => section.kind === "group" && section.itemType === "annotation")
+    .map(section => section.id);
   $: summaryAllGroupsExpanded = summaryGroupIds.length > 0 && summaryGroupIds.every(id => expandedSummaryCategories[id]);
+  let reorderDragState: ReorderDragState = null;
+  let reorderDropTarget: ReorderDropTarget = null;
   let summaryCollapsed = true;
   let summaryFullscreen = false;
   let summarySidebarWidth = 320;
@@ -1411,6 +1420,7 @@ ${body}
     });
     summaryItems = sortedItems;
     summarySections = buildSummarySections(sortedItems);
+    summaryCategoryOrder = reconcileSummaryCategoryOrder(summarySections, summaryCategoryOrder);
   }
 
   function buildSummarySections(items: SummaryItem[]) {
@@ -1446,6 +1456,44 @@ ${body}
     });
   }
 
+  function orderSummarySections(sections: SummarySection[], categoryOrder: string[]) {
+    const annotationGroups = sections.filter(section => section.kind === "group" && section.itemType === "annotation");
+    if (!annotationGroups.length || !categoryOrder.length) return sections;
+
+    const groupLookup = new Map(annotationGroups.map(section => [section.id, section] as const));
+    const orderedGroups: SummarySection[] = [];
+    const seen = new Set<string>();
+
+    for (const id of categoryOrder) {
+      const section = groupLookup.get(id);
+      if (!section) continue;
+      orderedGroups.push(section);
+      seen.add(id);
+    }
+
+    for (const section of annotationGroups) {
+      if (!seen.has(section.id)) orderedGroups.push(section);
+    }
+
+    let groupIndex = 0;
+    return sections.map(section => {
+      if (section.kind !== "group" || section.itemType !== "annotation") return section;
+      return orderedGroups[groupIndex++] ?? section;
+    });
+  }
+
+  function reconcileSummaryCategoryOrder(sections: SummarySection[], currentOrder: string[]) {
+    const groupIds = sections
+      .filter(section => section.kind === "group" && section.itemType === "annotation")
+      .map(section => section.id);
+    if (!groupIds.length) return [];
+    const nextOrder = currentOrder.filter(id => groupIds.includes(id));
+    for (const id of groupIds) {
+      if (!nextOrder.includes(id)) nextOrder.push(id);
+    }
+    return nextOrder;
+  }
+
   function toggleSummaryCategory(id: string) {
     expandedSummaryCategories = {
       ...expandedSummaryCategories,
@@ -1459,6 +1507,55 @@ ${body}
 
   function toggleAllSummaryCategories() {
     setAllSummaryCategories(!summaryAllGroupsExpanded);
+  }
+
+  function moveArrayItem<T>(items: T[], fromIndex: number, toIndex: number) {
+    if (fromIndex < 0 || fromIndex >= items.length) return items;
+    if (toIndex < 0 || toIndex > items.length) return items;
+    if (fromIndex === toIndex) return items;
+    const next = [...items];
+    const [item] = next.splice(fromIndex, 1);
+    next.splice(Math.max(0, Math.min(toIndex, next.length)), 0, item);
+    return next;
+  }
+
+  function moveSummaryCategoryById(id: string, targetId: string, after: boolean) {
+    const currentOrder = summaryCategoryOrder.length ? summaryCategoryOrder : summaryAnnotationGroupIds.slice();
+    const fromIndex = currentOrder.indexOf(id);
+    const targetIndex = currentOrder.indexOf(targetId);
+    if (fromIndex < 0 || targetIndex < 0) return;
+    const insertIndex = after ? targetIndex + 1 : targetIndex;
+    summaryCategoryOrder = moveArrayItem(currentOrder, fromIndex, insertIndex);
+  }
+
+  function setSummaryReorderDragState(id: string, event: DragEvent) {
+    reorderDragState = { kind: "summary", id };
+    reorderDropTarget = null;
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", id);
+    }
+  }
+
+  function updateSummaryReorderDropTarget(id: string, event: DragEvent) {
+    if (!reorderDragState || reorderDragState.id === id) return false;
+    event.preventDefault();
+    const currentTarget = event.currentTarget as HTMLElement | null;
+    if (!currentTarget) return false;
+    const rect = currentTarget.getBoundingClientRect();
+    const after = event.clientY > rect.top + rect.height / 2;
+    reorderDropTarget = { kind: "summary", id, after };
+    return true;
+  }
+
+  function finishReorderDrag() {
+    reorderDragState = null;
+    reorderDropTarget = null;
+  }
+
+  function commitSummaryReorder(targetId: string, after: boolean) {
+    if (!reorderDragState) return;
+    moveSummaryCategoryById(reorderDragState.id, targetId, after);
   }
 
   function clampSummarySidebarWidth(width: number) {
@@ -2949,7 +3046,7 @@ ${body}
         {#if summaryItems.length === 0}
           <div class="summary-empty">No annotations</div>
         {:else}
-          {#each summarySections as section (section.id)}
+          {#each orderedSummarySections as section (section.id)}
             {#if section.kind === "item"}
               <div
                 class="summary-item"
@@ -3013,10 +3110,23 @@ ${body}
               <div
                 class="summary-group-header"
                 class:open={expandedSummaryCategories[section.id]}
+                class:reorderable={section.itemType === "annotation"}
+                class:drag-over={section.itemType === "annotation" && reorderDropTarget?.id === section.id}
+                class:drop-after={section.itemType === "annotation" && reorderDropTarget?.id === section.id && reorderDropTarget.after}
+                class:drop-before={section.itemType === "annotation" && reorderDropTarget?.id === section.id && !reorderDropTarget.after}
                 role="button"
                 tabindex="0"
                 aria-expanded={!!expandedSummaryCategories[section.id]}
                 on:click={() => toggleSummaryCategory(section.id)}
+                on:dragover={event => section.itemType === "annotation" && updateSummaryReorderDropTarget(section.id, event)}
+                on:drop={event => {
+                  if (section.itemType === "annotation" && reorderDropTarget?.id === section.id) {
+                    event.preventDefault();
+                    commitSummaryReorder(section.id, reorderDropTarget.after);
+                  }
+                  finishReorderDrag();
+                }}
+                on:dragend={event => section.itemType === "annotation" && finishReorderDrag()}
                 on:keydown={event => handleSummaryGroupKeydown(event, section)}
               >
                 {#if section.itemType === "blockquote"}
@@ -3048,6 +3158,21 @@ ${body}
                   <span class="summary-group-label">{section.label}</span>
                 {/if}
                 <span class="summary-group-count">{section.count}</span>
+                {#if section.itemType === "annotation"}
+                  <button
+                    class="reorder-handle"
+                    type="button"
+                    draggable="true"
+                    aria-label={`Drag ${section.label} to reorder`}
+                    title={`Drag ${section.label} to reorder`}
+                    on:mousedown={event => event.stopPropagation()}
+                    on:click={event => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                    on:dragstart={event => setSummaryReorderDragState(section.id, event)}
+                  >↕</button>
+                {/if}
                 <span class="summary-group-chevron">›</span>
               </div>
               {#if expandedSummaryCategories[section.id]}
