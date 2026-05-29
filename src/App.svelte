@@ -134,12 +134,19 @@
   let editingStyleTitleName: string | null = null;
   let styleTitleDraft = "";
   let styleTitleInput: HTMLInputElement | null = null;
+  let editingStyleKeyName: string | null = null;
+  let styleKeyDraft = "";
+  let styleKeyInput: HTMLInputElement | null = null;
   let resizingSummarySidebar = false;
   let finishSummaryResize: (() => void) | null = null;
   const summarySidebarMinWidth = 240;
   const summarySidebarMaxWidth = 720;
   const styleTitlesStorageKey = "cm6-style-titles";
+  const styleKeysStorageKey = "cm6-style-keys";
+  const defaultStyleKeyOrder = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "z", "c", "v", "b", "m", ",", ".", "/"];
+  const reservedStyleKeys = new Set(["h", "j", "k", "l", "w", "a", "s", "d", "q", "e", "n", "u", "x", "?", " "]);
   let styleTitles = loadStyleTitles();
+  let styleKeys = loadStyleKeys();
   $: editorModeLabel = editorMode === "insert" ? "EDIT" : "ANNOTATE";
   $: summaryFontSize = Math.round((11 + ((summarySidebarWidth - summarySidebarMinWidth) / 110)) * 10) / 10;
   $: clampedSummaryFontSize = Math.max(11, Math.min(15, summaryFontSize));
@@ -313,6 +320,7 @@
     if (isModeShortcut(event) || isAudioShortcut(event) || isAudioRateShortcut(event)) return true;
     if (event.ctrlKey && !event.altKey && (event.key === "z" || event.key === "y" || event.key === "Z")) return true;
     if (editorMode !== "normal" || event.altKey) return false;
+    if (!event.ctrlKey && styleNumberForKey(event.key) !== null) return true;
 
     if (event.ctrlKey) {
       if (event.key === "ArrowLeft" || event.key === "ArrowRight" || event.key === "ArrowUp" || event.key === "ArrowDown") return true;
@@ -866,6 +874,29 @@
     return index < 0 ? 1 : index + 1;
   }
 
+  function styleKeyForName(name: string) {
+    return styleKeys[name] || defaultStyleKeyForName(name);
+  }
+
+  function styleNumberForKey(key: string) {
+    const normalized = normalizeStyleKey(key);
+    if (!normalized) return null;
+    const index = highlightStyles.findIndex(style => styleKeyForName(style.name) === normalized);
+    return index < 0 ? null : index + 1;
+  }
+
+  function normalizeStyleKey(key: string) {
+    if (key.length !== 1 || /\s/.test(key)) return "";
+    const normalized = key.toLowerCase();
+    return reservedStyleKeys.has(normalized) ? "" : normalized;
+  }
+
+  function defaultStyleKeyForName(name: string) {
+    const index = highlightStyles.findIndex(style => style.name === name);
+    const key = index < 0 ? "" : defaultStyleKeyOrder[index] ?? "";
+    return reservedStyleKeys.has(key) ? "" : key;
+  }
+
   function defaultStyleTitle(name: string) {
     return name;
   }
@@ -905,6 +936,33 @@
     }
   }
 
+  function loadStyleKeys() {
+    const stored = typeof localStorage === "undefined" ? null : localStorage.getItem(styleKeysStorageKey);
+    if (!stored) return {};
+
+    try {
+      const parsed = JSON.parse(stored);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+      const used = new Set<string>();
+      return Object.fromEntries(
+        Object.entries(parsed)
+          .filter((entry): entry is [string, string] =>
+            typeof entry[0] === "string" &&
+            highlightStyles.some(style => style.name === entry[0]) &&
+            typeof entry[1] === "string"
+          )
+          .map(([name, key]) => [name, normalizeStyleKey(key)])
+          .filter(([, key]) => {
+            if (!key || used.has(key)) return false;
+            used.add(key);
+            return true;
+          })
+      );
+    } catch {
+      return {};
+    }
+  }
+
   function persistStyleTitles(titles: Record<string, string>) {
     styleTitles = titles;
     if (typeof localStorage === "undefined") return;
@@ -912,6 +970,16 @@
       localStorage.setItem(styleTitlesStorageKey, JSON.stringify(titles));
     } else {
       localStorage.removeItem(styleTitlesStorageKey);
+    }
+  }
+
+  function persistStyleKeys(keys: Record<string, string>) {
+    styleKeys = keys;
+    if (typeof localStorage === "undefined") return;
+    if (Object.keys(keys).length) {
+      localStorage.setItem(styleKeysStorageKey, JSON.stringify(keys));
+    } else {
+      localStorage.removeItem(styleKeysStorageKey);
     }
   }
 
@@ -951,6 +1019,72 @@
     const name = editingStyleTitleName;
     editingStyleTitleName = null;
     persistStyleTitle(name, styleTitleDraft);
+  }
+
+  function startStyleKeyEdit(event: MouseEvent, name: string) {
+    event.preventDefault();
+    event.stopPropagation();
+    editingStyleKeyName = name;
+    styleKeyDraft = styleKeyForName(name);
+    void focusStyleKeyInput();
+  }
+
+  async function focusStyleKeyInput() {
+    await tick();
+    focusInputAtEnd(styleKeyInput);
+  }
+
+  function saveStyleKey() {
+    if (!editingStyleKeyName) return;
+    const name = editingStyleKeyName;
+    editingStyleKeyName = null;
+    persistStyleKey(name, styleKeyDraft);
+  }
+
+  function persistStyleKey(name: string, key: string) {
+    const normalized = normalizeStyleKey(key) || defaultStyleKeyForName(name);
+    const oldKey = styleKeyForName(name);
+    if (!normalized) return;
+
+    const nextKeys = { ...styleKeys };
+    const otherStyle = highlightStyles.find(style =>
+      style.name !== name && styleKeyForName(style.name) === normalized
+    );
+    if (otherStyle && oldKey) {
+      nextKeys[otherStyle.name] = oldKey;
+    }
+    nextKeys[name] = normalized;
+    persistStyleKeys(nextKeys);
+  }
+
+  function cancelStyleKeyEdit() {
+    editingStyleKeyName = null;
+  }
+
+  function handleStyleKeyKeydown(event: KeyboardEvent) {
+    event.stopPropagation();
+    if (event.key === "Enter") {
+      event.preventDefault();
+      saveStyleKey();
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancelStyleKeyEdit();
+      return;
+    }
+    if (event.key === "Backspace" || event.key === "Delete") {
+      event.preventDefault();
+      styleKeyDraft = "";
+      return;
+    }
+    if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      const key = normalizeStyleKey(event.key);
+      if (!key) return;
+      event.preventDefault();
+      styleKeyDraft = key;
+      saveStyleKey();
+    }
   }
 
   function cancelStyleTitleEdit() {
@@ -2368,6 +2502,26 @@ ${body}
     return false;
   }
 
+  function setAnnotationColorOrStyle(v: EditorView, style: number) {
+    const cursor = v.state.selection.main.head;
+    const docText = v.state.doc.toString();
+    annotationPattern.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = annotationPattern.exec(docText)) !== null) {
+      const spanStart = m.index, spanEnd = spanStart + m[0].length;
+      if (cursor >= spanStart && cursor <= spanEnd) {
+        const newName = styleName(style);
+        const updated = m[0].replace(/^`([^`]+)`<!--\s*\w+,/, `\`$1\`<!-- ${newName},`);
+        currentStyle = style;
+        v.dispatch({ changes: { from: spanStart, to: spanEnd, insert: updated } });
+        return true;
+      }
+    }
+
+    currentStyle = style;
+    return true;
+  }
+
   function removeAnnotation(v: EditorView) {
     const cursor = v.state.selection.main.head;
     const docText = v.state.doc.toString();
@@ -2708,6 +2862,19 @@ ${body}
       { key: "Shift-Ctrl-a", run: normal(v => navigation.moveByWordCount(v, false, 5, true)) },
       { key: "Shift-Ctrl-d", run: normal(v => navigation.moveByWordCount(v, true, 5, true)) },
       // Normal-mode only: Annotation actions
+      {
+        any: (v, event) => {
+          if (
+            editorMode !== "normal" ||
+            event.key.length !== 1 ||
+            event.ctrlKey ||
+            event.metaKey ||
+            event.altKey
+          ) return false;
+          const style = styleNumberForKey(event.key);
+          return style === null ? false : setAnnotationColorOrStyle(v, style);
+        }
+      },
       { key: "Space",  run: normal(v => wrapSelectionOrWord(v, currentStyle)) },
       { key: "Enter",  run: normal(v => handleEnterInAnnotationMode(v)) },
       { key: "x",      run: normal(v => removeAnnotation(v)) },
@@ -2890,7 +3057,27 @@ ${body}
                 aria-label={`Use ${styleDisplayTitle(style.name)}`}
                 on:click={() => { currentStyle = index + 1; view?.focus(); }}
               ></button>
-              <span class="style-key-badge">{index + 1}</span>
+              {#if editingStyleKeyName === style.name}
+                <input
+                  class="style-key-badge style-key-input"
+                  bind:this={styleKeyInput}
+                  bind:value={styleKeyDraft}
+                  aria-label={`Shortcut key for ${styleDisplayTitle(style.name)}`}
+                  on:click={event => event.stopPropagation()}
+                  on:blur={saveStyleKey}
+                  on:keydown={handleStyleKeyKeydown}
+                />
+              {:else}
+                <button
+                  class="style-key-badge style-key-action"
+                  type="button"
+                  title={`Edit shortcut key for ${styleDisplayTitle(style.name)}`}
+                  on:click={event => startStyleKeyEdit(event, style.name)}
+                  on:keydown={event => event.stopPropagation()}
+                >
+                  {styleKeyForName(style.name)}
+                </button>
+              {/if}
               <span class="style-separator" aria-hidden="true">:</span>
               {#if editingStyleTitleName === style.name}
                 <input

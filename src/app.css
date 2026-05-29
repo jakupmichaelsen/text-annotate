@@ -765,6 +765,30 @@
     user-select: none;
   }
 
+  .style-key-action,
+  .style-key-input {
+    cursor: text;
+  }
+
+  .style-key-action:hover,
+  .style-key-action:focus-visible {
+    color: var(--yellow);
+    outline: none;
+  }
+
+  .style-key-input {
+    height: 20px;
+    width: 22px;
+    padding: 1px 3px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    outline: none;
+  }
+
+  .style-key-input:focus {
+    border-color: var(--yellow);
+  }
+
   .reorder-handle {
     width: 20px;
     height: 20px;
