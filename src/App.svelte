@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { onMount, tick } from "svelte";
-  import { Compartment, EditorState, Prec, type Extension } from "@codemirror/state";
+  import { onMount } from "svelte";
+  import { EditorState, Prec, type Extension } from "@codemirror/state";
   import {
     EditorView, keymap, lineNumbers, drawSelection, runScopeHandlers,
     highlightActiveLineGutter, ViewPlugin, Decoration,
@@ -11,8 +11,12 @@
   import { EditorSelection, RangeSet, StateEffect, StateField, type Range, type Text, type Transaction, type TransactionSpec } from "@codemirror/state";
   import {
     defaultKeymap, history, historyKeymap, undo, redo,
+    cursorLineUp, cursorLineDown, cursorLineStart, cursorLineEnd,
     cursorCharLeft, cursorCharRight,
-    selectCharLeft, selectCharRight
+    selectAll,
+    selectCharLeft, selectCharRight,
+    selectLineUp, selectLineDown,
+    selectLineStart, selectLineEnd
   } from "@codemirror/commands";
   import { searchKeymap } from "@codemirror/search";
   import { RangeSetBuilder } from "@codemirror/state";
@@ -30,7 +34,7 @@
   let editorEl: HTMLDivElement;
   let view: EditorView;
   let fileInput: HTMLInputElement;
-  let padLeft = 24;
+  let padLeft = 40;
   let padRight = 40;
   let padTop = 16;
   let padBottom = 64;
@@ -38,7 +42,6 @@
   let lineHeight = 1.6;
   let fontSize = 14;
   let paragraphSpacing = 0;
-  let centerCurrentLine = false;
   let showHelp = false;
   let pdfModalOpen = false;
   let pdfDraftText = "";
@@ -53,51 +56,23 @@
   let autosaveWriting = false;
   let audioUrl = "";
   let audioFileName = "";
-  let audioSourceFile: File | null = null;
   let audioElement: HTMLAudioElement | null = null;
   let audioCurrentTime = 0;
   let audioDuration = 0;
   let audioPlaying = false;
   let audioLoaded = false;
   let audioRateIndex = 0;
-  let audioPlaybackRate = 1;
-  const audioRates = [1, 1.25, 1.5, 1.75, 2];
-  const mediaSeekSeconds = 5;
+  const audioRates = [1, 1.5, 2];
   const audioDbName = "textAnnotate-state";
   const audioStoreName = "audio";
-  const openAiApiKeyStorageKey = "textAnnotate-openai-api-key";
   const mediaExtensions = [".mp3", ".wav", ".m4a", ".ogg", ".oga", ".webm", ".aac", ".flac", ".mp4", ".mov", ".mkv"];
   let loadedFileType = "Markdown";
-  type TranscriptionModel = "gpt-4o-transcribe" | "gpt-4o-mini-transcribe" | "whisper-1";
-  let openAiApiKey = "";
-  let rememberOpenAiApiKey = false;
-  let transcriptionModel: TranscriptionModel = "whisper-1";
-  let transcriptionPrompt = "";
-  let transcriptionBusy = false;
-  let transcriptionStatus = "";
-  let transcriptionError = "";
-  type TtsSegment = { text: string; from: number; to: number };
-  let ttsAvailable = false;
-  let ttsSpeaking = false;
-  let ttsPaused = false;
-  let ttsSegments: TtsSegment[] = [];
-  let ttsIndex = 0;
-  let ttsRunId = 0;
-  let ttsStatus = "";
-  let ttsSpeakTimer: ReturnType<typeof setTimeout> | null = null;
-  let ttsVoices: SpeechSynthesisVoice[] = [];
-  let ttsUtterance: SpeechSynthesisUtterance | null = null;
   $: pdfFrameSrc = pdfPreviewUrl ? `${pdfPreviewUrl}#zoom=75` : "";
-  $: audioPlaybackRate = audioElement?.playbackRate ?? audioRates[audioRateIndex];
   $: if (audioElement) audioElement.playbackRate = audioRates[audioRateIndex];
-  $: audioRateText = formatPlaybackRate(audioPlaybackRate);
-  $: showTtsWidget = ttsAvailable && !audioUrl && loadedFileType !== "SRT";
-  $: ttsProgressText = ttsStatus || (ttsSegments.length ? `${Math.min(ttsIndex + 1, ttsSegments.length)}/${ttsSegments.length}` : "ready");
+  $: audioRateText = audioRateIndex === 0 ? "x1" : audioRateIndex === 1 ? "x1½" : "x2";
 
   let currentStyle = 0;
-  let themeMode = loadThemeMode();
   let annotationMode: "clean" | "raw" | "all" = "clean";
-  let divideImportSentences = false;
   let blockquoteAlign: "left" | "center" | "right" = "left";
   let blockquoteBgWidth = 100;
   let blockquoteActive = false;
@@ -116,40 +91,16 @@
     | { kind: "group"; id: string; label: string; count: number; color: string; itemType: SummaryItem["type"]; items: SummaryItem[] };
   let summaryItems: SummaryItem[] = [];
   let summarySections: SummarySection[] = [];
-  let summaryCategoryOrder: string[] = [];
   let expandedSummaryCategories: Record<string, boolean> = {};
-  $: orderedSummarySections = orderSummarySections(summarySections, summaryCategoryOrder);
-  $: summaryGroupIds = orderedSummarySections.filter(section => section.kind === "group").map(section => section.id);
-  $: summaryAnnotationGroupIds = orderedSummarySections
-    .filter(section => section.kind === "group" && section.itemType === "annotation")
-    .map(section => section.id);
-  $: summaryAllGroupsExpanded = summaryGroupIds.length > 0 && summaryGroupIds.every(id => expandedSummaryCategories[id]);
   let summaryCollapsed = true;
   let summaryFullscreen = false;
   let summarySidebarWidth = 320;
   let editingSummaryTitleKey: string | null = null;
   let summaryTitleDraft = "";
-  let summaryTitleInput: HTMLInputElement | null = null;
   let resizingSummarySidebar = false;
   let finishSummaryResize: (() => void) | null = null;
-  let finishRightPaddingDrag: (() => void) | null = null;
-  type ReorderDragState = { kind: "style" | "summary"; id: string } | null;
-  type ReorderDropTarget = { kind: "style" | "summary"; id: string; after: boolean } | null;
-  let reorderDragState: ReorderDragState = null;
-  let reorderDropTarget: ReorderDropTarget = null;
-  let settingsOpen = false;
-  let settingsTab: "markup" | "layout" | "transcribe" = "markup";
-  let followTimer: ReturnType<typeof setInterval> | null = null;
-  let lastAnnotateRightRepeatAt = 0;
-  const annotateRightRepeatStorageKey = "cm6-annotate-right-repeat-interval";
-  let annotateRightRepeatIntervalMs = loadAnnotateRightRepeatInterval();
   const summarySidebarMinWidth = 240;
   const summarySidebarMaxWidth = 720;
-  const themeStorageKey = "cm6-theme";
-  const themeCompartment = new Compartment();
-  const editableCompartment = new Compartment();
-  $: activeTheme = getTheme(themeMode);
-  $: activeThemeName = themeMode === "nord" ? "Nord" : "Gruvbox";
   $: editorModeLabel = editorMode === "insert" ? "EDIT" : "ANNOTATE";
   $: summaryFontSize = Math.round((11 + ((summarySidebarWidth - summarySidebarMinWidth) / 110)) * 10) / 10;
   $: clampedSummaryFontSize = Math.max(11, Math.min(15, summaryFontSize));
@@ -158,24 +109,19 @@
   $: activeSummaryFontSize = summaryFullscreen ? fontSize : clampedSummaryFontSize;
   $: activeSummaryMetaFontSize = summaryFullscreen ? Math.max(9, fontSize - 4) : summaryMetaFontSize;
   $: activeSummaryTimestampFontSize = summaryFullscreen ? Math.max(8, fontSize - 5) : summaryTimestampFontSize;
-  $: editorBottomPadding = Math.round(fontSize * lineHeight * 20);
   const helpSections = [
     {
       title: "Navigation",
       items: [
-        ["h l", "left / right"],
+        ["h j k l", "left / down / up / right"],
         ["← ↓ ↑ →", "left / down / up / right"],
-        ["Tab", "center cursor in view"],
-        ["w k", "line up"],
-        ["s j", "line down"],
+        ["w s", "line up / down"],
         ["a d", "word left / right"],
-        ["Ctrl+h/a or l/d", "display line start / end"],
+        ["Ctrl+h/l", "word left / right"],
         ["Ctrl+k/j", "paragraph start / end"],
         ["Ctrl+w/s", "paragraph start / end"],
         ["Ctrl+↑/↓", "paragraph start / end"],
-        ["CapsLock+h/l or a/d", "jump 3 words left / right"],
-        ["CapsLock+k/j or w/s", "visual line up / down"],
-        ["f", "toggle slow word follow"]
+        ["Ctrl+a/d", "jump 5 words left / right"]
       ]
     },
     {
@@ -185,21 +131,21 @@
         ["⇧Arrows", "select by char / line"],
         ["⇧w ⇧s", "select by line"],
         ["⇧a ⇧d", "select by word"],
-        ["Ctrl+⇧h/a or l/d", "select to display line start / end"],
+        ["Ctrl+⇧h/l", "select by word"],
         ["Ctrl+⇧k/j", "select to paragraph start / end"],
         ["Ctrl+⇧w/s", "select to paragraph start / end"],
         ["Ctrl+⇧↑/↓", "select to paragraph start / end"],
+        ["Ctrl+Shift+a/d", "select 5 words left / right"]
       ]
     },
     {
       title: "Annotations",
       items: [
-        ["STYLE_KEYS", "select color / recolor annotation"],
-        ["0", "box annotation / toggle counterpart"],
-        ["q/i, e/o", "style prev / next"],
         ["Space", "wrap word / selection"],
+        ["q e", "style prev / next"],
+        ["n N", "style next / prev"],
         ["Enter", "edit note / cue playback"],
-        ["Del / Backspace", "remove annotation"]
+        ["x", "remove annotation"]
       ]
     },
     {
@@ -212,15 +158,10 @@
     {
       title: "Other",
       items: [
-        ["F2", "toggle Annotate / Edit"],
+        ["F2", "enter Edit mode"],
         ["Esc", "return to Annotate mode"],
-        ["Alt+Space", "play / pause media or TTS"],
-        ["Alt+←/→", "seek media / step TTS"],
-        ["r / Alt+r", "cycle playback / TTS speed"],
-        ["Alt+n/p", "next / previous annotation"],
-        ["Alt+A/H, D/L", "back / forward"],
-        ["Alt+W/K", "play current line"],
-        ["Alt+S/J", "play / pause media or TTS"],
+        ["Alt+Space", "play / pause audio"],
+        ["Alt+←/→", "seek audio back / forward"],
         ["F1 / ?", "toggle this help"]
       ]
     }
@@ -230,7 +171,6 @@
     if (audioUrl) URL.revokeObjectURL(audioUrl);
     audioUrl = "";
     audioFileName = "";
-    audioSourceFile = null;
     audioCurrentTime = 0;
     audioDuration = 0;
     audioPlaying = false;
@@ -247,7 +187,6 @@
   }
 
   function helpShortcutLabel(label: string) {
-    if (label === "STYLE_KEYS") return styleShortcutSummary();
     return label;
   }
 
@@ -281,27 +220,6 @@
     }
   }
 
-  async function clearPersistedAudioFile() {
-    try {
-      const db = await openAudioDb();
-      await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(audioStoreName, "readwrite");
-        tx.objectStore(audioStoreName).delete("current");
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-      });
-      db.close();
-    } catch (error) {
-      console.error(error);
-    }
-  }
-
-  function clearAudioSession() {
-    resetTtsState();
-    clearAudioTarget();
-    void clearPersistedAudioFile();
-  }
-
   async function restoreAudioFile() {
     try {
       const db = await openAudioDb();
@@ -319,11 +237,9 @@
   }
 
   async function loadAudioFile(file: File) {
-    resetTtsState();
     clearAudioTarget();
     audioUrl = URL.createObjectURL(file);
     audioFileName = file.name;
-    audioSourceFile = file;
     loadedFileType = file.name.split(".").pop()?.toUpperCase() || "MP3";
     if (audioElement) {
       audioElement.src = audioUrl;
@@ -339,26 +255,18 @@
     else audioElement.pause();
   }
 
-  function toggleMediaPlayback() {
-    if (audioElement && audioLoaded) {
-      toggleAudioPlayback();
-      return;
-    }
-    toggleTtsPlayback();
-  }
-
   function cycleAudioRate() {
     audioRateIndex = (audioRateIndex + 1) % audioRates.length;
-    audioPlaybackRate = audioRates[audioRateIndex];
     if (!audioElement) return;
     audioElement.playbackRate = audioRates[audioRateIndex];
-    audioPlaybackRate = audioElement.playbackRate;
   }
 
-  function formatPlaybackRate(rate: number) {
-    if (!Number.isFinite(rate) || rate <= 0) return "1x";
-    const formatted = rate.toFixed(2).replace(/\.?0+$/, "");
-    return `${formatted}x`;
+  function audioRateLabel() {
+    return audioRates[audioRateIndex] === 1
+      ? "x1"
+      : audioRates[audioRateIndex] === 1.5
+        ? "x1½"
+        : "x2";
   }
 
   function playAudioIfNeeded() {
@@ -390,251 +298,6 @@
     playAudioIfNeeded();
   }
 
-  function scrollEditorViewport(direction: -1 | 1) {
-    if (!view) return;
-    const scrollAmount = Math.max(24, Math.round(fontSize * lineHeight * 4));
-    view.scrollDOM.scrollBy({ top: direction * scrollAmount, behavior: "auto" });
-  }
-
-  function speechSynth() {
-    return typeof window === "undefined" ? null : window.speechSynthesis;
-  }
-
-  function refreshTtsVoices() {
-    const voices = speechSynth()?.getVoices() ?? [];
-    ttsVoices = voices;
-    if (voices.length && ttsStatus === "no voice") ttsStatus = "";
-    return voices;
-  }
-
-  function preferredTtsVoice(voices: SpeechSynthesisVoice[]) {
-    const isEnglish = (voice: SpeechSynthesisVoice) => voice.lang.toLowerCase().startsWith("en");
-    return voices.find(voice => voice.localService && isEnglish(voice)) ??
-      voices.find(isEnglish) ??
-      voices.find(voice => voice.default) ??
-      voices.find(voice => voice.localService) ??
-      null;
-  }
-
-  function resetTtsState() {
-    ttsRunId += 1;
-    if (ttsSpeakTimer) {
-      clearTimeout(ttsSpeakTimer);
-      ttsSpeakTimer = null;
-    }
-    speechSynth()?.cancel();
-    ttsUtterance = null;
-    ttsSpeaking = false;
-    ttsPaused = false;
-    ttsSegments = [];
-    ttsIndex = 0;
-    ttsStatus = "";
-  }
-
-  function cleanTtsLine(text: string) {
-    return summaryVisibleText(text
-      .replace(/^\s*#{1,6}\s+/, "")
-      .replace(/^\s*[-*+]\s+/, "")
-      .replace(/^\s*\d+[.)]\s+/, ""))
-      .trim();
-  }
-
-  function splitTtsText(text: string) {
-    const pieces = text.match(/[^.!?]+[.!?]*/g) ?? [text];
-    const chunks: string[] = [];
-    let current = "";
-    for (const piece of pieces.map(part => part.trim()).filter(Boolean)) {
-      if (current && `${current} ${piece}`.length > 240) {
-        chunks.push(current);
-        current = piece;
-      } else {
-        current = current ? `${current} ${piece}` : piece;
-      }
-    }
-    if (current) chunks.push(current);
-    return chunks.length ? chunks : [text];
-  }
-
-  function buildTtsSegments() {
-    if (!view) return { segments: [] as TtsSegment[], startIndex: 0 };
-    const state = view.state;
-    const selection = state.selection.main;
-    const doc = state.doc;
-    const segments: TtsSegment[] = [];
-
-    const addLineSegments = (from: number, to: number, lineText: string) => {
-      const cleaned = cleanTtsLine(lineText);
-      if (!cleaned) return;
-      for (const chunk of splitTtsText(cleaned)) {
-        segments.push({ text: chunk, from, to });
-      }
-    };
-
-    if (!selection.empty) {
-      addLineSegments(selection.from, selection.to, state.sliceDoc(selection.from, selection.to));
-      return { segments, startIndex: 0 };
-    }
-
-    for (let lineNumber = 1; lineNumber <= doc.lines; lineNumber += 1) {
-      const lineInfo = doc.line(lineNumber);
-      if (isSrtTimestampLine(lineInfo.text)) continue;
-      addLineSegments(lineInfo.from, lineInfo.to, lineInfo.text);
-    }
-
-    const head = selection.head;
-    const foundIndex = segments.findIndex(segment => segment.to >= head);
-    const startIndex = foundIndex < 0 ? Math.max(0, segments.length - 1) : foundIndex;
-    return { segments, startIndex };
-  }
-
-  function prepareTtsSegments() {
-    const result = buildTtsSegments();
-    ttsSegments = result.segments;
-    ttsIndex = result.startIndex;
-    ttsStatus = ttsSegments.length ? "" : "no text";
-    return ttsSegments.length > 0;
-  }
-
-  function speakTtsSegment(index: number, useBrowserDefaultVoice = false) {
-    const synth = speechSynth();
-    const segment = ttsSegments[index];
-    const Utterance = typeof window === "undefined" ? null : window.SpeechSynthesisUtterance;
-    if (!synth || !Utterance) {
-      ttsStatus = "unavailable";
-      return;
-    }
-    if (!segment) return;
-
-    ttsRunId += 1;
-    const runId = ttsRunId;
-    if (ttsSpeakTimer) {
-      clearTimeout(ttsSpeakTimer);
-      ttsSpeakTimer = null;
-    }
-    const replacingSpeech = synth.speaking || synth.pending || !!ttsUtterance;
-    if (replacingSpeech) synth.cancel();
-
-    const voices = refreshTtsVoices();
-    if (!voices.length) {
-      ttsUtterance = null;
-      ttsSpeaking = false;
-      ttsPaused = false;
-      ttsStatus = "no voice";
-      return;
-    }
-
-    const utterance = new Utterance(segment.text);
-    const voice = useBrowserDefaultVoice ? null : preferredTtsVoice(voices);
-    if (voice) utterance.voice = voice;
-    if (voice) utterance.lang = voice.lang;
-    else utterance.lang = "en-US";
-    utterance.rate = audioRates[audioRateIndex];
-    utterance.onstart = () => {
-      if (runId !== ttsRunId) return;
-      ttsStatus = "";
-      ttsSpeaking = true;
-      ttsPaused = false;
-    };
-    utterance.onend = () => {
-      if (runId !== ttsRunId) return;
-      if (ttsIndex < ttsSegments.length - 1) {
-        ttsIndex += 1;
-        speakTtsSegment(ttsIndex);
-        return;
-      }
-      ttsUtterance = null;
-      ttsSpeaking = false;
-      ttsPaused = false;
-      ttsStatus = "";
-    };
-    utterance.onerror = event => {
-      if (runId !== ttsRunId) return;
-      ttsUtterance = null;
-      ttsSpeaking = false;
-      ttsPaused = false;
-      if (!useBrowserDefaultVoice && utterance.voice) {
-        ttsStatus = "retrying";
-        speakTtsSegment(index, true);
-        return;
-      }
-      ttsStatus = event.error === "interrupted" || event.error === "canceled" ? "" : event.error;
-      if (ttsStatus) console.warn("TTS failed", event.error);
-    };
-
-    ttsUtterance = utterance;
-    ttsIndex = index;
-    ttsSpeaking = true;
-    ttsPaused = false;
-    ttsStatus = voices.length ? "queued" : "voice...";
-    const startSpeaking = () => {
-      if (runId !== ttsRunId) return;
-      ttsSpeakTimer = null;
-      const currentSynth = speechSynth();
-      if (!currentSynth) {
-        ttsStatus = "unavailable";
-        ttsSpeaking = false;
-        return;
-      }
-      currentSynth.resume();
-      currentSynth.speak(utterance);
-      setTimeout(() => {
-        if (runId !== ttsRunId || ttsUtterance !== utterance || currentSynth.speaking || currentSynth.pending) return;
-        ttsSpeaking = false;
-        ttsPaused = false;
-        ttsStatus = "no voice";
-      }, 1200);
-    };
-
-    if (replacingSpeech) ttsSpeakTimer = setTimeout(startSpeaking, 80);
-    else startSpeaking();
-  }
-
-  function toggleTtsPlayback() {
-    if (!showTtsWidget) return;
-    const synth = speechSynth();
-    if (!synth) return;
-
-    if (ttsSpeaking && !ttsPaused) {
-      synth.pause();
-      ttsPaused = true;
-      return;
-    }
-    if (ttsSpeaking && ttsPaused) {
-      synth.resume();
-      ttsPaused = false;
-      return;
-    }
-    if (!prepareTtsSegments()) return;
-    speakTtsSegment(ttsIndex);
-  }
-
-  function seekTts(delta: number, playAfterSeek = false) {
-    if (!showTtsWidget) return;
-    if ((!ttsSpeaking && !ttsPaused) || !ttsSegments.length) {
-      if (!prepareTtsSegments()) return;
-    }
-    const nextIndex = Math.min(Math.max(ttsIndex + delta, 0), ttsSegments.length - 1);
-    const shouldPlay = playAfterSeek || (ttsSpeaking && !ttsPaused);
-    if (shouldPlay) {
-      speakTtsSegment(nextIndex);
-      return;
-    }
-
-    if (ttsSpeaking || ttsPaused || ttsUtterance) {
-      ttsRunId += 1;
-      speechSynth()?.cancel();
-      ttsUtterance = null;
-      ttsSpeaking = false;
-      ttsPaused = false;
-      ttsStatus = "";
-    }
-    ttsIndex = nextIndex;
-  }
-
-  function seekTtsAndPlay(delta: number) {
-    seekTts(delta, true);
-  }
-
   function isTextEntryTarget(target: EventTarget | null) {
     if (!(target instanceof HTMLElement)) return false;
     if (target.isContentEditable) return true;
@@ -655,86 +318,20 @@
     return !event.ctrlKey && !event.metaKey && !event.altKey && (event.key === "Escape" || event.key === "F1" || event.key === "F2");
   }
 
-  function isSpaceKey(event: KeyboardEvent) {
-    return event.key === " " || event.key === "Spacebar" || event.code === "Space";
-  }
-
-  function isPlainRightArrow(event: KeyboardEvent) {
-    return !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey &&
-      (event.key === "ArrowRight" || event.key === "Right");
-  }
-
-  function throttleAnnotateRightRepeat(event: KeyboardEvent) {
-    if (editorMode !== "normal" || !isPlainRightArrow(event)) {
-      if (!event.repeat) lastAnnotateRightRepeatAt = 0;
-      return false;
-    }
-
-    if (!event.repeat) {
-      lastAnnotateRightRepeatAt = 0;
-      return false;
-    }
-
-    const now = performance.now();
-    if (lastAnnotateRightRepeatAt && now - lastAnnotateRightRepeatAt < annotateRightRepeatIntervalMs) {
-      event.preventDefault();
-      event.stopPropagation();
-      return true;
-    }
-
-    lastAnnotateRightRepeatAt = now;
-    return false;
-  }
-
   function isAudioShortcut(event: KeyboardEvent) {
     return event.altKey && !event.ctrlKey && !event.metaKey &&
-      (
-        isSpaceKey(event) ||
-        event.key === "ArrowLeft" ||
-        event.key === "Left" ||
-        event.key === "ArrowRight" ||
-        event.key === "Right"
-      );
+      (event.key === " " || event.key === "ArrowLeft" || event.key === "Left" || event.key === "ArrowRight" || event.key === "Right");
   }
 
   function isAudioRateShortcut(event: KeyboardEvent) {
     return event.altKey && !event.ctrlKey && !event.metaKey && event.key.toLowerCase() === "r";
   }
 
-  function isPlaybackShortcut(event: KeyboardEvent) {
-    return event.altKey && !event.ctrlKey && !event.metaKey && "ahdl".includes(event.key.toLowerCase());
-  }
-
-  function isMediaControlShortcut(event: KeyboardEvent) {
-    return event.altKey && !event.ctrlKey && !event.metaKey && "wsjk".includes(event.key.toLowerCase());
-  }
-
-  function isAnnotationJumpShortcut(event: KeyboardEvent) {
-    return event.altKey && !event.ctrlKey && !event.metaKey && "np".includes(event.key.toLowerCase());
-  }
-
-  function isTabScrollShortcut(event: KeyboardEvent) {
-    return event.key === "Tab" && !event.ctrlKey && !event.metaKey && !event.altKey;
-  }
-
-  function isHelpCloseShortcut(event: KeyboardEvent) {
-    return (showHelp || settingsOpen) && !event.ctrlKey && !event.metaKey && !event.altKey && (event.key === "Escape" || event.key === "?");
-  }
-
-  function closeHelpFromShortcut() {
-    if (!showHelp && !settingsOpen) return false;
-    showHelp = false;
-    settingsOpen = false;
-    return true;
-  }
-
   function isAppShortcutCandidate(event: KeyboardEvent) {
     if (event.metaKey) return false;
-    if (isTabScrollShortcut(event)) return true;
-    if (isModeShortcut(event) || isAudioShortcut(event) || isAudioRateShortcut(event) || isPlaybackShortcut(event) || isMediaControlShortcut(event) || isAnnotationJumpShortcut(event)) return true;
+    if (isModeShortcut(event) || isAudioShortcut(event) || isAudioRateShortcut(event)) return true;
     if (event.ctrlKey && !event.altKey && (event.key === "z" || event.key === "y" || event.key === "Z")) return true;
     if (editorMode !== "normal" || event.altKey) return false;
-    if (!event.ctrlKey && styleNumberForKey(event.key) !== null) return true;
 
     if (event.ctrlKey) {
       if (event.key === "ArrowLeft" || event.key === "ArrowRight" || event.key === "ArrowUp" || event.key === "ArrowDown") return true;
@@ -748,9 +345,7 @@
       event.key === "ArrowRight" ||
       event.key === "ArrowUp" ||
       event.key === "ArrowDown" ||
-      event.key === "Delete" ||
-      event.key === "Backspace" ||
-      "fhjklwasdFHJKLWASDqerioUu".includes(event.key);
+      "hjklwasdHJKLWASDxeqnNuU".includes(event.key);
   }
 
   function shouldDeferWindowShortcut(event: KeyboardEvent) {
@@ -763,88 +358,24 @@
 
   function handleAudioKeydown(event: KeyboardEvent) {
     if (event.defaultPrevented) return;
-    if (!isAudioShortcut(event) && !isPlaybackShortcut(event) && !isMediaControlShortcut(event) && !isAnnotationJumpShortcut(event)) return;
+    if (!isAudioShortcut(event)) return;
     if (isTextEntryTarget(event.target)) return;
 
     event.preventDefault();
     event.stopPropagation();
 
-    const key = event.key.toLowerCase();
-    if (key === "n") {
-      jumpToAdjacentAnnotation(1);
-      return;
-    }
-    if (key === "p") {
-      jumpToAdjacentAnnotation(-1);
-      return;
-    }
-    if (key === "s" || key === "j") {
-      toggleMediaPlayback();
-      return;
-    }
-    if (view && (key === "w" || key === "k")) {
-      toggleAssociatedSrtPlayback(view);
-      return;
-    }
-    if (!audioElement || !audioLoaded) {
-      if (!showTtsWidget) return;
-      if (isSpaceKey(event)) {
-        toggleTtsPlayback();
-        return;
-      }
-      if (key === "a" || key === "h" || event.key === "ArrowLeft" || event.key === "Left") {
-        seekTts(-1);
-        return;
-      }
-      if (key === "d" || key === "l" || event.key === "ArrowRight" || event.key === "Right") {
-        seekTts(1);
-        return;
-      }
-      if (key === "r") {
-        cycleAudioRate();
-      }
-      return;
-    }
-
-    if (isSpaceKey(event)) {
+    if (!audioElement || !audioLoaded) return;
+    if (event.key === " ") {
       toggleAudioPlayback();
       return;
     }
-    if (key === "a" || key === "h" || event.key === "ArrowLeft" || event.key === "Left") {
-      seekAudio(-mediaSeekSeconds);
-      return;
-    }
-    if (key === "d" || key === "l" || event.key === "ArrowRight" || event.key === "Right") {
-      seekAudio(mediaSeekSeconds);
-      return;
-    }
-    if (key === "r") {
-      cycleAudioRate();
-      return;
-    }
-    seekAudio(event.key === "ArrowLeft" || event.key === "Left" ? -mediaSeekSeconds : mediaSeekSeconds);
+    seekAudio(event.key === "ArrowLeft" || event.key === "Left" ? -10 : 10);
   }
 
   function handleWindowKeydown(event: KeyboardEvent) {
-    if (event.defaultPrevented) return;
-    if (isHelpCloseShortcut(event)) {
-      closeHelpFromShortcut();
-      event.preventDefault();
-      event.stopPropagation();
-      requestAnimationFrame(() => view?.focus());
-      return;
-    }
-    if (view && isTabScrollShortcut(event) && !isTextEntryTarget(event.target)) {
-      event.preventDefault();
-      event.stopPropagation();
-      scrollCursorIntoView(view, true);
-      requestAnimationFrame(() => view?.focus());
-      return;
-    }
-    if (isEditorEventTarget(event.target) || shouldDeferWindowShortcut(event)) return;
+    if (event.defaultPrevented || isEditorEventTarget(event.target) || shouldDeferWindowShortcut(event)) return;
     handleAudioKeydown(event);
     if (event.defaultPrevented || !view || !isAppShortcutCandidate(event)) return;
-    if (throttleAnnotateRightRepeat(event)) return;
     if (!runScopeHandlers(view, event, "editor")) return;
     event.preventDefault();
     event.stopPropagation();
@@ -865,8 +396,7 @@
 
   function replaceDocument(text: string, preserveLineBreaks = false) {
     if (!view) return;
-    resetTtsState();
-    const insert = importTextForEditor(text, preserveLineBreaks);
+    const insert = preserveLineBreaks ? text.replace(/\r\n?/g, "\n").trim() : sentenceLineBreaks(text);
     const initialCursor = firstVisibleDocumentPosition(insert);
     view.dispatch({
       changes: { from: 0, to: view.state.doc.length, insert },
@@ -874,12 +404,6 @@
       effects: EditorView.scrollIntoView(initialCursor, { y: "start", yMargin: 0 })
     });
     view.focus();
-  }
-
-  function importTextForEditor(text: string, preserveLineBreaks = false) {
-    const normalized = text.replace(/\r\n?/g, "\n").trim();
-    if (preserveLineBreaks || !divideImportSentences) return normalized;
-    return sentenceLineBreaks(normalized);
   }
 
   function firstVisibleDocumentPosition(text: string) {
@@ -918,7 +442,6 @@
     const audioFile = files.find(isMediaFile);
     const srtFile = files.find(file => file.name.toLowerCase().endsWith(".srt"));
     if (audioFile) await loadAudioFile(audioFile);
-    else if (!srtFile) clearAudioSession();
     if (srtFile) {
       loadedFileType = "SRT";
       replaceDocument(formatSrtTranscript(await srtFile.text()), true);
@@ -995,130 +518,6 @@
     return timestamp.trim().replace(",", ".");
   }
 
-  function loadOpenAiApiKey() {
-    if (typeof localStorage === "undefined") return "";
-    return localStorage.getItem(openAiApiKeyStorageKey) ?? "";
-  }
-
-  function persistOpenAiApiKey() {
-    if (typeof localStorage === "undefined") return;
-    if (rememberOpenAiApiKey && openAiApiKey.trim()) {
-      localStorage.setItem(openAiApiKeyStorageKey, openAiApiKey.trim());
-    } else {
-      localStorage.removeItem(openAiApiKeyStorageKey);
-    }
-  }
-
-  function handleOpenAiKeyInput(event: Event) {
-    openAiApiKey = (event.target as HTMLInputElement).value;
-    persistOpenAiApiKey();
-  }
-
-  function toggleRememberOpenAiKey(event: Event) {
-    rememberOpenAiApiKey = (event.target as HTMLInputElement).checked;
-    persistOpenAiApiKey();
-  }
-
-  async function transcribeLoadedAudio() {
-    transcriptionError = "";
-    transcriptionStatus = "";
-    if (!audioSourceFile) {
-      transcriptionError = "Load an audio or video file first.";
-      return;
-    }
-    let apiKey = openAiApiKey.trim();
-    if (!apiKey) {
-      const enteredKey = prompt("OpenAI API key");
-      apiKey = enteredKey?.trim() ?? "";
-      if (!apiKey) {
-        transcriptionError = "OpenAI API key is required for transcription.";
-        return;
-      }
-      openAiApiKey = apiKey;
-      persistOpenAiApiKey();
-    }
-
-    transcriptionBusy = true;
-    transcriptionStatus = `Uploading ${audioFileName || "media"}...`;
-
-    try {
-      const formData = new FormData();
-      formData.append("file", audioSourceFile, audioSourceFile.name);
-      formData.append("model", transcriptionModel);
-      if (transcriptionPrompt.trim()) formData.append("prompt", transcriptionPrompt.trim());
-      if (transcriptionModel === "whisper-1") {
-        formData.append("response_format", "verbose_json");
-        formData.append("timestamp_granularities[]", "segment");
-      } else {
-        formData.append("response_format", "text");
-      }
-
-      const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${apiKey}` },
-        body: formData
-      });
-
-      const contentType = response.headers.get("content-type") ?? "";
-      const payload = contentType.includes("application/json") ? await response.json() : await response.text();
-
-      if (!response.ok) {
-        throw new Error(openAiErrorMessage(payload, response.status));
-      }
-
-      const transcript = transcriptionPayloadToText(payload);
-      if (!transcript.trim()) throw new Error("The transcription completed, but no text was returned.");
-
-      loadedFileType = transcriptionModel === "whisper-1" && transcript.includes("-->") ? "SRT" : "TRANSCRIPT";
-      replaceDocument(transcript, loadedFileType === "SRT");
-      transcriptionStatus = `Loaded transcript from ${audioFileName || "media"}.`;
-      persistOpenAiApiKey();
-    } catch (error) {
-      transcriptionError = error instanceof Error ? error.message : "Transcription failed.";
-      transcriptionStatus = "";
-    } finally {
-      transcriptionBusy = false;
-    }
-  }
-
-  function transcriptionPayloadToText(payload: unknown) {
-    if (typeof payload === "string") return stripEmptyLines(payload);
-    if (!payload || typeof payload !== "object") return "";
-
-    const data = payload as { text?: string; segments?: { start?: number; end?: number; text?: string }[] };
-    if (Array.isArray(data.segments) && data.segments.length) {
-      return data.segments
-        .map(segment => {
-          const text = (segment.text ?? "").replace(/\s+/g, " ").trim();
-          if (!text) return "";
-          return `[${formatSrtTime(segment.start ?? 0)} --> ${formatSrtTime(segment.end ?? segment.start ?? 0)}]\n${text}`;
-        })
-        .filter(Boolean)
-        .join("\n");
-    }
-
-    return stripEmptyLines(data.text ?? "");
-  }
-
-  function formatSrtTime(seconds: number) {
-    const value = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
-    const totalMs = Math.round(value * 1000);
-    const hours = Math.floor(totalMs / 3_600_000);
-    const minutes = Math.floor((totalMs % 3_600_000) / 60_000);
-    const wholeSeconds = Math.floor((totalMs % 60_000) / 1000);
-    const milliseconds = totalMs % 1000;
-    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(wholeSeconds).padStart(2, "0")}.${String(milliseconds).padStart(3, "0")}`;
-  }
-
-  function openAiErrorMessage(payload: unknown, status: number) {
-    if (payload && typeof payload === "object" && "error" in payload) {
-      const error = (payload as { error?: { message?: string } }).error;
-      if (error?.message) return error.message;
-    }
-    if (typeof payload === "string" && payload.trim()) return payload.trim();
-    return `OpenAI transcription request failed (${status}).`;
-  }
-
   function stripEmptyLines(text: string) {
     return text
       .replace(/\r\n?/g, "\n")
@@ -1130,47 +529,6 @@
 
   function updateEditorViewportHeight() {
     editorViewportHeight = editorEl?.clientHeight ?? 0;
-  }
-
-  function clampNumber(value: number, min: number, max: number) {
-    return Math.max(min, Math.min(max, value));
-  }
-
-  function setRightPaddingFromClientX(clientX: number) {
-    if (!editorEl) return;
-    const rect = editorEl.getBoundingClientRect();
-    const maxPadding = Math.max(0, Math.min(720, rect.width - 120));
-    padRight = Math.round(clampNumber(rect.right - clientX, 0, maxPadding));
-  }
-
-  function startRightPaddingDrag(event: PointerEvent) {
-    event.preventDefault();
-    event.stopPropagation();
-    finishRightPaddingDrag?.();
-    setRightPaddingFromClientX(event.clientX);
-
-    const move = (moveEvent: PointerEvent) => setRightPaddingFromClientX(moveEvent.clientX);
-    const finish = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", finish);
-      window.removeEventListener("pointercancel", finish);
-      finishRightPaddingDrag = null;
-    };
-
-    finishRightPaddingDrag = finish;
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", finish);
-    window.addEventListener("pointercancel", finish);
-  }
-
-  function adjustLayoutValue(kind: "lineHeight" | "fontSize" | "paragraphSpacing", delta: number) {
-    if (kind === "lineHeight") {
-      lineHeight = Math.round(clampNumber(lineHeight + delta * 0.05, 1, 3) * 100) / 100;
-    } else if (kind === "fontSize") {
-      fontSize = Math.round(clampNumber(fontSize + delta, 10, 28));
-    } else {
-      paragraphSpacing = Math.round(clampNumber(paragraphSpacing + delta * 0.05, 0, 2) * 100) / 100;
-    }
   }
 
   function clearActiveSaveTarget() {
@@ -1266,171 +624,8 @@
     if (fallbackName) downloadText(fallbackName, html, "text/html;charset=utf-8");
   }
 
-  async function exportSummaryHtml() {
-    if (!view) return;
-    const suggestedName = `${stripExtension(activeSaveName || "annotations")}-summary.html`;
-    const html = buildSummaryExportHtml();
-    const picker = (window as any).showSaveFilePicker;
-
-    if (picker) {
-      try {
-        const handle = await picker({
-          suggestedName,
-          types: [{ description: "HTML", accept: { "text/html": [".html"] } }]
-        });
-        await writeTextToHandle(handle, html);
-      } catch (error) {
-        if (!(error instanceof DOMException && error.name === "AbortError")) console.error(error);
-      }
-      return;
-    }
-
-    const fallbackName = prompt("Export filename", suggestedName);
-    if (fallbackName) downloadText(fallbackName, html, "text/html;charset=utf-8");
-  }
-
   function stripExtension(name: string) {
     return name.replace(/\.[^.]+$/, "") || "annotations";
-  }
-
-  function buildSummaryExportHtml() {
-    const body = buildSummaryExportBody();
-    return `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${escapeHtml(stripExtension(activeSaveName || "Annotated document"))} summary</title>
-  <style>
-    body {
-      margin: 0;
-      background: ${activeTheme.bg};
-      color: ${activeTheme.fg};
-      font-family: "Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      line-height: 1.45;
-      font-size: ${fontSize}px;
-    }
-    main {
-      box-sizing: border-box;
-      max-width: 960px;
-      min-height: 100vh;
-      margin: 0 auto;
-      padding: ${padTop}px ${padRight}px ${padBottom}px ${padLeft}px;
-    }
-    h1, h2 {
-      color: ${activeTheme.yellow};
-      line-height: 1.25;
-    }
-    h1 {
-      margin: 0 0 1rem;
-      font-size: 1.5rem;
-    }
-    h2 {
-      margin: 1.5rem 0 0.75rem;
-      font-size: 1.1rem;
-    }
-    p { margin: 0 0 0.75rem; }
-    .summary-export-source {
-      color: ${activeTheme.fgMuted};
-      margin-bottom: 1.25rem;
-    }
-    .summary-export-entry {
-      margin: 0 0 0.75rem;
-      padding: 0.75rem 0.9rem;
-      border: 1px solid ${activeTheme.border};
-      border-radius: 6px;
-      background: ${activeTheme.bgHard};
-    }
-    .summary-export-head {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.35rem 0.5rem;
-      align-items: center;
-      margin-bottom: 0.55rem;
-    }
-    .summary-export-swatch {
-      width: 10px;
-      height: 10px;
-      border-radius: 2px;
-      border: 1px solid rgba(0, 0, 0, 0.25);
-      flex: 0 0 auto;
-    }
-    .summary-export-title {
-      font-weight: 700;
-      color: ${activeTheme.fg};
-    }
-    .summary-export-meta {
-      color: ${activeTheme.fgMuted};
-      font-size: 0.85em;
-    }
-    .summary-export-context {
-      margin-bottom: 0.4rem;
-    }
-    .summary-export-context mark {
-      border-radius: 3px;
-      padding: 0 0.25rem;
-      border: 1px solid rgba(0, 0, 0, 0.18);
-    }
-    .summary-export-comment {
-      color: ${activeTheme.fgMuted};
-      font-size: 0.95em;
-      margin-bottom: 0;
-    }
-    blockquote {
-      margin: 0 0 0.75rem;
-      padding: 0.25rem 0.35rem 0.25rem 0.75rem;
-      border-left: 3px solid ${activeTheme.orange};
-      background: ${activeTheme.blockquoteBg};
-      color: ${activeTheme.blockquoteFg};
-      border-radius: 4px;
-    }
-  </style>
-</head>
-<body>
-  <main>
-${body}
-  </main>
-</body>
-</html>
-`;
-  }
-
-  function buildSummaryExportBody() {
-    const blocks: string[] = [];
-    blocks.push(`    <h1>Summary</h1>`);
-    blocks.push(`    <p class="summary-export-source">Source: ${escapeHtml(activeSaveName || "annotations.md")}</p>`);
-
-    for (const section of orderedSummarySections) {
-      if (section.kind === "group") {
-        blocks.push(`    <h2>${escapeHtml(section.label)}</h2>`);
-        for (const item of section.items) {
-          blocks.push(buildSummaryExportEntry(item));
-        }
-        continue;
-      }
-
-      blocks.push(buildSummaryExportEntry(section.item));
-    }
-
-    return blocks.join("\n");
-  }
-
-  function buildSummaryExportEntry(item: SummaryItem) {
-    if (item.type === "blockquote") {
-      return `    <blockquote>${escapeHtml(item.text)}</blockquote>`;
-    }
-
-    const comment = item.comment.trim();
-    return `    <article class="summary-export-entry">
-      <div class="summary-export-head">
-        <span class="summary-export-swatch" style="background:${escapeHtml(item.color)}"></span>
-        <span class="summary-export-title">${escapeHtml(summaryAnnotationTitle(item))}</span>
-        <span class="summary-export-meta">Ln ${item.line}</span>
-        <span class="summary-export-meta">${escapeHtml(summaryTimestamp(item.timestamp))}</span>
-      </div>
-      <p class="summary-export-context"><span>${escapeHtml(item.context.before)}</span><mark style="background:${escapeHtml(item.color)};color:${escapeHtml(contrastColor(item.color))}">${escapeHtml(item.context.text)}</mark><span>${escapeHtml(item.context.after)}</span></p>
-      ${comment ? `<p class="summary-export-comment">${escapeHtml(comment)}</p>` : ""}
-    </article>`;
   }
 
   function downloadText(filename: string, text: string, type: string) {
@@ -1648,25 +843,13 @@ ${body}
 
   function setMode(mode: "normal" | "insert") {
     const selection = view?.state.selection;
-    const head = selection?.main.head;
     editorMode = mode;
     if (view) {
-      view.dispatch({
-        ...(selection ? { selection } : {}),
-        effects: editableCompartment.reconfigure(EditorView.editable.of(mode === "insert"))
-      });
-      // Mode classes drive cursor visibility and edit/annotate styling.
+      view.dispatch(selection ? { selection } : {});  // trigger keymap/decoration rebuild
+      // In normal mode, show a block cursor via a theme class on the editor dom
       view.dom.classList.toggle("mode-insert", mode === "insert");
       view.dom.classList.toggle("mode-normal", mode === "normal");
-      requestAnimationFrame(() => {
-        if (!view) return;
-        view.focus();
-        view.requestMeasure();
-        if (head !== undefined) {
-          view.dispatch({ effects: cursorScrollEffect(view, head) });
-        }
-        view.scrollDOM.dispatchEvent(new Event("scroll"));
-      });
+      requestAnimationFrame(() => view?.focus());
     }
   }
 
@@ -1679,8 +862,7 @@ ${body}
       content.style.paddingLeft   = `${padLeft}px`;
       content.style.paddingRight  = `${padRight}px`;
       content.style.paddingTop    = `${padTop}px`;
-      content.style.paddingBottom = `${editorBottomPadding}px`;
-      content.style.caretColor = "transparent";
+      content.style.paddingBottom = `${padBottom}px`;
     }
     const scroller = view.dom.querySelector<HTMLElement>(".cm-scroller");
     if (scroller) {
@@ -1713,256 +895,43 @@ ${body}
     { name: "rosewood", color: "#8f3f4d" },
     { name: "purple",  color: "#d3869b" }
   ];
-  const styleOrderStorageKey = "cm6-style-order";
-  const annotationBoxSuffix = "_box";
-  const defaultStyleKeyOrder = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "z", "x", "c", "v", "b", "n", "m", ",", ".", "/"];
-  const defaultStyleOrder = highlightStyles.map(s => s.name);
-  let styleOrder = loadStyleOrder();
-  $: orderedHighlightStyles = styleOrder
-    .map(name => highlightStyles.find(s => s.name === name))
-    .filter((style): style is typeof highlightStyles[number] => !!style);
-
   function cycleStyle(delta: number) {
     currentStyle = cycleStyleNumber(currentStyle, delta);
   }
 
   function cycleStyleNumber(style: number, delta: number, includePlain = true) {
     if (includePlain) {
-      const styleCount = orderedHighlightStyles.length + 1;
+      const styleCount = highlightStyles.length + 1;
       return ((style + delta) + styleCount) % styleCount;
     }
 
-    const styleCount = orderedHighlightStyles.length;
+    const styleCount = highlightStyles.length;
     const colorStyle = Math.max(1, style);
     return (((colorStyle - 1 + delta) + styleCount) % styleCount) + 1;
   }
 
   function styleName(style: number) {
-    return style === 0 ? "" : orderedHighlightStyles[style - 1]?.name ?? "";
-  }
-
-  function baseStyleName(name: string) {
-    return name.endsWith(annotationBoxSuffix) ? name.slice(0, -annotationBoxSuffix.length) : name;
-  }
-
-  function isBoxStyleName(name: string) {
-    return name.endsWith(annotationBoxSuffix);
-  }
-
-  function boxStyleName(name: string) {
-    const base = baseStyleName(name);
-    return base ? `${base}${annotationBoxSuffix}` : "";
-  }
-
-  function counterpartStyleName(name: string) {
-    return isBoxStyleName(name) ? baseStyleName(name) : boxStyleName(name);
+    return style === 0 ? "" : highlightStyles[style - 1]?.name ?? "";
   }
 
   function styleColor(style: number) {
-    return style === 0 ? activeTheme.orange : styleColorForName(orderedHighlightStyles[style - 1]?.name ?? "");
+    return style === 0 ? gruvbox.orange : highlightStyles[style - 1]?.color ?? gruvbox.fg;
   }
 
   function styleNumberForName(name: string) {
-    const base = baseStyleName(name);
-    if (base === "plain") return 0;
-    const index = orderedHighlightStyles.findIndex(s => s.name === base);
+    const index = highlightStyles.findIndex(s => s.name === name);
     return index < 0 ? 1 : index + 1;
   }
 
-  function styleColorForName(name: string) {
-    const base = baseStyleName(name);
-    if (base === "plain") return activeTheme.orange;
-    return highlightStyles.find(s => s.name === base)?.color ?? activeTheme.yellow;
-  }
-
-  function styleKeyForName(name: string) {
-    const index = orderedHighlightStyles.findIndex(style => style.name === baseStyleName(name));
-    return index < 0 ? "" : defaultStyleKeyOrder[index] ?? "";
-  }
-
-  function styleKeyForStyle(style: number) {
-    return style <= 0 ? "" : styleKeyForName(styleName(style));
-  }
-
-  function styleNumberForKey(key: string) {
-    const normalized = normalizeStyleKey(key);
-    if (!normalized) return null;
-    const index = defaultStyleKeyOrder.indexOf(normalized);
-    return index < 0 || index >= orderedHighlightStyles.length ? null : index + 1;
-  }
-
-  function styleShortcutSummary() {
-    const keys = orderedHighlightStyles
-      .map(style => styleKeyForName(style.name))
-      .filter(Boolean);
-    return keys.length ? keys.join(" ") : "style keys";
-  }
-
-  function normalizeStyleKey(key: string) {
-    if (key.length !== 1 || /\s/.test(key)) return "";
-    return key.toLowerCase();
-  }
-
-  function loadStyleOrder() {
-    const stored = typeof localStorage === "undefined" ? null : localStorage.getItem(styleOrderStorageKey);
-    if (!stored) return defaultStyleOrder;
-
-    try {
-      const parsed = JSON.parse(stored);
-      if (!Array.isArray(parsed)) return defaultStyleOrder;
-      const order = parsed.filter((name: unknown): name is string => typeof name === "string" && defaultStyleOrder.includes(name));
-      const missing = defaultStyleOrder.filter(name => !order.includes(name));
-      return [...order, ...missing];
-    } catch {
-      return defaultStyleOrder;
-    }
-  }
-
-  function persistStyleOrder(order: string[]) {
-    styleOrder = order;
-    if (typeof localStorage !== "undefined") {
-      localStorage.setItem(styleOrderStorageKey, JSON.stringify(order));
-    }
-  }
-
-  function moveArrayItem<T>(items: T[], fromIndex: number, toIndex: number) {
-    if (fromIndex < 0 || fromIndex >= items.length) return items;
-    if (toIndex < 0 || toIndex > items.length) return items;
-    if (fromIndex === toIndex) return items;
-    const next = [...items];
-    const [item] = next.splice(fromIndex, 1);
-    next.splice(Math.max(0, Math.min(toIndex, next.length)), 0, item);
-    return next;
-  }
-
-  function moveStyleOrderById(id: string, targetId: string, after: boolean) {
-    const fromIndex = styleOrder.indexOf(id);
-    const targetIndex = styleOrder.indexOf(targetId);
-    if (fromIndex < 0 || targetIndex < 0) return;
-    const insertIndex = after ? targetIndex + 1 : targetIndex;
-    persistStyleOrder(moveArrayItem(styleOrder, fromIndex, insertIndex));
-  }
-
-  function setReorderDragState(kind: "style" | "summary", id: string, event: DragEvent) {
-    reorderDragState = { kind, id };
-    reorderDropTarget = null;
-    if (event.dataTransfer) {
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", id);
-    }
-  }
-
-  function updateReorderDropTarget(kind: "style" | "summary", id: string, event: DragEvent) {
-    if (!reorderDragState || reorderDragState.kind !== kind || reorderDragState.id === id) return false;
-    event.preventDefault();
-    const currentTarget = event.currentTarget as HTMLElement | null;
-    if (!currentTarget) return false;
-    const rect = currentTarget.getBoundingClientRect();
-    const after = event.clientY > rect.top + rect.height / 2;
-    reorderDropTarget = { kind, id, after };
-    return true;
-  }
-
-  function finishReorderDrag() {
-    reorderDragState = null;
-    reorderDropTarget = null;
-  }
-
-  function commitStyleReorder(targetId: string, after: boolean) {
-    if (!reorderDragState || reorderDragState.kind !== "style") return;
-    moveStyleOrderById(reorderDragState.id, targetId, after);
-  }
-
-  function commitSummaryReorder(targetId: string, after: boolean) {
-    if (!reorderDragState || reorderDragState.kind !== "summary") return;
-    moveSummaryCategoryById(reorderDragState.id, targetId, after);
-  }
-
-  function resetStyleOrder() {
-    persistStyleOrder(defaultStyleOrder);
-  }
-
-  type ThemeMode = "gruvbox" | "nord";
-  type ThemePalette = {
-    dark: boolean;
-    bg: string;
-    bgSoft: string;
-    bgHard: string;
-    bgAlt: string;
-    border: string;
-    fg: string;
-    fgMuted: string;
-    yellow: string;
-    green: string;
-    blue: string;
-    aqua: string;
-    orange: string;
-    red: string;
-    purple: string;
-    selection: string;
-    activeLine: string;
-    gutterText: string;
-    cursor: string;
-    comment: string;
-    searchMatch: string;
-    searchMatchSelected: string;
-    blockquoteBg: string;
-    blockquoteFg: string;
-    plainCodeBg: string;
-    activeLineEdit: string;
-    activeGutterEdit: string;
+  const gruvbox = {
+    bg: "#282828", bgSoft: "#32302f", bgHard: "#1d2021",
+    bgAlt: "#3c3836", border: "#504945", fg: "#ebdbb2",
+    fgMuted: "#a89984", yellow: "#fabd2f", green: "#b8bb26",
+    blue: "#83a598", aqua: "#8ec07c", orange: "#fe8019",
+    red: "#fb4934", purple: "#d3869b", selection: "#665c54",
+    activeLine: "#3c3836aa", gutterText: "#7c6f64",
+    cursor: "#fe8019", comment: "#928374"
   };
-
-  const themes: Record<ThemeMode, ThemePalette> = {
-    gruvbox: {
-      dark: true,
-      bg: "#282828", bgSoft: "#32302f", bgHard: "#1d2021",
-      bgAlt: "#3c3836", border: "#504945", fg: "#ebdbb2",
-      fgMuted: "#a89984", yellow: "#fabd2f", green: "#b8bb26",
-      blue: "#83a598", aqua: "#8ec07c", orange: "#fe8019",
-      red: "#fb4934", purple: "#d3869b", selection: "#665c54",
-      activeLine: "#3c3836aa", gutterText: "#7c6f64",
-      cursor: "#fe8019", comment: "#928374",
-      searchMatch: "#665c54", searchMatchSelected: "#7c6f64",
-      blockquoteBg: "#4a3520", blockquoteFg: "#fabd2f",
-      plainCodeBg: "#32302f", activeLineEdit: "#2f4a3aaa", activeGutterEdit: "#2f4a3a"
-    },
-    nord: {
-      dark: false,
-      bg: "#eceff4", bgSoft: "#e5e9f0", bgHard: "#d8dee9",
-      bgAlt: "#e5e9f0", border: "#cfd7e3", fg: "#2e3440",
-      fgMuted: "#4c566a", yellow: "#ebcb8b", green: "#a3be8c",
-      blue: "#81a1c1", aqua: "#8fbcbb", orange: "#d08770",
-      red: "#bf616a", purple: "#b48ead", selection: "#d8dee9",
-      activeLine: "#e5e9f0", gutterText: "#5e6472",
-      cursor: "#5e81ac", comment: "#4c566a",
-      searchMatch: "#d8dee9", searchMatchSelected: "#cfd7e3",
-      blockquoteBg: "#e5e9f0", blockquoteFg: "#5e81ac",
-      plainCodeBg: "#e5e9f0", activeLineEdit: "#d8dee9", activeGutterEdit: "#d8dee9"
-    }
-  };
-
-  function loadThemeMode(): ThemeMode {
-    const stored = typeof localStorage === "undefined" ? null : localStorage.getItem("cm6-theme");
-    return stored === "gruvbox" ? "gruvbox" : "nord";
-  }
-
-  function loadAnnotateRightRepeatInterval() {
-    if (typeof localStorage === "undefined") return 240;
-    const stored = Number(localStorage.getItem(annotateRightRepeatStorageKey));
-    return Number.isFinite(stored) ? Math.round(clampNumber(stored, 80, 800)) : 240;
-  }
-
-  function persistAnnotateRightRepeatInterval() {
-    annotateRightRepeatIntervalMs = Math.round(clampNumber(Number(annotateRightRepeatIntervalMs), 80, 800));
-    if (typeof localStorage !== "undefined") {
-      localStorage.setItem(annotateRightRepeatStorageKey, String(annotateRightRepeatIntervalMs));
-    }
-  }
-
-  function getTheme(mode: ThemeMode): ThemePalette {
-    return themes[mode];
-  }
 
   function starterDoc() {
     const fmt = (d: Date) => d.toLocaleString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).replace(/,/g, "");
@@ -2013,92 +982,62 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
 `;
   }
 
-  function buildHighlightStyle(theme: ThemePalette) {
-    return HighlightStyle.define([
-      { tag: tags.heading, color: theme.yellow, fontWeight: "700" },
-      { tag: tags.contentSeparator, color: theme.orange },
-      { tag: tags.emphasis, color: theme.fg, fontStyle: "italic" },
-      { tag: tags.strong, color: theme.fg, fontWeight: "700" },
-      { tag: tags.strikethrough, color: theme.fgMuted, textDecoration: "line-through" },
-      { tag: tags.link, color: theme.blue, textDecoration: "underline" },
-      { tag: tags.url, color: theme.aqua, textDecoration: "underline" },
-      { tag: tags.labelName, color: theme.yellow },
-      { tag: tags.keyword, color: theme.red },
-      { tag: [tags.atom, tags.bool, tags.null], color: theme.purple },
-      { tag: [tags.number, tags.integer, tags.float], color: theme.purple },
-      { tag: [tags.string, tags.special(tags.string)], color: theme.green },
-      { tag: tags.regexp, color: theme.aqua },
-      { tag: tags.escape, color: theme.orange },
-      { tag: [tags.variableName, tags.name], color: theme.fg },
-      { tag: tags.function(tags.variableName), color: theme.green },
-      { tag: [tags.className, tags.typeName], color: theme.yellow },
-      { tag: [tags.operator, tags.compareOperator, tags.logicOperator], color: theme.red },
-      { tag: [tags.punctuation, tags.separator, tags.bracket], color: theme.fgMuted },
-      { tag: tags.comment, color: theme.comment },
-      { tag: tags.meta, color: theme.orange },
-      { tag: tags.monospace, color: "inherit" }
-    ]);
-  }
+  const gruvboxHighlight = HighlightStyle.define([
+    { tag: tags.heading, color: gruvbox.yellow, fontWeight: "700" },
+    { tag: tags.contentSeparator, color: gruvbox.orange },
+    { tag: tags.emphasis, color: gruvbox.fg, fontStyle: "italic" },
+    { tag: tags.strong, color: gruvbox.fg, fontWeight: "700" },
+    { tag: tags.strikethrough, color: gruvbox.fgMuted, textDecoration: "line-through" },
+    { tag: tags.link, color: gruvbox.blue, textDecoration: "underline" },
+    { tag: tags.url, color: gruvbox.aqua, textDecoration: "underline" },
+    { tag: tags.labelName, color: gruvbox.yellow },
+    { tag: tags.keyword, color: gruvbox.red },
+    { tag: [tags.atom, tags.bool, tags.null], color: gruvbox.purple },
+    { tag: [tags.number, tags.integer, tags.float], color: gruvbox.purple },
+    { tag: [tags.string, tags.special(tags.string)], color: gruvbox.green },
+    { tag: tags.regexp, color: gruvbox.aqua },
+    { tag: tags.escape, color: gruvbox.orange },
+    { tag: [tags.variableName, tags.name], color: gruvbox.fg },
+    { tag: tags.function(tags.variableName), color: gruvbox.green },
+    { tag: [tags.className, tags.typeName], color: gruvbox.yellow },
+    { tag: [tags.operator, tags.compareOperator, tags.logicOperator], color: gruvbox.red },
+    { tag: [tags.punctuation, tags.separator, tags.bracket], color: gruvbox.fgMuted },
+    { tag: tags.comment, color: gruvbox.comment },
+    { tag: tags.meta, color: gruvbox.orange },
+    { tag: tags.monospace, color: "inherit" }
+  ]);
 
-  function buildEditorTheme(theme: ThemePalette): Extension {
+  function buildGruvboxTheme(): Extension {
     return EditorView.theme({
-      "&": { height: "100%", color: theme.fg, backgroundColor: theme.bg },
+      "&": { height: "100%", color: gruvbox.fg, backgroundColor: gruvbox.bg },
       ".cm-scroller": { overflow: "auto", fontFamily: '"Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, monospace', lineHeight: "1.75" },
-      ".cm-content": { textAlign: "left", padding: "1rem 1.25rem 4rem", minHeight: "100%", caretColor: theme.cursor, whiteSpace: "pre-wrap", wordBreak: "break-word" },
+      ".cm-content": { textAlign: "left", padding: "1rem 1.25rem 4rem", minHeight: "100%", caretColor: gruvbox.cursor, whiteSpace: "pre-wrap", wordBreak: "break-word" },
       ".cm-line": { textAlign: "left" },
-      "&.cm-focused .cm-cursor": { borderLeftColor: theme.cursor },
-      ".cm-content, .cm-line": { caretColor: "transparent !important" },
-      ".cm-cursorLayer": {
-        animation: "none !important",
-        display: "none !important",
-        opacity: "0 !important",
-        visibility: "hidden !important"
-      },
-      ".cm-cursor, .cm-cursor-primary, .cm-cursor-secondary, .cm-secondaryCursor, .cm-dropCursor": {
-        borderLeft: "0 !important",
-        borderLeftColor: "transparent !important",
-        display: "none !important",
-        opacity: "0 !important",
-        visibility: "hidden !important"
-      },
-      "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { backgroundColor: `${theme.orange} !important`, color: theme.bg, opacity: "50%" },
-      ".cm-gutters": { backgroundColor: theme.bgHard, color: theme.gutterText, borderRight: "none" },
-      ".cm-activeLine": { backgroundColor: theme.activeLine },
-      ".cm-activeLineGutter": { color: theme.yellow },
-      ".cm-panels": { backgroundColor: theme.bgSoft, color: theme.fg },
-      ".cm-searchMatch": { backgroundColor: theme.searchMatch, outline: `1px solid ${theme.yellow}` },
-      ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: theme.searchMatchSelected },
-      ".cm-matchingBracket, .cm-nonmatchingBracket": { backgroundColor: theme.bgAlt, outline: `1px solid ${theme.blue}` },
-      ".cm-formatting-code": { color: theme.orange },
-      ".cm-formatting-code-block": { color: theme.orange },
-      ".cm-formatting": { color: theme.fgMuted },
+      "&.cm-focused .cm-cursor": { borderLeftColor: gruvbox.cursor },
+      "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { backgroundColor: `${gruvbox.orange} !important`, color: gruvbox.bg, opacity: '50%' },
+      ".cm-gutters": { backgroundColor: gruvbox.bgHard, color: gruvbox.gutterText, borderRight: "none" },
+      ".cm-activeLine": { backgroundColor: "transparent" },
+      ".cm-activeLineGutter": { color: gruvbox.yellow },
+      ".cm-panels": { backgroundColor: gruvbox.bgSoft, color: gruvbox.fg },
+      ".cm-searchMatch": { backgroundColor: "#665c54", outline: `1px solid ${gruvbox.yellow}` },
+      ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: "#7c6f64" },
+      ".cm-matchingBracket, .cm-nonmatchingBracket": { backgroundColor: gruvbox.bgAlt, outline: `1px solid ${gruvbox.blue}` },
+      ...Object.fromEntries(highlightStyles.map(s => [
+        `.cm-annotation-${s.name}`,
+        { color: `${contrastColor(s.color)} !important`, backgroundColor: `${s.color} !important`, border: "none" }
+      ])),
+      ".cm-formatting-code": { color: gruvbox.orange },
+      ".cm-formatting-code-block": { color: gruvbox.orange },
+      ".cm-formatting": { color: gruvbox.fgMuted },
       ".cm-blockquote-line": {
-        borderLeft: `3px solid ${theme.orange}`,
+        borderLeft: `3px solid ${gruvbox.orange}`,
         paddingLeft: "0.75em",
         paddingRight: "0.35em",
-        backgroundColor: theme.blockquoteBg,
-        color: theme.blockquoteFg
+        backgroundColor: "#4a3520",
+        marginBottom: "2px",
+        color: gruvbox.yellow
       }
-    }, { dark: theme.dark });
-  }
-
-  function buildThemeExtensions(theme: ThemePalette): Extension[] {
-    return [
-      syntaxHighlighting(buildHighlightStyle(theme)),
-      buildHighlightDecorator(theme),
-      buildEditorTheme(theme)
-    ];
-  }
-
-  function reconfigureTheme(nextMode: ThemeMode) {
-    const nextTheme = getTheme(nextMode);
-    themeMode = nextMode;
-    if (typeof localStorage !== "undefined") localStorage.setItem(themeStorageKey, nextMode);
-    view?.dispatch({ effects: themeCompartment.reconfigure(buildThemeExtensions(nextTheme)) });
-  }
-
-  function toggleThemeMode() {
-    reconfigureTheme(themeMode === "nord" ? "gruvbox" : "nord");
+    }, { dark: true });
   }
 
   function updateStatusFromView(v: EditorView) {
@@ -2116,7 +1055,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
   }
 
   // Returns theme bg or fg based on which has better contrast against the annotation color
-  function contrastColor(hex: string, bg = activeTheme.bg, fg = activeTheme.fg): string {
+  function contrastColor(hex: string): string {
     const toLinear = (c: number) => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
     const luminance = (h: string) => {
       const r = toLinear(parseInt(h.slice(1, 3), 16) / 255);
@@ -2126,11 +1065,12 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     };
     const contrast = (L1: number, L2: number) => (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
     const Lann = luminance(hex);
-    return contrast(Lann, luminance(bg)) >= contrast(Lann, luminance(fg)) ? bg : fg;
+    return contrast(Lann, luminance(gruvbox.bg)) >= contrast(Lann, luminance(gruvbox.fg)) ? gruvbox.bg : gruvbox.fg;
   }
 
   const annotationPattern = /`([^`]+)`<!--\s*(\w+),\s*(.+?):\s*"([^"]*)"(?:,\s*title:\s*"([^"]*)")?\s*-->/g;
   const srtPattern = /\[\s*([0-9:.]+)\s*-->\s*([0-9:.]+)\s*\]/g;
+  const styleColorMap: Record<string, string> = Object.fromEntries(highlightStyles.map(s => [s.name, s.color]));
   let editingSpan: number | null = null;
   type BlockquoteAlign = "left" | "center" | "right";
   const blockquoteMetaPattern = /<!--\s*align:(left|center|right)\s+width:(\d{1,3})\s*-->/i;
@@ -2169,12 +1109,6 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     return start === end ? null : { from: start, to: end };
   }
 
-  function trimTrailingWhitespaceRange(text: string, from: number, to: number): WordRange | null {
-    let end = Math.max(from, Math.min(to, text.length));
-    while (end > from && /\s/.test(text[end - 1])) end -= 1;
-    return end > from ? { from, to: end } : null;
-  }
-
   function wordBoundary(text: string, pos: number, forward: boolean): number {
     let next = Math.max(0, Math.min(pos, text.length));
 
@@ -2195,22 +1129,6 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     return next;
   }
 
-  function wordSelectionBoundary(text: string, pos: number, forward: boolean): number {
-    let next = Math.max(0, Math.min(pos, text.length));
-
-    if (forward) {
-      const current = wordRangeAt(text, next);
-      if (current && next !== current.to) return current.to;
-      while (next < text.length && !isSelectableWordChar(text, next)) next += 1;
-      return wordRangeAt(text, next)?.to ?? next;
-    }
-
-    const current = wordRangeAt(text, next);
-    if (current && next !== current.from) return current.from;
-    while (next > 0 && !isSelectableWordChar(text, next - 1)) next -= 1;
-    return next > 0 ? wordRangeAt(text, next - 1)?.from ?? next : 0;
-  }
-
   function cleanHtmlDocument(markdownText: string) {
     const body = renderCleanHtmlBody(markdownText);
     return `<!doctype html>
@@ -2222,8 +1140,8 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
   <style>
     body {
       margin: 0;
-      background: ${activeTheme.bg};
-      color: ${activeTheme.fg};
+      background: ${gruvbox.bg};
+      color: ${gruvbox.fg};
       font-family: "Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       line-height: ${lineHeight};
       font-size: ${fontSize}px;
@@ -2237,8 +1155,8 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
       white-space: normal;
     }
     p { margin: 0 0 ${1 + paragraphSpacing}em; }
-    h1, h2, h3, h4, h5, h6 { color: ${activeTheme.yellow}; margin: 1.25rem 0 0.75rem; line-height: 1.25; }
-    code { color: ${activeTheme.yellow}; background: ${activeTheme.bgSoft}; border: 1px solid ${activeTheme.border}; border-radius: 4px; padding: 0 0.25rem; }
+    h1, h2, h3, h4, h5, h6 { color: ${gruvbox.yellow}; margin: 1.25rem 0 0.75rem; line-height: 1.25; }
+    code { color: ${gruvbox.yellow}; background: ${gruvbox.bgSoft}; border: 1px solid ${gruvbox.border}; border-radius: 4px; padding: 0 0.25rem; }
     .annotation-token {
       border-radius: 3px;
       padding: 0 0.25rem;
@@ -2252,33 +1170,21 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
       padding: 0 0.35rem;
       border-radius: 999px;
       background: rgba(80, 73, 69, 0.9);
-      border: 1px solid ${activeTheme.border};
-      color: ${activeTheme.fgMuted};
+      border: 1px solid ${gruvbox.border};
+      color: ${gruvbox.fgMuted};
       font-size: 10px;
       line-height: 1.4;
       white-space: nowrap;
       vertical-align: middle;
       box-shadow: 0 1px 0 rgba(0, 0, 0, 0.15);
     }
-    .annotation-comment {
-      display: inline-block;
-      margin-left: 0.35rem;
-      padding: 0 0.4rem;
-      border-radius: 999px;
-      background: color-mix(in srgb, ${activeTheme.bgSoft} 90%, transparent);
-      border: 1px solid ${activeTheme.border};
-      color: ${activeTheme.fgMuted};
-      font-size: 10px;
-      line-height: 1.4;
-      vertical-align: middle;
-    }
     blockquote {
-      border-left: 3px solid ${activeTheme.orange};
+      border-left: 3px solid ${gruvbox.orange};
       padding: 0.25rem 0.35rem 0.25rem 0.75rem;
       margin-top: 0;
       margin-bottom: 0.25rem;
-      background: ${activeTheme.blockquoteBg};
-      color: ${activeTheme.blockquoteFg};
+      background: #4a3520;
+      color: ${gruvbox.yellow};
     }
   </style>
 </head>
@@ -2342,24 +1248,14 @@ ${body}
 
     while ((match = pattern.exec(text)) !== null) {
       html += renderPlainInlineHtml(text.slice(lastIndex, match.index));
-      const color = styleColorForName(match[2]);
-      html += `<span class="annotation-token" style="${escapeHtml(annotationTokenStyle(match[2], color))}">${escapeHtml(match[1])}</span>`;
+      const color = styleColorMap[match[2]] || gruvbox.yellow;
+      html += `<span class="annotation-token" style="background:${escapeHtml(color)};color:${escapeHtml(contrastColor(color))};">${escapeHtml(match[1])}</span>`;
       html += `<span class="annotation-timestamp" title="${escapeHtml(match[3])}">${escapeHtml(match[3])}</span>`;
-      if (match[4]?.trim()) {
-        html += `<span class="annotation-comment">${escapeHtml(match[4].trim())}</span>`;
-      }
       lastIndex = match.index + match[0].length;
     }
 
     html += renderPlainInlineHtml(text.slice(lastIndex));
     return html;
-  }
-
-  function annotationTokenStyle(styleName: string, color = styleColorForName(styleName)) {
-    if (isBoxStyleName(styleName)) {
-      return `background:transparent;color:${color};border-color:${color};`;
-    }
-    return `background:${color};color:${contrastColor(color)};`;
   }
 
   function renderPlainInlineHtml(text: string) {
@@ -2380,11 +1276,11 @@ ${body}
   }
 
   function summaryAnnotationTitle(item: SummaryAnnotationItem) {
-    return item.title || baseStyleName(item.colorName).toUpperCase();
+    return item.title || item.colorName.toUpperCase();
   }
 
   function annotationTitleKey(item: SummaryAnnotationItem) {
-    return item.title.trim() || baseStyleName(item.colorName);
+    return item.title.trim() || item.colorName;
   }
 
   function isSummaryAnnotationItem(item: SummaryItem): item is SummaryAnnotationItem {
@@ -2469,7 +1365,7 @@ ${body}
         id: `annotation-${spanStart}`,
         colorName,
         title: annotation[5]?.trim() ?? "",
-        color: styleColorForName(colorName),
+        color: styleColorMap[colorName] ?? gruvbox.fgMuted,
         text: annotation[1],
         context: annotationSentenceContext(docText, spanStart, spanStart + annotation[0].length),
         timestamp: annotation[3],
@@ -2488,7 +1384,6 @@ ${body}
     });
     summaryItems = sortedItems;
     summarySections = buildSummarySections(sortedItems);
-    summaryCategoryOrder = reconcileSummaryCategoryOrder(summarySections, summaryCategoryOrder);
   }
 
   function buildSummarySections(items: SummaryItem[]) {
@@ -2501,7 +1396,7 @@ ${body}
         order.push(key);
         grouped.set(key, {
           label: item.type === "blockquote" ? "Notes" : summaryAnnotationTitle(item),
-          color: item.type === "blockquote" ? activeTheme.yellow : item.color,
+          color: item.type === "blockquote" ? gruvbox.yellow : item.color,
           itemType: item.type,
           items: []
         });
@@ -2511,6 +1406,7 @@ ${body}
 
     return order.map((key): SummarySection => {
       const group = grouped.get(key)!;
+      if (group.items.length === 1) return { kind: "item", id: group.items[0].id, item: group.items[0] };
       return {
         kind: "group",
         id: key,
@@ -2523,67 +1419,11 @@ ${body}
     });
   }
 
-  function orderSummarySections(sections: SummarySection[], categoryOrder: string[]) {
-    const annotationGroups = sections.filter(section => section.kind === "group" && section.itemType === "annotation");
-    if (!annotationGroups.length) return sections;
-    if (!categoryOrder.length) return sections;
-
-    const groupLookup = new Map(annotationGroups.map(section => [section.id, section] as const));
-    const orderedGroups: SummarySection[] = [];
-    const seen = new Set<string>();
-
-    for (const id of categoryOrder) {
-      const section = groupLookup.get(id);
-      if (!section) continue;
-      orderedGroups.push(section);
-      seen.add(id);
-    }
-
-    for (const section of annotationGroups) {
-      if (!seen.has(section.id)) orderedGroups.push(section);
-    }
-
-    let groupIndex = 0;
-    return sections.map(section => {
-      if (section.kind !== "group" || section.itemType !== "annotation") return section;
-      return orderedGroups[groupIndex++] ?? section;
-    });
-  }
-
-  function reconcileSummaryCategoryOrder(sections: SummarySection[], currentOrder: string[]) {
-    const groupIds = sections
-      .filter(section => section.kind === "group" && section.itemType === "annotation")
-      .map(section => section.id);
-    if (!groupIds.length) return [];
-    const nextOrder = currentOrder.filter(id => groupIds.includes(id));
-    for (const id of groupIds) {
-      if (!nextOrder.includes(id)) nextOrder.push(id);
-    }
-    return nextOrder;
-  }
-
   function toggleSummaryCategory(id: string) {
     expandedSummaryCategories = {
       ...expandedSummaryCategories,
       [id]: !expandedSummaryCategories[id]
     };
-  }
-
-  function moveSummaryCategoryById(id: string, targetId: string, after: boolean) {
-    const currentOrder = summaryCategoryOrder.length ? summaryCategoryOrder : summaryAnnotationGroupIds.slice();
-    const fromIndex = currentOrder.indexOf(id);
-    const targetIndex = currentOrder.indexOf(targetId);
-    if (fromIndex < 0 || targetIndex < 0) return;
-    const insertIndex = after ? targetIndex + 1 : targetIndex;
-    summaryCategoryOrder = moveArrayItem(currentOrder, fromIndex, insertIndex);
-  }
-
-  function setAllSummaryCategories(expanded: boolean) {
-    expandedSummaryCategories = Object.fromEntries(summaryGroupIds.map(id => [id, expanded]));
-  }
-
-  function toggleAllSummaryCategories() {
-    setAllSummaryCategories(!summaryAllGroupsExpanded);
   }
 
   function clampSummarySidebarWidth(width: number) {
@@ -2713,38 +1553,6 @@ ${body}
     view.focus();
   }
 
-  function annotationJumpTargets() {
-    return summaryItems
-      .filter(isSummaryAnnotationItem)
-      .slice()
-      .sort((a, b) => a.from - b.from || a.to - b.to);
-  }
-
-  function jumpToAdjacentAnnotation(delta: -1 | 1) {
-    if (!view) return false;
-    const items = annotationJumpTargets();
-    if (!items.length) return false;
-
-    const head = view.state.selection.main.head;
-    let index = -1;
-
-    if (delta > 0) {
-      index = items.findIndex(item => item.from > head);
-      if (index < 0) index = 0;
-    } else {
-      for (let i = items.length - 1; i >= 0; i -= 1) {
-        if (items[i].to < head) {
-          index = i;
-          break;
-        }
-      }
-      if (index < 0) index = items.length - 1;
-    }
-
-    jumpToSummaryItem(items[index]);
-    return true;
-  }
-
   function handleSummaryItemKeydown(event: KeyboardEvent, item: SummaryItem) {
     if (event.key !== "Enter" && event.key !== " ") return;
     event.preventDefault();
@@ -2765,8 +1573,7 @@ ${body}
     event.preventDefault();
     event.stopPropagation();
     editingSummaryTitleKey = key;
-    summaryTitleDraft = item.title || baseStyleName(item.colorName);
-    void focusSummaryTitleInput();
+    summaryTitleDraft = item.title || item.colorName;
   }
 
   function startSummaryGroupTitleEdit(event: MouseEvent, section: Extract<SummarySection, { kind: "group" }>) {
@@ -2775,19 +1582,12 @@ ${body}
     const firstAnnotation = summaryAnnotationItems(section.items)[0];
     if (!firstAnnotation) return;
     editingSummaryTitleKey = section.id;
-    summaryTitleDraft = firstAnnotation.title || baseStyleName(firstAnnotation.colorName);
-    void focusSummaryTitleInput();
-  }
-
-  async function focusSummaryTitleInput() {
-    await tick();
-    summaryTitleInput?.focus();
-    summaryTitleInput?.select();
+    summaryTitleDraft = firstAnnotation.title || firstAnnotation.colorName;
   }
 
   function normalizeSummaryTitle(title: string, colorName: string) {
     const normalized = title.trim().replace(/\s+/g, " ").replace(/"/g, "'").replace(/[<>]/g, "").replace(/--+/g, "-");
-    return normalized.toLowerCase() === baseStyleName(colorName).toLowerCase() ? "" : normalized;
+    return normalized.toLowerCase() === colorName.toLowerCase() ? "" : normalized;
   }
 
   function annotationMatchAt(docText: string, spanStart: number) {
@@ -2957,20 +1757,20 @@ ${body}
           const colorName = m[2];
           const timestamp = m[3] || "";
           const comment   = m[4] || "";
-          const color = styleColorForName(colorName);
+          const color = styleColorMap[colorName] ?? gruvbox.fgMuted;
           return [{
             pos: wordStart, above: true, strictSide: true, arrow: false,
             create() {
               const dom = document.createElement("div");
               dom.className = "cm-annotation-bubble";
-              dom.style.cssText = `background:${activeTheme.bgAlt};border:1px solid ${activeTheme.border};border-left:3px solid ${color};border-radius:4px;padding:4px 10px;font-size:11px;color:${activeTheme.fg};line-height:1.6;white-space:nowrap;pointer-events:none;`;
+              dom.style.cssText = `background:${gruvbox.bgAlt};border:1px solid ${gruvbox.border};border-left:3px solid ${color};border-radius:4px;padding:4px 10px;font-size:11px;color:${gruvbox.fg};line-height:1.6;white-space:nowrap;pointer-events:none;`;
               const meta = document.createElement("div");
-              meta.style.color = activeTheme.fgMuted;
+              meta.style.color = gruvbox.fgMuted;
               meta.textContent = `${colorName}  ${timestamp}`;
               dom.appendChild(meta);
               const line2 = document.createElement("div");
               line2.textContent = comment || "Enter to add note";
-              if (!comment) line2.style.color = activeTheme.fgMuted;
+              if (!comment) line2.style.color = gruvbox.fgMuted;
               dom.appendChild(line2);
               return { dom };
             }
@@ -2988,16 +1788,14 @@ ${body}
     private spanStart: number;
     private spanEnd: number;
     private editorView: EditorView;
-    private theme: ThemePalette;
 
-    constructor(color: string, comment: string, spanStart: number, spanEnd: number, editorView: EditorView, theme: ThemePalette) {
+    constructor(color: string, comment: string, spanStart: number, spanEnd: number, editorView: EditorView) {
       super();
       this.color = color;
       this.comment = comment;
       this.spanStart = spanStart;
       this.spanEnd = spanEnd;
       this.editorView = editorView;
-      this.theme = theme;
     }
 
     toDOM() {
@@ -3007,7 +1805,7 @@ ${body}
       input.type = "text";
       input.value = this.comment;
       input.placeholder = "add note…";
-      input.style.cssText = `background:transparent;border:none;outline:none;color:${this.theme.fg};caret-color:${this.theme.cursor};font-family:inherit;font-size:inherit;width:${Math.max(this.comment.length || 8, 8)}ch;min-width:8ch;`;
+      input.style.cssText = `background:transparent;border:none;outline:none;color:${gruvbox.fg};font-family:inherit;font-size:inherit;width:${Math.max(this.comment.length || 8, 8)}ch;min-width:8ch;`;
       const save = () => {
         editingSpan = null;
         const full = this.editorView.state.doc.sliceString(this.spanStart, this.spanEnd);
@@ -3215,7 +2013,7 @@ ${body}
   ): readonly TransactionSpec[] | null {
     const selection = tr.newSelection.main;
     const cursor = selection.head;
-    if (cursor <= range.from || cursor >= range.to) return null;
+    if (cursor < range.from || cursor > range.to) return null;
 
     const movingRight = cursor >= tr.startState.selection.main.head;
     const target = movingRight ? range.rightExit : range.leftExit;
@@ -3273,15 +2071,9 @@ ${body}
     return true;
   }
 
-  function buildHighlightDecorator(theme: ThemePalette): Extension {
+  function buildHighlightDecorator(): Extension {
     const colorTheme = EditorView.theme(Object.fromEntries(
-      highlightStyles.flatMap(s => {
-        const color = styleColorForName(s.name);
-        return [
-          [`.cm-annotation-${s.name}`, { backgroundColor: color, color: contrastColor(color, theme.bg, theme.fg), borderRadius: "3px", padding: "0 2px" }],
-          [`.cm-annotation-${boxStyleName(s.name)}`, { backgroundColor: "transparent", color, border: `1px solid ${color}`, borderRadius: "3px", padding: "0 2px" }]
-        ];
-      })
+      highlightStyles.map(s => [`.cm-annotation-${s.name}`, { backgroundColor: s.color, color: contrastColor(s.color), borderRadius: "3px", padding: "0 2px" }])
     ));
 
     const plugin = ViewPlugin.fromClass(class {
@@ -3302,7 +2094,7 @@ ${body}
           while ((match = annotationPattern.exec(text)) !== null) {
             const colorName = match[2];
             const comment   = match[4] || "";
-            const color = styleColorForName(colorName);
+            const color = styleColorMap[colorName];
             if (!color) continue;
             const spanStart = from + match.index;
             const spanEnd   = spanStart + match[0].length;
@@ -3324,7 +2116,7 @@ ${body}
             builder.add(spanStart, wordStart, Decoration.replace({ widget: new EmptyWidget(color), inclusive: false }));
             builder.add(wordStart, wordEnd, Decoration.mark({ class: `cm-annotation-${colorName}` }));
             if (isEditing) {
-              builder.add(wordEnd, spanEnd, Decoration.replace({ widget: new EditWidget(color, comment, spanStart, spanEnd, v, theme) }));
+              builder.add(wordEnd, spanEnd, Decoration.replace({ widget: new EditWidget(color, comment, spanStart, spanEnd, v) }));
             } else {
               builder.add(wordEnd, spanEnd, Decoration.replace({ widget: new EmptyWidget() }));
             }
@@ -3363,7 +2155,7 @@ ${body}
     }, { decorations: v => v.decorations });
 
     const plainTheme = EditorView.theme({
-      ".cm-plain-code": { color: `${theme.yellow} !important`, backgroundColor: theme.plainCodeBg, border: `1px solid ${theme.border}`, borderRadius: "4px", padding: "0 0.25rem" }
+      ".cm-plain-code": { color: `${gruvbox.yellow} !important`, backgroundColor: gruvbox.bgSoft, border: `1px solid ${gruvbox.border}`, borderRadius: "4px", padding: "0 0.25rem" }
     });
 
     const atomicPlugin = ViewPlugin.fromClass(class {
@@ -3486,26 +2278,19 @@ ${body}
     return [colorTheme, plugin, plainTheme, plainPlugin, atomicPlugin, srtPlugin, snapFilter, srtSnapFilter];
   }
 
-  function selectedAnnotationColorName() {
-    return baseStyleName(styleName(currentStyle) || "orange");
-  }
-
-  function wrapSelectionOrWord(v: EditorView, style: number = 0, annotationStyleName = "") {
+  function wrapSelectionOrWord(v: EditorView, style: number = 0) {
     const state = v.state;
     const range = state.selection.main;
-    const cursorAfterInsert = (from: number, insert: string) => from + insert.length;
     const makeInsert = (text: string): string => {
-      if (style === 0 && !annotationStyleName) return `\`${text}\``;
+      if (style === 0) return `\`${text}\``;
       const now = new Date();
       const ts = now.toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).replace(/,/g, "");
-      const name = annotationStyleName || styleName(style);
+      const name = styleName(style);
       return `\`${text}\`<!-- ${name}, ${ts}: "" -->`;
     };
     if (!range.empty) {
-      const trimmedRange = trimTrailingWhitespaceRange(state.doc.toString(), range.from, range.to);
-      if (!trimmedRange) return true;
-      const insert = makeInsert(state.doc.sliceString(trimmedRange.from, trimmedRange.to));
-      v.dispatch({ changes: { from: trimmedRange.from, to: trimmedRange.to, insert }, selection: { anchor: cursorAfterInsert(trimmedRange.from, insert) } });
+      const insert = makeInsert(state.doc.sliceString(range.from, range.to));
+      v.dispatch({ changes: { from: range.from, to: range.to, insert }, selection: { anchor: Math.min(range.from + insert.length + (style > 0 ? 1 : 0), v.state.doc.length) } });
       return true;
     }
     const docText = state.doc.toString();
@@ -3513,11 +2298,11 @@ ${body}
     if (!wordRange) return true;
     const { from, to } = wordRange;
     const insert = makeInsert(state.doc.sliceString(from, to));
-    v.dispatch({ changes: { from, to, insert }, selection: { anchor: cursorAfterInsert(from, insert) } });
+    v.dispatch({ changes: { from, to, insert }, selection: { anchor: Math.min(from + insert.length + (style > 0 ? 1 : 0), v.state.doc.length) } });
     return true;
   }
 
-  function applyBoxAnnotationStyle(v: EditorView) {
+  function cycleAnnotationColor(v: EditorView, delta: number) {
     const cursor = v.state.selection.main.head;
     const docText = v.state.doc.toString();
     annotationPattern.lastIndex = 0;
@@ -3525,62 +2310,15 @@ ${body}
     while ((m = annotationPattern.exec(docText)) !== null) {
       const spanStart = m.index, spanEnd = spanStart + m[0].length;
       if (cursor >= spanStart && cursor <= spanEnd) {
-        const tokenStart = spanStart + 1;
-        const updatedName = counterpartStyleName(m[2]);
-        const updated = m[0].replace(/^`([^`]+)`<!--\s*\w+,/, `\`$1\`<!-- ${updatedName},`);
-        currentStyle = styleNumberForName(updatedName);
-        v.dispatch({
-          changes: { from: spanStart, to: spanEnd, insert: updated },
-          selection: { anchor: tokenStart },
-          effects: cursorScrollEffect(v, tokenStart)
-        });
+        const newStyle = cycleStyleNumber(styleNumberForName(m[2]), delta, false);
+        const newName = styleName(newStyle);
+        const updated = m[0].replace(/^`([^`]+)`<!--\s*\w+,/, `\`$1\`<!-- ${newName},`);
+        currentStyle = newStyle;
+        v.dispatch({ changes: { from: spanStart, to: spanEnd, insert: updated } });
         return true;
       }
     }
-
-    const baseName = selectedAnnotationColorName();
-    currentStyle = styleNumberForName(baseName);
-    return wrapSelectionOrWord(v, currentStyle, boxStyleName(baseName));
-  }
-
-  function setAnnotationColorOrStyle(v: EditorView, style: number) {
-    const name = styleName(style);
-    if (!name) return true;
-    currentStyle = style;
-    const cursor = v.state.selection.main.head;
-    const docText = v.state.doc.toString();
-    annotationPattern.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = annotationPattern.exec(docText)) !== null) {
-      const spanStart = m.index, spanEnd = spanStart + m[0].length;
-      if (cursor >= spanStart && cursor <= spanEnd) {
-        const tokenStart = spanStart + 1;
-        const updatedName = isBoxStyleName(m[2]) ? boxStyleName(name) : name;
-        const updated = m[0].replace(/^`([^`]+)`<!--\s*\w+,/, `\`$1\`<!-- ${updatedName},`);
-        v.dispatch({
-          changes: { from: spanStart, to: spanEnd, insert: updated },
-          selection: { anchor: tokenStart },
-          effects: cursorScrollEffect(v, tokenStart)
-        });
-        return true;
-      }
-    }
-    return wrapSelectionOrWord(v, style);
-  }
-
-  function cycleAnnotationColorOrStyle(v: EditorView, delta: number) {
-    const cursor = v.state.selection.main.head;
-    const docText = v.state.doc.toString();
-    annotationPattern.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = annotationPattern.exec(docText)) !== null) {
-      const spanStart = m.index, spanEnd = spanStart + m[0].length;
-      if (cursor >= spanStart && cursor <= spanEnd) {
-        return setAnnotationColorOrStyle(v, cycleStyleNumber(styleNumberForName(m[2]), delta, false));
-      }
-    }
-    cycleStyle(delta);
-    return true;
+    return false;
   }
 
   function removeAnnotation(v: EditorView) {
@@ -3626,7 +2364,7 @@ ${body}
   // Status bar reactive values
   $: styleLabel = currentStyle === 0
     ? "Style: plain"
-    : `Style: ${currentStyle}/${highlightStyles.length} (${styleName(currentStyle)})${styleKeyForStyle(currentStyle) ? ` [${styleKeyForStyle(currentStyle)}]` : ""}`;
+    : `Style: ${currentStyle}/${highlightStyles.length} (${styleName(currentStyle)})`;
   $: currentStyleColor = styleColor(currentStyle);
 
   const statusPlugin = ViewPlugin.fromClass(class {
@@ -3780,16 +2518,17 @@ ${body}
       this.scheduled = true;
       this.view.requestMeasure({
         read: view => {
-          const head = view.state.selection.main.head;
+          const coords = view.coordsAtPos(view.state.selection.main.head);
+          if (!coords) return null;
           const scroller = view.scrollDOM;
           const scrollerRect = scroller.getBoundingClientRect();
-          const coords = view.coordsAtPos(head);
-          if (!coords) return null;
+          const lineHeight = parseFloat(getComputedStyle(view.contentDOM).lineHeight) || 18;
+          const cursorHeight = Math.max(1, coords.bottom - coords.top);
           return {
-            top: coords.top - scrollerRect.top + scroller.scrollTop,
+            top: coords.top - scrollerRect.top + scroller.scrollTop - ((lineHeight - cursorHeight) / 2),
             left: scroller.scrollLeft,
             width: scroller.clientWidth,
-            height: Math.max(1, coords.bottom - coords.top),
+            height: lineHeight,
             isEdit: editorMode === "insert"
           };
         },
@@ -3815,37 +2554,6 @@ ${body}
     }
   });
 
-  const hideEditorCursorPlugin = ViewPlugin.fromClass(class {
-    view: EditorView;
-    scheduled = false;
-
-    constructor(view: EditorView) {
-      this.view = view;
-      this.hideCursor();
-    }
-
-    update() {
-      this.hideCursor();
-    }
-
-    hideCursor = () => {
-      if (this.scheduled) return;
-      this.scheduled = true;
-      requestAnimationFrame(() => {
-        this.scheduled = false;
-        this.view.contentDOM.style.setProperty("caret-color", "transparent", "important");
-        const selectors = ".cm-cursorLayer, .cm-cursor, .cm-cursor-primary, .cm-cursor-secondary, .cm-dropCursor";
-        this.view.dom.querySelectorAll<HTMLElement>(selectors).forEach(element => {
-          element.style.setProperty("animation", "none", "important");
-          element.style.setProperty("border-left", "0", "important");
-          element.style.setProperty("display", "none", "important");
-          element.style.setProperty("opacity", "0", "important");
-          element.style.setProperty("visibility", "hidden", "important");
-        });
-      });
-    };
-  });
-
   function cursorScrollMargin(v: EditorView) {
     const linePx = parseFloat(getComputedStyle(v.contentDOM).lineHeight) || fontSize * lineHeight;
     const viewportHeight = v.scrollDOM.clientHeight;
@@ -3855,18 +2563,11 @@ ${body}
   }
 
   function cursorScrollEffect(v: EditorView, head = v.state.selection.main.head) {
-    return centerCurrentLine
-      ? EditorView.scrollIntoView(head, { y: "center" })
-      : EditorView.scrollIntoView(head, { y: "nearest", yMargin: cursorScrollMargin(v) });
+    return EditorView.scrollIntoView(head, { y: "nearest", yMargin: cursorScrollMargin(v) });
   }
 
-  function scrollCursorIntoView(v: EditorView, forceCenter = false) {
-    const head = v.state.selection.main.head;
-    v.dispatch({
-      effects: forceCenter
-        ? EditorView.scrollIntoView(head, { y: "center" })
-        : cursorScrollEffect(v, head)
-    });
+  function scrollCursorIntoView(v: EditorView) {
+    v.dispatch({ effects: cursorScrollEffect(v) });
   }
 
   function runWithCursorScroll(v: EditorView, command: (view: EditorView) => boolean) {
@@ -3874,31 +2575,6 @@ ${body}
     if (handled) scrollCursorIntoView(v);
     return handled;
   }
-
-  function stopFollowMode() {
-    if (!followTimer) return;
-    clearInterval(followTimer);
-    followTimer = null;
-  }
-
-  function runLeftWithCursorScroll(v: EditorView, command: (view: EditorView) => boolean) {
-    stopFollowMode();
-    return runWithCursorScroll(v, command);
-  }
-
-  const centerCurrentLinePlugin = ViewPlugin.fromClass(class {
-    scheduled = false;
-
-    update(update: ViewUpdate) {
-      if (!centerCurrentLine || (!update.selectionSet && !update.docChanged)) return;
-      if (this.scheduled) return;
-      this.scheduled = true;
-      requestAnimationFrame(() => {
-        this.scheduled = false;
-        if (centerCurrentLine) scrollCursorIntoView(update.view);
-      });
-    }
-  });
 
   const dblClickBehavior = EditorView.domEventHandlers({
     dblclick(event, v) {
@@ -3932,41 +2608,11 @@ ${body}
     let head = selection.head;
 
     for (let i = 0; i < count; i += 1) {
-      const next = extend ? wordSelectionBoundary(docText, head, forward) : wordBoundary(docText, head, forward);
+      const next = wordBoundary(docText, head, forward);
       if (next === head) break;
       head = next;
     }
 
-    if (!forward && head < selection.head) stopFollowMode();
-    v.dispatch({
-      selection: { anchor: extend ? selection.anchor : head, head },
-      effects: cursorScrollEffect(v, head)
-    });
-    return true;
-  }
-
-  function editorLineHeightPx(v: EditorView) {
-    return parseFloat(getComputedStyle(v.contentDOM).lineHeight) || fontSize * lineHeight || 20;
-  }
-
-  function visualLineStartAtY(v: EditorView, y: number) {
-    const contentRect = v.contentDOM.getBoundingClientRect();
-    const pos = v.posAtCoords({ x: contentRect.left + 1, y });
-    if (pos === null) return null;
-    const coords = v.coordsAtPos(pos);
-    if (!coords) return pos;
-    return v.posAtCoords({ x: contentRect.left + 1, y: coords.top + Math.max(1, (coords.bottom - coords.top) / 2) }) ?? pos;
-  }
-
-  function visualLineBoundary(v: EditorView, direction: "start" | "end", extend = false) {
-    const selection = v.state.selection.main;
-    const coords = v.coordsAtPos(selection.head);
-    if (!coords) return true;
-    const contentRect = v.contentDOM.getBoundingClientRect();
-    const y = coords.top + Math.max(1, (coords.bottom - coords.top) / 2);
-    const x = direction === "start" ? contentRect.left + 1 : contentRect.right - 1;
-    const head = v.posAtCoords({ x, y }) ?? selection.head;
-    if (direction === "start" && head < selection.head) stopFollowMode();
     v.dispatch({
       selection: { anchor: extend ? selection.anchor : head, head },
       effects: cursorScrollEffect(v, head)
@@ -4008,110 +2654,41 @@ ${body}
     return true;
   }
 
-  function moveVisualLineSkippingSrt(v: EditorView, direction: "up" | "down", extend = false) {
+  function moveLineSkippingSrt(v: EditorView, direction: "up" | "down", extend = false) {
+    const move = direction === "up"
+      ? (extend ? selectLineUp : cursorLineUp)
+      : (extend ? selectLineDown : cursorLineDown);
     const selection = v.state.selection.main;
-    const isSkippableLine = (text: string) => isSrtTimestampLine(text) || text.trimStart().startsWith(">");
-    const coords = v.coordsAtPos(selection.head);
-    if (!coords) return true;
+    const doc = v.state.doc;
+    const currentLine = doc.lineAt(selection.head);
     const step = direction === "up" ? -1 : 1;
-    const linePx = editorLineHeightPx(v);
-    const scrollerRect = v.scrollDOM.getBoundingClientRect();
-    const minY = scrollerRect.top + 1;
-    const maxY = scrollerRect.bottom - 1;
-    let targetY = direction === "up" ? coords.top - linePx * 0.6 : coords.bottom + linePx * 0.6;
+    const adjacentNumber = currentLine.number + step;
 
-    for (let i = 0; i < 80; i += 1) {
-      if (targetY < minY) {
-        if (v.scrollDOM.scrollTop <= 0) break;
-        v.scrollDOM.scrollTop = Math.max(0, v.scrollDOM.scrollTop - linePx);
-        targetY = minY + linePx * 0.5;
-      } else if (targetY > maxY) {
-        v.scrollDOM.scrollTop += linePx;
-        targetY = maxY - linePx * 0.5;
-      }
-
-      const head = visualLineStartAtY(v, targetY);
-      if (head === null) break;
-      const line = v.state.doc.lineAt(head);
-      if (!isSkippableLine(line.text) && line.text.trim()) {
-        v.dispatch({
-          selection: { anchor: extend ? selection.anchor : head, head },
-          effects: cursorScrollEffect(v, head)
-        });
-        return true;
-      }
-      targetY += step * linePx;
+    if (adjacentNumber < 1 || adjacentNumber > doc.lines) {
+      runWithCursorScroll(v, move);
+      return true;
     }
 
-    const fallbackHead = direction === "up" ? 0 : v.state.doc.length;
-    v.dispatch({
-      selection: { anchor: extend ? selection.anchor : fallbackHead, head: fallbackHead },
-      effects: cursorScrollEffect(v, fallbackHead)
-    });
+    const adjacentLine = doc.line(adjacentNumber);
+    if (!isSrtTimestampLine(adjacentLine.text)) {
+      runWithCursorScroll(v, move);
+      return true;
+    }
+
+    const column = selection.head - currentLine.from;
+    for (let lineNumber = adjacentNumber + step; lineNumber >= 1 && lineNumber <= doc.lines; lineNumber += step) {
+      const line = doc.line(lineNumber);
+      if (isSrtTimestampLine(line.text) || !line.text.trim()) continue;
+      const head = line.from + Math.min(column, line.length);
+      v.dispatch({
+        selection: { anchor: extend ? selection.anchor : head, head },
+        effects: cursorScrollEffect(v, head)
+      });
+      return true;
+    }
+
     return true;
   }
-
-  function toggleFollowMode(v: EditorView) {
-    if (followTimer) {
-      clearInterval(followTimer);
-      followTimer = null;
-      return true;
-    }
-
-    followTimer = setInterval(() => {
-      if (!view || editorMode !== "normal") {
-        if (followTimer) clearInterval(followTimer);
-        followTimer = null;
-        return;
-      }
-      const before = view.state.selection.main.head;
-      moveByWordCount(view, true, 1);
-      if (view.state.selection.main.head === before || before >= view.state.doc.length) {
-        if (followTimer) clearInterval(followTimer);
-        followTimer = null;
-      }
-    }, 520);
-
-    moveByWordCount(v, true, 1);
-    return true;
-  }
-
-  function handleCapsLockNavigation(v: EditorView, event: KeyboardEvent) {
-    if (
-      editorMode !== "normal" ||
-      !event.getModifierState("CapsLock") ||
-      event.ctrlKey ||
-      event.metaKey ||
-      event.altKey
-    ) return false;
-
-    const key = event.key.toLowerCase();
-    const extend = event.shiftKey;
-    if (key === "h" || key === "a") return moveByWordCount(v, false, 3, extend);
-    if (key === "l" || key === "d") return moveByWordCount(v, true, 3, extend);
-    if (key === "k" || key === "w") return moveVisualLineSkippingSrt(v, "up", extend);
-    if (key === "j" || key === "s") return moveVisualLineSkippingSrt(v, "down", extend);
-    return false;
-  }
-
-  const capsLockNavigationBehavior = EditorView.domEventHandlers({
-    keydown(event, v) {
-      if (!handleCapsLockNavigation(v, event)) return false;
-      event.preventDefault();
-      event.stopPropagation();
-      return true;
-    }
-  });
-
-  const tabScrollBehavior = EditorView.domEventHandlers({
-    keydown(event, v) {
-      if (event.key !== "Tab" || event.ctrlKey || event.metaKey || event.altKey) return false;
-      event.preventDefault();
-      event.stopPropagation();
-      scrollCursorIntoView(v, true);
-      return true;
-    }
-  });
 
   // Custom keymap — all app-specific bindings
   function buildKeymap() {
@@ -4119,43 +2696,21 @@ ${body}
       (v: EditorView) => editorMode === "normal" ? fn(v) : false;
 
     return Prec.high(keymap.of([
-      // Escape closes help first, otherwise returns to normal
-      { key: "Escape", run: () => { if (closeHelpFromShortcut()) return true; setMode("normal"); return true; } },
-      // Always: F2 toggles edit mode
-      { key: "F2", run: v => { setMode(editorMode === "insert" ? "normal" : "insert"); return true; } },
+      // Always: Escape returns to normal
+      { key: "Escape", run: v => { setMode("normal"); return true; } },
+      // Always: F2 enters edit
+      { key: "F2", run: v => { setMode("insert"); return true; } },
       { key: "F1", run: () => { showHelp = !showHelp; return true; } },
-      { key: "Tab", run: normal(v => { scrollCursorIntoView(v, true); return true; }) },
-      { key: "q", run: normal(v => cycleAnnotationColorOrStyle(v, -1)) },
-      { key: "e", run: normal(v => cycleAnnotationColorOrStyle(v, +1)) },
-      { key: "r", run: normal(() => { cycleAudioRate(); return true; }) },
-      { key: "f", run: normal(v => toggleFollowMode(v)) },
-      { key: "i", run: normal(v => cycleAnnotationColorOrStyle(v, -1)) },
-      { key: "o", run: normal(v => cycleAnnotationColorOrStyle(v, +1)) },
-      { any: (v, event) => handleCapsLockNavigation(v, event) },
-      {
-        any: (v, event) => {
-          if (
-            editorMode !== "normal" ||
-            event.key.length !== 1 ||
-            event.ctrlKey ||
-            event.metaKey ||
-            event.altKey
-          ) return false;
-          if (event.key === "0") return applyBoxAnnotationStyle(v);
-          const style = styleNumberForKey(event.key);
-          return style === null ? false : setAnnotationColorOrStyle(v, style);
-        }
-      },
 
       // Normal-mode only: Navigation
-      { key: "ArrowLeft",        run: normal(v => runLeftWithCursorScroll(v, cursorCharLeft)) },
-      { key: "ArrowRight",       run: normal(v => runWithCursorScroll(v, cursorCharRight)) },
-      { key: "ArrowUp",          run: normal(v => moveVisualLineSkippingSrt(v, "up")) },
-      { key: "ArrowDown",        run: normal(v => moveVisualLineSkippingSrt(v, "down")) },
-      { key: "Shift-ArrowLeft",  run: normal(v => runLeftWithCursorScroll(v, selectCharLeft)) },
-      { key: "Shift-ArrowRight", run: normal(v => runWithCursorScroll(v, selectCharRight)) },
-      { key: "Shift-ArrowUp",    run: normal(v => moveVisualLineSkippingSrt(v, "up", true)) },
-      { key: "Shift-ArrowDown",  run: normal(v => moveVisualLineSkippingSrt(v, "down", true)) },
+      { key: "ArrowLeft",        run: normal(v => { cursorCharLeft(v);  return true; }) },
+      { key: "ArrowRight",       run: normal(v => { cursorCharRight(v); return true; }) },
+      { key: "ArrowUp",          run: normal(v => moveLineSkippingSrt(v, "up")) },
+      { key: "ArrowDown",        run: normal(v => moveLineSkippingSrt(v, "down")) },
+      { key: "Shift-ArrowLeft",  run: normal(v => { selectCharLeft(v);  return true; }) },
+      { key: "Shift-ArrowRight", run: normal(v => { selectCharRight(v); return true; }) },
+      { key: "Shift-ArrowUp",    run: normal(v => moveLineSkippingSrt(v, "up", true)) },
+      { key: "Shift-ArrowDown",  run: normal(v => moveLineSkippingSrt(v, "down", true)) },
       { key: "Ctrl-ArrowLeft",        run: normal(v => moveByWordCount(v, false, 1)) },
       { key: "Ctrl-ArrowRight",       run: normal(v => moveByWordCount(v, true, 1)) },
       { key: "Ctrl-ArrowUp",          run: normal(v => paragraphBoundary(v, "start")) },
@@ -4164,72 +2719,58 @@ ${body}
       { key: "Shift-Ctrl-ArrowRight", run: normal(v => moveByWordCount(v, true, 1, true)) },
       { key: "Shift-Ctrl-ArrowUp",    run: normal(v => paragraphBoundary(v, "start", true)) },
       { key: "Shift-Ctrl-ArrowDown",  run: normal(v => paragraphBoundary(v, "end", true)) },
-      { key: "h", run: normal(v => runLeftWithCursorScroll(v, cursorCharLeft)) },
-      { key: "j", run: normal(v => moveVisualLineSkippingSrt(v, "down")) },
-      { key: "k", run: normal(v => moveVisualLineSkippingSrt(v, "up")) },
-      { key: "l", run: normal(v => runWithCursorScroll(v, cursorCharRight)) },
-      { key: "Ctrl-h", run: normal(v => visualLineBoundary(v, "start")) },
+      { key: "h", run: normal(v => { cursorCharLeft(v);  return true; }) },
+      { key: "j", run: normal(v => moveLineSkippingSrt(v, "down")) },
+      { key: "k", run: normal(v => moveLineSkippingSrt(v, "up")) },
+      { key: "l", run: normal(v => { cursorCharRight(v); return true; }) },
+      { key: "Ctrl-h", run: normal(v => moveByWordCount(v, false, 1)) },
       { key: "Ctrl-j", run: normal(v => paragraphBoundary(v, "end")) },
       { key: "Ctrl-k", run: normal(v => paragraphBoundary(v, "start")) },
-      { key: "Ctrl-l", run: normal(v => visualLineBoundary(v, "end")) },
-      { key: "w", run: normal(v => moveVisualLineSkippingSrt(v, "up")) },
-      { key: "s", run: normal(v => moveVisualLineSkippingSrt(v, "down")) },
+      { key: "Ctrl-l", run: normal(v => moveByWordCount(v, true, 1)) },
+      { key: "w", run: normal(v => moveLineSkippingSrt(v, "up")) },
+      { key: "s", run: normal(v => moveLineSkippingSrt(v, "down")) },
       { key: "a", run: normal(v => moveByWordCount(v, false, 1)) },
       { key: "d", run: normal(v => moveByWordCount(v, true, 1)) },
       { key: "Ctrl-w", run: normal(v => paragraphBoundary(v, "start")) },
       { key: "Ctrl-s", run: normal(v => paragraphBoundary(v, "end")) },
-      { key: "Ctrl-a", run: normal(v => visualLineBoundary(v, "start")) },
-      { key: "Ctrl-d", run: normal(v => visualLineBoundary(v, "end")) },
+      { key: "Ctrl-a", run: normal(v => moveByWordCount(v, false, 5)) },
+      { key: "Ctrl-d", run: normal(v => moveByWordCount(v, true, 5)) },
       // Shift variants extend selection
-      { key: "H", run: normal(v => runLeftWithCursorScroll(v, selectCharLeft)) },
-      { key: "J", run: normal(v => moveVisualLineSkippingSrt(v, "down", true)) },
-      { key: "K", run: normal(v => moveVisualLineSkippingSrt(v, "up", true)) },
-      { key: "L", run: normal(v => runWithCursorScroll(v, selectCharRight)) },
-      { key: "Shift-Ctrl-h", run: normal(v => visualLineBoundary(v, "start", true)) },
+      { key: "H", run: normal(v => { selectCharLeft(v);  return true; }) },
+      { key: "J", run: normal(v => moveLineSkippingSrt(v, "down", true)) },
+      { key: "K", run: normal(v => moveLineSkippingSrt(v, "up", true)) },
+      { key: "L", run: normal(v => { selectCharRight(v); return true; }) },
+      { key: "Shift-Ctrl-h", run: normal(v => moveByWordCount(v, false, 1, true)) },
       { key: "Shift-Ctrl-j", run: normal(v => paragraphBoundary(v, "end", true)) },
       { key: "Shift-Ctrl-k", run: normal(v => paragraphBoundary(v, "start", true)) },
-      { key: "Shift-Ctrl-l", run: normal(v => visualLineBoundary(v, "end", true)) },
-      { key: "W", run: normal(v => moveVisualLineSkippingSrt(v, "up", true)) },
-      { key: "S", run: normal(v => moveVisualLineSkippingSrt(v, "down", true)) },
+      { key: "Shift-Ctrl-l", run: normal(v => moveByWordCount(v, true, 1, true)) },
+      { key: "W", run: normal(v => moveLineSkippingSrt(v, "up", true)) },
+      { key: "S", run: normal(v => moveLineSkippingSrt(v, "down", true)) },
       { key: "A", run: normal(v => moveByWordCount(v, false, 1, true)) },
       { key: "D", run: normal(v => moveByWordCount(v, true, 1, true)) },
       { key: "Shift-Ctrl-w", run: normal(v => paragraphBoundary(v, "start", true)) },
       { key: "Shift-Ctrl-s", run: normal(v => paragraphBoundary(v, "end", true)) },
-      { key: "Shift-Ctrl-a", run: normal(v => visualLineBoundary(v, "start", true)) },
-      { key: "Shift-Ctrl-d", run: normal(v => visualLineBoundary(v, "end", true)) },
+      { key: "Shift-Ctrl-a", run: normal(v => moveByWordCount(v, false, 5, true)) },
+      { key: "Shift-Ctrl-d", run: normal(v => moveByWordCount(v, true, 5, true)) },
       // Normal-mode only: Annotation actions
-      {
-        any: (_v, event) => {
-          if (!event.altKey || event.ctrlKey || event.metaKey || !isSpaceKey(event)) return false;
-          toggleMediaPlayback();
-          return true;
-        }
-      },
       { key: "Space",  run: normal(v => wrapSelectionOrWord(v, currentStyle)) },
       { key: "Enter",  run: normal(v => handleEnterInAnnotationMode(v)) },
-      { key: "Delete", run: normal(v => { removeAnnotation(v); return true; }) },
-      { key: "Backspace", run: normal(v => { removeAnnotation(v); return true; }) },
+      { key: "x",      run: normal(v => removeAnnotation(v)) },
+      { key: "q",      run: normal(v => { if (!cycleAnnotationColor(v, -1)) cycleStyle(-1); return true; }) },
+      { key: "e",      run: normal(v => { if (!cycleAnnotationColor(v, +1)) cycleStyle(+1); return true; }) },
+      { key: "n",      run: normal(v => { if (!cycleAnnotationColor(v, +1)) cycleStyle(+1); return true; }) },
+      { key: "N",      run: normal(v => { if (!cycleAnnotationColor(v, -1)) cycleStyle(-1); return true; }) },
       // Undo/redo (both modes)
       { key: "u",      run: normal(v => undo(v)) },
       { key: "U",      run: normal(v => redo(v)) },
       { key: "Ctrl-z", run: v => undo(v) },
       { key: "Ctrl-y", run: v => redo(v) },
       { key: "Ctrl-Z", run: v => redo(v) },
-      { key: "?",      run: () => { if (closeHelpFromShortcut()) return true; if (editorMode !== "normal") return false; showHelp = true; return true; } },
+      { key: "?",      run: normal(() => { showHelp = !showHelp; return true; }) },
       { key: "Alt-r", run: () => { cycleAudioRate(); return true; } },
-      { key: "Alt-Space",  run: () => { toggleMediaPlayback(); return true; } },
-      { key: "Alt-ArrowLeft",  run: () => { seekAudio(-mediaSeekSeconds); return true; } },
-      { key: "Alt-ArrowRight", run: () => { seekAudio(mediaSeekSeconds); return true; } },
-      { key: "Alt-a", run: () => { seekAudio(-mediaSeekSeconds); return true; } },
-      { key: "Alt-h", run: () => { seekAudio(-mediaSeekSeconds); return true; } },
-      { key: "Alt-d", run: () => { seekAudio(mediaSeekSeconds); return true; } },
-      { key: "Alt-l", run: () => { seekAudio(mediaSeekSeconds); return true; } },
-      { key: "Alt-n", run: () => { jumpToAdjacentAnnotation(1); return true; } },
-      { key: "Alt-p", run: () => { jumpToAdjacentAnnotation(-1); return true; } },
-      { key: "Alt-w", run: v => { toggleAssociatedSrtPlayback(v); return true; } },
-      { key: "Alt-k", run: v => { toggleAssociatedSrtPlayback(v); return true; } },
-      { key: "Alt-s", run: () => { toggleMediaPlayback(); return true; } },
-      { key: "Alt-j", run: () => { toggleMediaPlayback(); return true; } },
+      { key: "Alt-Space",  run: () => { toggleAudioPlayback(); return true; } },
+      { key: "Alt-ArrowLeft",  run: () => { seekAudio(-10); return true; } },
+      { key: "Alt-ArrowRight", run: () => { seekAudio(10); return true; } },
       {
         any: (_view, event) =>
           editorMode === "normal" &&
@@ -4244,9 +2785,6 @@ ${body}
   function baseExtensions(): Extension[] {
     return [
       dblClickBehavior,
-      capsLockNavigationBehavior,
-      tabScrollBehavior,
-      centerCurrentLinePlugin,
       EditorView.lineWrapping,
       lineNumbers({
         formatNumber: formatEditorLineNumber,
@@ -4263,14 +2801,11 @@ ${body}
         }
       }),
       drawSelection(),
-      editableCompartment.of(EditorView.editable.of(editorMode === "insert")),
-      EditorView.contentAttributes.of({ tabindex: "0" }),
-      Prec.high(EditorView.domEventHandlers({ keydown: event => throttleAnnotateRightRepeat(event) })),
       history(),
       indentOnInput(),
       bracketMatching(),
       highlightActiveLineGutter(),
-      themeCompartment.of(buildThemeExtensions(getTheme(themeMode))),
+      syntaxHighlighting(gruvboxHighlight),
       buildKeymap(),
       keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
       markdown({ base: markdownLanguage }),
@@ -4280,35 +2815,24 @@ ${body}
       blockquoteLinePlugin,
       columnGuidePlugin,
       visualLinePlugin,
-      hideEditorCursorPlugin,
+      buildHighlightDecorator(),
       annotationTooltipField,
       EditorView.theme({
         ".cm-tooltip": { background: "transparent", border: "none" },
         ".cm-annotation-bubble": { display: "block" }
       }),
+      buildGruvboxTheme()
     ];
   }
 
   onMount(() => {
     const onWindowKeydown = (event: KeyboardEvent) => handleWindowKeydown(event);
     window.addEventListener("keydown", onWindowKeydown);
-    ttsAvailable = "speechSynthesis" in window && "SpeechSynthesisUtterance" in window;
-    const synth = speechSynth();
-    const onVoicesChanged = () => refreshTtsVoices();
-    if (synth) {
-      refreshTtsVoices();
-      synth.addEventListener("voiceschanged", onVoicesChanged);
-    }
     const editorResizeObserver = new ResizeObserver(() => updateEditorViewportHeight());
-    openAiApiKey = loadOpenAiApiKey();
-    rememberOpenAiApiKey = Boolean(openAiApiKey);
-    const initialDoc = localStorage.getItem("cm6-buffer") ?? starterDoc();
-    const initialCursor = firstVisibleDocumentPosition(initialDoc);
 
     view = new EditorView({
       state: EditorState.create({
-        doc: initialDoc,
-        selection: { anchor: initialCursor },
+        doc: localStorage.getItem("cm6-buffer") ?? starterDoc(),
         extensions: [...baseExtensions()]
       }),
       parent: editorEl
@@ -4323,12 +2847,8 @@ ${body}
 
     return () => {
       window.removeEventListener("keydown", onWindowKeydown);
-      synth?.removeEventListener("voiceschanged", onVoicesChanged);
       finishSummaryResize?.();
-      finishRightPaddingDrag?.();
-      if (followTimer) clearInterval(followTimer);
       editorResizeObserver.disconnect();
-      resetTtsState();
       clearAudioTarget();
       view?.destroy();
     };
@@ -4338,242 +2858,23 @@ ${body}
 <div
   class="app"
   style={`
-    --bg: ${activeTheme.bg}; --bg-soft: ${activeTheme.bgSoft}; --bg-hard: ${activeTheme.bgHard};
-    --bg-alt: ${activeTheme.bgAlt}; --border: ${activeTheme.border}; --fg: ${activeTheme.fg};
+    --bg: ${gruvbox.bg}; --bg-soft: ${gruvbox.bgSoft}; --bg-hard: ${gruvbox.bgHard};
+    --bg-alt: ${gruvbox.bgAlt}; --border: ${gruvbox.border}; --fg: ${gruvbox.fg};
     --internal-border: transparent;
-    --fg-muted: ${activeTheme.fgMuted}; --yellow: ${activeTheme.yellow}; --green: ${activeTheme.green};
-    --blue: ${activeTheme.blue}; --orange: ${activeTheme.orange}; --selection: ${activeTheme.selection};
+    --fg-muted: ${gruvbox.fgMuted}; --yellow: ${gruvbox.yellow}; --green: ${gruvbox.green};
+    --blue: ${gruvbox.blue}; --orange: ${gruvbox.orange}; --selection: ${gruvbox.selection};
     --active-style-color: ${currentStyleColor};
     --active-line-annotate: color-mix(in srgb, var(--active-style-color) 34%, transparent);
-    --active-line-edit: ${activeTheme.activeLineEdit};
+    --active-line-edit: #2f4a3aaa;
     --active-gutter-annotate: color-mix(in srgb, var(--active-style-color) 58%, var(--bg-hard));
-    --active-gutter-edit: ${activeTheme.activeGutterEdit};
+    --active-gutter-edit: #2f4a3a;
   `}
 >
   <div class="toolbar">
     <div class="title">textAnnotate</div>
     <span class="subtitle">paste or load .srt, .txt, .md, .docx, .pdf</span>
-    <button
-      class="toolbar-btn settings-btn"
-      class:active={settingsOpen}
-      on:click={() => settingsOpen = !settingsOpen}
-      title="Settings"
-      aria-label="Settings"
-      aria-expanded={settingsOpen}
-    >⚙</button>
     <button class="toolbar-btn help-btn" on:click={() => showHelp = !showHelp} title="Keyboard shortcuts (?)">?</button>
   </div>
-
-  {#if settingsOpen}
-    <div class="settings-popover" role="dialog" aria-label="Settings">
-      <div class="settings-tabs" role="tablist" aria-label="Settings sections">
-        <button type="button" class:active={settingsTab === "markup"} on:click={() => settingsTab = "markup"}>Markup</button>
-        <button type="button" class:active={settingsTab === "layout"} on:click={() => settingsTab = "layout"}>Layout</button>
-        <button type="button" class:active={settingsTab === "transcribe"} on:click={() => settingsTab = "transcribe"}>Transcribe</button>
-      </div>
-
-      {#if settingsTab === "markup"}
-        <div class="settings-panel">
-          <section class="settings-section">
-            <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">↵</span><span>Import</span></div>
-            <label class="settings-toggle-row">
-              <span class="settings-control-icon" aria-hidden="true">¶</span>
-              <span>Divide imported sentences into lines</span>
-              <input type="checkbox" bind:checked={divideImportSentences} />
-            </label>
-          </section>
-          <section class="settings-section">
-            <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">`</span><span>Markup Visibility</span></div>
-            <div class="settings-radio-group" aria-label="Markup visibility">
-              <label class="settings-choice-row">
-                <span class="settings-control-icon" aria-hidden="true">✓</span>
-                <span>Clean</span>
-                <input type="radio" name="annotationMode" value="clean"
-                  checked={annotationMode === "clean"}
-                  on:change={() => { annotationMode = "clean"; view?.dispatch({}); view?.focus(); }} />
-              </label>
-              <label class="settings-choice-row">
-                <span class="settings-control-icon" aria-hidden="true">•</span>
-                <span>Raw (current)</span>
-                <input type="radio" name="annotationMode" value="raw"
-                  checked={annotationMode === "raw"}
-                  on:change={() => { annotationMode = "raw"; view?.dispatch({}); view?.focus(); }} />
-              </label>
-              <label class="settings-choice-row">
-                <span class="settings-control-icon" aria-hidden="true">≡</span>
-                <span>Raw (all)</span>
-                <input type="radio" name="annotationMode" value="all"
-                  checked={annotationMode === "all"}
-                  on:change={() => { annotationMode = "all"; view?.dispatch({}); view?.focus(); }} />
-              </label>
-            </div>
-          </section>
-        </div>
-      {:else if settingsTab === "layout"}
-        <div class="settings-panel">
-          <div class="layout-list">
-            <section class="layout-panel-section">
-              <div class="layout-panel-heading"><span class="font-icon" aria-hidden="true">Aa</span><span>Typography</span></div>
-              <div class="layout-stepper-grid">
-                <div class="layout-stepper">
-                  <span class="layout-control-icon" aria-hidden="true">↕</span>
-                  <span class="layout-stepper-label">Line height</span>
-                  <span class="layout-stepper-value">{lineHeight.toFixed(2)}</span>
-                  <span class="layout-stepper-buttons">
-                    <button type="button" on:click={() => adjustLayoutValue("lineHeight", -1)} aria-label="Decrease line height">−</button>
-                    <button type="button" on:click={() => adjustLayoutValue("lineHeight", 1)} aria-label="Increase line height">+</button>
-                  </span>
-                </div>
-                <div class="layout-stepper">
-                  <span class="layout-control-icon" aria-hidden="true">T</span>
-                  <span class="layout-stepper-label">Font size</span>
-                  <span class="layout-stepper-value">{fontSize}px</span>
-                  <span class="layout-stepper-buttons">
-                    <button type="button" on:click={() => adjustLayoutValue("fontSize", -1)} aria-label="Decrease font size">−</button>
-                    <button type="button" on:click={() => adjustLayoutValue("fontSize", 1)} aria-label="Increase font size">+</button>
-                  </span>
-                </div>
-                <div class="layout-stepper">
-                  <span class="layout-control-icon" aria-hidden="true">¶</span>
-                  <span class="layout-stepper-label">Paragraph gap</span>
-                  <span class="layout-stepper-value">{paragraphSpacing.toFixed(2)}</span>
-                  <span class="layout-stepper-buttons">
-                    <button type="button" on:click={() => adjustLayoutValue("paragraphSpacing", -1)} aria-label="Decrease paragraph spacing">−</button>
-                    <button type="button" on:click={() => adjustLayoutValue("paragraphSpacing", 1)} aria-label="Increase paragraph spacing">+</button>
-                  </span>
-                </div>
-              </div>
-            </section>
-
-            <section class="layout-panel-section">
-              <div class="layout-panel-heading"><span class="font-icon" aria-hidden="true">▣</span><span>Editor Frame</span></div>
-              <label class="layout-toggle-row">
-                <span class="layout-control-icon" aria-hidden="true">◎</span>
-                <span>Center current line</span>
-                <input
-                  type="checkbox"
-                  bind:checked={centerCurrentLine}
-                  on:change={() => view && scrollCursorIntoView(view)}
-                />
-              </label>
-              <label class="layout-range-row">
-                <span class="layout-control-icon" aria-hidden="true">⇤</span>
-                <span class="layout-range-label">Left margin</span>
-                <input type="range" min="0" max="400" step="2" bind:value={padLeft} class="slider" aria-label="Left padding" />
-                <span class="layout-range-value">{padLeft}px</span>
-              </label>
-              <label class="layout-range-row">
-                <span class="layout-control-icon" aria-hidden="true">⇥</span>
-                <span class="layout-range-label">Right border</span>
-                <input type="range" min="0" max="720" step="2" bind:value={padRight} class="slider" aria-label="Right padding" />
-                <span class="layout-range-value">{padRight}px</span>
-              </label>
-              <label class="layout-range-row">
-                <span class="layout-control-icon" aria-hidden="true">↥</span>
-                <span class="layout-range-label">Top margin</span>
-                <input type="range" min="0" max="400" step="2" bind:value={padTop} class="slider" aria-label="Top padding" />
-                <span class="layout-range-value">{padTop}px</span>
-              </label>
-              <label class="layout-range-row">
-                <span class="layout-control-icon" aria-hidden="true">→</span>
-                <span class="layout-range-label">Right hold delay</span>
-                <input
-                  type="range"
-                  min="80"
-                  max="800"
-                  step="20"
-                  bind:value={annotateRightRepeatIntervalMs}
-                  on:input={persistAnnotateRightRepeatInterval}
-                  class="slider"
-                  aria-label="Right arrow hold repeat delay"
-                />
-                <span class="layout-range-value">{annotateRightRepeatIntervalMs}ms</span>
-              </label>
-            </section>
-
-            <section class="layout-panel-section">
-              <div class="layout-panel-heading"><span class="font-icon" aria-hidden="true">◫</span><span>Notes</span></div>
-              <div class="layout-segment-row">
-                <span class="layout-control-icon" aria-hidden="true">≡</span>
-                <span class="layout-range-label">Alignment</span>
-                <div class="layout-segment-control" role="group" aria-label="Notes alignment">
-                  <button type="button" class:active={blockquoteAlign === "left"} disabled={!blockquoteActive} on:click={() => view && updateCurrentBlockquote(view, { align: "left" })} aria-label="Align notes left">⇤</button>
-                  <button type="button" class:active={blockquoteAlign === "center"} disabled={!blockquoteActive} on:click={() => view && updateCurrentBlockquote(view, { align: "center" })} aria-label="Align notes center">↔</button>
-                  <button type="button" class:active={blockquoteAlign === "right"} disabled={!blockquoteActive} on:click={() => view && updateCurrentBlockquote(view, { align: "right" })} aria-label="Align notes right">⇥</button>
-                </div>
-              </div>
-              <label class="layout-range-row">
-                <span class="layout-control-icon" aria-hidden="true">▰</span>
-                <span class="layout-range-label">Background width</span>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="1"
-                  class="slider"
-                  aria-label="Notes width"
-                  disabled={!blockquoteActive}
-                  value={blockquoteBgWidth}
-                  on:input={e => {
-                    if (view) updateCurrentBlockquote(view, { width: +(e.target as HTMLInputElement).value });
-                  }}
-                />
-                <span class="layout-range-value">{blockquoteBgWidth}%</span>
-              </label>
-            </section>
-          </div>
-        </div>
-      {:else if settingsTab === "transcribe"}
-        <div class="settings-panel">
-          <section class="settings-section">
-            <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">⎋</span><span>Connection</span></div>
-            <label class="settings-field">
-              <span class="settings-field-label">OpenAI API key</span>
-              <input
-                class="settings-input"
-                type="password"
-                autocomplete="off"
-                placeholder="sk-..."
-                value={openAiApiKey}
-                on:input={handleOpenAiKeyInput}
-              />
-            </label>
-            <label class="settings-toggle-row">
-              <span class="settings-control-icon" aria-hidden="true">◎</span>
-              <span>Remember key on this device</span>
-              <input type="checkbox" checked={rememberOpenAiApiKey} on:change={toggleRememberOpenAiKey} />
-            </label>
-          </section>
-          <section class="settings-section">
-            <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">▣</span><span>Transcription</span></div>
-            <label class="settings-field">
-              <span class="settings-field-label">Model</span>
-              <select class="settings-input" bind:value={transcriptionModel}>
-                <option value="whisper-1">whisper-1 (timestamps)</option>
-                <option value="gpt-4o-transcribe">gpt-4o-transcribe</option>
-                <option value="gpt-4o-mini-transcribe">gpt-4o-mini-transcribe</option>
-              </select>
-            </label>
-            <label class="settings-field">
-              <span class="settings-field-label">Prompt</span>
-              <textarea
-                class="settings-input settings-textarea"
-                rows="3"
-                bind:value={transcriptionPrompt}
-                placeholder="Names, terms, or context"
-              ></textarea>
-            </label>
-            {#if transcriptionStatus}
-              <div class="transcribe-status">{transcriptionStatus}</div>
-            {/if}
-            {#if transcriptionError}
-              <div class="transcribe-error">{transcriptionError}</div>
-            {/if}
-          </section>
-        </div>
-      {/if}
-    </div>
-  {/if}
 
   <div
     class="main"
@@ -4587,12 +2888,21 @@ ${body}
       --summary-content-pad-left: ${summaryFullscreen ? padLeft : 0}px;
       --summary-content-pad-right: ${summaryFullscreen ? padRight : 0}px;
       --summary-content-pad-top: ${summaryFullscreen ? padTop : 0}px;
-      --summary-content-pad-bottom: ${summaryFullscreen ? editorBottomPadding : 0}px;
+      --summary-content-pad-bottom: ${summaryFullscreen ? padBottom : 0}px;
       --summary-line-height: ${summaryFullscreen ? lineHeight : 1.28};
       --summary-paragraph-spacing: ${summaryFullscreen ? paragraphSpacing : 0}em;
     `}
   >
     <div class="sidebar">
+      <div class="sidebar-section">
+        <input type="file" accept=".srt,.txt,.md,.docx,.pdf,.mp3,.wav,.m4a,.ogg,.oga,.webm,.aac,.flac,.mp4,.mov,.mkv" multiple style="display:none" bind:this={fileInput} on:change={loadFile} />
+        <button class="sidebar-label load-btn" on:click={() => fileInput.click()}>LOAD FILE(S)...</button>
+        <div class="file-actions">
+          <button class="sidebar-label load-btn" on:click={saveDocument}>Save</button>
+          <button class="sidebar-label load-btn" on:click={exportCleanHtml}>Export</button>
+        </div>
+      </div>
+
       <div class="sidebar-section">
         <label class="mode-switch" aria-label="Switch between Annotate and Edit mode">
           <span class:active={editorMode === "normal"}>Annotate</span>
@@ -4606,89 +2916,73 @@ ${body}
           </span>
           <span class:active={editorMode === "insert"}>Edit</span>
         </label>
-        <button class="sidebar-label load-btn theme-toggle" on:click={toggleThemeMode}>Theme: {activeThemeName}</button>
       </div>
 
       <div class="sidebar-section">
-        <input type="file" accept=".srt,.txt,.md,.docx,.pdf,.mp3,.wav,.m4a,.ogg,.oga,.webm,.aac,.flac,.mp4,.mov,.mkv" multiple style="display:none" bind:this={fileInput} on:change={loadFile} />
-        <button class="sidebar-label load-btn" on:click={() => fileInput.click()}>LOAD FILE(S)...</button>
-        <div class="file-actions">
-          <button class="sidebar-label load-btn" on:click={saveDocument}>Save</button>
-          <button class="sidebar-label load-btn" on:click={exportCleanHtml}>Export</button>
-          <button class="sidebar-label load-btn" on:click={transcribeLoadedAudio} disabled={transcriptionBusy}>
-            {transcriptionBusy ? "Transcribing..." : "Transcribe"}
-          </button>
+        <div class="sidebar-label">Layout</div>
+        <div class="slider-row" data-tooltip="Left padding"><span class="slider-lbl">L</span><input type="range" min="0" max="400" step="4" bind:value={padLeft}   class="slider" aria-label="Left padding" /><span class="slider-val">{padLeft}</span></div>
+        <div class="slider-row" data-tooltip="Right padding"><span class="slider-lbl">R</span><input type="range" min="0" max="400" step="4" bind:value={padRight}  class="slider" aria-label="Right padding" /><span class="slider-val">{padRight}</span></div>
+        <div class="slider-row" data-tooltip="Top padding"><span class="slider-lbl">T</span><input type="range" min="0" max="400" step="4" bind:value={padTop}    class="slider" aria-label="Top padding" /><span class="slider-val">{padTop}</span></div>
+        <div class="slider-row" data-tooltip="Bottom padding"><span class="slider-lbl">B</span><input type="range" min="0" max={Math.max(0, editorViewportHeight - 48)} step="4" bind:value={padBottom} class="slider" aria-label="Bottom padding" /><span class="slider-val">{padBottom}</span></div>
+        <div class="slider-row" data-tooltip="Line height"><span class="slider-lbl">LH</span><input type="range" min="1" max="3" step="0.05" bind:value={lineHeight} class="slider" aria-label="Line height" /><span class="slider-val">{lineHeight.toFixed(2)}</span></div>
+        <div class="slider-row" data-tooltip="Spacing after each line"><span class="slider-lbl">PS</span><input type="range" min="0" max="2" step="0.05" bind:value={paragraphSpacing} class="slider" aria-label="Paragraph spacing" /><span class="slider-val">{paragraphSpacing.toFixed(2)}</span></div>
+        <div class="slider-row" data-tooltip="Font size"><span class="slider-lbl">FS</span><input type="range" min="10" max="28" step="1" bind:value={fontSize} class="slider" aria-label="Font size" /><span class="slider-val">{fontSize}</span></div>
+        <div class="slider-row" data-tooltip="Notes alignment">
+          <span class="slider-lbl">A</span>
+          <input type="range" min="0" max="2" step="1" class="slider"
+            aria-label="Notes alignment"
+            disabled={!blockquoteActive}
+            value={blockquoteAlign === "left" ? 0 : blockquoteAlign === "center" ? 1 : 2}
+            on:input={e => {
+              const align = ["left", "center", "right"][+(e.target as HTMLInputElement).value] as BlockquoteAlign;
+              if (view) updateCurrentBlockquote(view, { align });
+            }} />
+          <span class="slider-val">{blockquoteAlign[0].toUpperCase()}</span>
         </div>
-        {#if transcriptionBusy || transcriptionStatus || transcriptionError}
-          <div class:transcribe-error={Boolean(transcriptionError)} class:transcribe-status={!transcriptionError}>
-            {transcriptionError || transcriptionStatus}
-          </div>
-        {/if}
+        <div class="slider-row" data-tooltip="Notes width">
+          <span class="slider-lbl">BG</span>
+          <input
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            class="slider"
+            aria-label="Notes width"
+            disabled={!blockquoteActive}
+            value={blockquoteBgWidth}
+            on:input={e => {
+              if (view) updateCurrentBlockquote(view, { width: +(e.target as HTMLInputElement).value });
+            }}
+          />
+          <span class="slider-val">{blockquoteBgWidth}</span>
+        </div>
       </div>
 
       <div class="sidebar-section">
-        <div class="sidebar-label">Annotation styles</div>
-        <div class="style-list sidebar-style-list">
-          <div class="style-row style-row-plain">
-            <span class="style-swatch" style={`background: ${styleColor(0)}`}></span>
-            <span class="style-name">Space. plain</span>
-          </div>
-          <div class="style-row style-row-plain">
-            <span class="style-swatch style-swatch-box" style={`border-color: ${styleColor(currentStyle)}; color: ${styleColor(currentStyle)}`}></span>
-            <span class="style-name">0. box counterpart</span>
-          </div>
-          {#each orderedHighlightStyles as style, index}
-            <div
-              class="style-row reorderable"
-              role="listitem"
-              class:drag-over={reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name}
-              class:drop-after={reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name && reorderDropTarget.after}
-              class:drop-before={reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name && !reorderDropTarget.after}
-              on:dragover={event => updateReorderDropTarget("style", style.name, event)}
-              on:drop={event => {
-                if (reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name) {
-                  event.preventDefault();
-                  commitStyleReorder(style.name, reorderDropTarget.after);
-                }
-                finishReorderDrag();
-              }}
-              on:dragend={finishReorderDrag}
-            >
-              <span class="style-swatch" style={`background: ${style.color}`}></span>
-              <span class="style-name">{index + 1}. {style.name}</span>
-              <span class="style-key-badge" title={`Shortcut key for ${style.name}`}>{styleKeyForName(style.name)}</span>
-              <button
-                class="reorder-handle"
-                type="button"
-                draggable="true"
-                aria-label={`Drag ${style.name} to reorder`}
-                title={`Drag ${style.name} to reorder`}
-                on:mousedown={event => event.stopPropagation()}
-                on:click={event => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                }}
-                on:dragstart={event => setReorderDragState("style", style.name, event)}
-              >↕</button>
-            </div>
-          {/each}
-        </div>
-        <div class="style-footer-actions">
-          <button class="style-reset-btn" type="button" on:click={resetStyleOrder}>Reset order</button>
-        </div>
+        <div class="sidebar-label">Display</div>
+        <label class="sidebar-toggle">
+          <input type="radio" name="annotationMode" value="clean"
+            checked={annotationMode === "clean"}
+            on:change={() => { annotationMode = "clean"; view?.dispatch({}); view?.focus(); }} />
+          Clean
+        </label>
+        <label class="sidebar-toggle">
+          <input type="radio" name="annotationMode" value="raw"
+            checked={annotationMode === "raw"}
+            on:change={() => { annotationMode = "raw"; view?.dispatch({}); view?.focus(); }} />
+          Raw (current)
+        </label>
+        <label class="sidebar-toggle">
+          <input type="radio" name="annotationMode" value="all"
+            checked={annotationMode === "all"}
+            on:change={() => { annotationMode = "all"; view?.dispatch({}); view?.focus(); }} />
+          Raw (all)
+        </label>
       </div>
 
     </div>
 
-    <div class="editor" bind:this={editorEl} style={`--editor-right-padding: ${padRight}px;`}>
-      <button
-        class="right-padding-handle"
-        type="button"
-        aria-label="Drag right text border"
-        title="Drag right text border"
-        on:pointerdown={startRightPaddingDrag}
-      ></button>
-    </div>
+    <div class="editor" bind:this={editorEl}></div>
 
     <aside class="summary-sidebar" class:collapsed={summaryCollapsed} class:fullscreen={summaryFullscreen} class:resizing={resizingSummarySidebar} aria-label="Annotation summary">
       {#if !summaryCollapsed && !summaryFullscreen}
@@ -4707,18 +3001,6 @@ ${body}
         {/if}
         <div class="summary-header-actions">
           {#if !summaryCollapsed}
-            {#if summaryGroupIds.length > 0}
-              <button
-                class="summary-icon-btn"
-                type="button"
-                title={summaryAllGroupsExpanded ? "Collapse all groups" : "Expand all groups"}
-                aria-label={summaryAllGroupsExpanded ? "Collapse all groups" : "Expand all groups"}
-                aria-pressed={summaryAllGroupsExpanded}
-                on:click={toggleAllSummaryCategories}
-              >
-                {summaryAllGroupsExpanded ? "−" : "+"}
-              </button>
-            {/if}
             <button
               class="summary-icon-btn"
               type="button"
@@ -4739,9 +3021,6 @@ ${body}
           >
             {summaryCollapsed ? "‹" : "›"}
           </button>
-          {#if !summaryCollapsed}
-            <button class="summary-export-btn" type="button" on:click={exportSummaryHtml}>EXPORT</button>
-          {/if}
         </div>
       </div>
       {#if summaryCollapsed}
@@ -4751,7 +3030,7 @@ ${body}
         {#if summaryItems.length === 0}
           <div class="summary-empty">No annotations</div>
         {:else}
-          {#each orderedSummarySections as section (section.id)}
+          {#each summarySections as section (section.id)}
             {#if section.kind === "item"}
               <div
                 class="summary-item"
@@ -4767,9 +3046,9 @@ ${body}
                       {#if editingSummaryTitleKey === section.item.id}
                         <input
                           class="summary-title-input"
-                          bind:this={summaryTitleInput}
                           bind:value={summaryTitleDraft}
                           aria-label="Annotation title"
+                          autofocus
                           on:click={event => event.stopPropagation()}
                           on:focus={event => (event.target as HTMLInputElement).select()}
                           on:blur={() => saveSummaryTitle([section.item])}
@@ -4814,24 +3093,11 @@ ${body}
             {:else}
               <div
                 class="summary-group-header"
-                class:reorderable={section.itemType === "annotation"}
                 class:open={expandedSummaryCategories[section.id]}
-                class:drag-over={section.itemType === "annotation" && reorderDropTarget?.kind === "summary" && reorderDropTarget.id === section.id}
-                class:drop-after={section.itemType === "annotation" && reorderDropTarget?.kind === "summary" && reorderDropTarget.id === section.id && reorderDropTarget.after}
-                class:drop-before={section.itemType === "annotation" && reorderDropTarget?.kind === "summary" && reorderDropTarget.id === section.id && !reorderDropTarget.after}
                 role="button"
                 tabindex="0"
                 aria-expanded={!!expandedSummaryCategories[section.id]}
                 on:click={() => toggleSummaryCategory(section.id)}
-                on:dragover={event => section.itemType === "annotation" && updateReorderDropTarget("summary", section.id, event)}
-                on:drop={event => {
-                  if (section.itemType === "annotation" && reorderDropTarget?.kind === "summary" && reorderDropTarget.id === section.id) {
-                    event.preventDefault();
-                    commitSummaryReorder(section.id, reorderDropTarget.after);
-                  }
-                  finishReorderDrag();
-                }}
-                on:dragend={event => section.itemType === "annotation" && finishReorderDrag()}
                 on:keydown={event => handleSummaryGroupKeydown(event, section)}
               >
                 {#if section.itemType === "blockquote"}
@@ -4842,9 +3108,9 @@ ${body}
                 {#if section.itemType === "annotation" && editingSummaryTitleKey === section.id}
                   <input
                     class="summary-title-input summary-group-title-input"
-                    bind:this={summaryTitleInput}
                     bind:value={summaryTitleDraft}
                     aria-label="Annotation group title"
+                    autofocus
                     on:click={event => event.stopPropagation()}
                     on:focus={event => (event.target as HTMLInputElement).select()}
                     on:blur={() => saveSummaryTitle(summaryAnnotationItems(section.items))}
@@ -4852,7 +3118,7 @@ ${body}
                   />
                 {:else if section.itemType === "annotation"}
                   <button
-                    class="summary-group-label summary-title-action summary-group-title-action"
+                    class="summary-group-label summary-title-action"
                     type="button"
                     on:click={event => startSummaryGroupTitleEdit(event, section)}
                     on:keydown={event => event.stopPropagation()}
@@ -4861,21 +3127,6 @@ ${body}
                   </button>
                 {:else}
                   <span class="summary-group-label">{section.label}</span>
-                {/if}
-                {#if section.itemType === "annotation"}
-                  <button
-                    class="reorder-handle"
-                    type="button"
-                    draggable="true"
-                    aria-label={`Drag ${section.label} to reorder`}
-                    title={`Drag ${section.label} to reorder`}
-                    on:mousedown={event => event.stopPropagation()}
-                    on:click={event => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                    }}
-                    on:dragstart={event => setReorderDragState("summary", section.id, event)}
-                  >↕</button>
                 {/if}
                 <span class="summary-group-count">{section.count}</span>
                 <span class="summary-group-chevron">›</span>
@@ -4896,9 +3147,9 @@ ${body}
                           {#if editingSummaryTitleKey === item.id}
                             <input
                               class="summary-title-input"
-                              bind:this={summaryTitleInput}
                               bind:value={summaryTitleDraft}
                               aria-label="Annotation title"
+                              autofocus
                               on:click={event => event.stopPropagation()}
                               on:focus={event => (event.target as HTMLInputElement).select()}
                               on:blur={() => saveSummaryTitle([item])}
@@ -4953,7 +3204,7 @@ ${body}
   {#if !summaryFullscreen}
     <div class="statusbar">
       <div class="status-left">
-        <span class="segment mode" style="color: {editorMode === 'insert' ? activeTheme.green : activeTheme.orange}">{editorModeLabel}</span>
+        <span class="segment mode" style="color: {editorMode === 'insert' ? gruvbox.green : gruvbox.orange}">{editorModeLabel}</span>
         <span class="segment">{selectionInfo}</span>
         <span class="segment">{wordCountInfo}</span>
         <span class="segment style" style="color: {currentStyleColor}">{styleLabel}</span>
@@ -4963,25 +3214,13 @@ ${body}
           <div class="audio-widget">
             <span class="audio-name">{audioFileName}</span>
             <span class="audio-sep">|</span>
-            <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(-mediaSeekSeconds)} title={`Back ${mediaSeekSeconds} seconds (Alt+A/H)`} aria-label={`Back ${mediaSeekSeconds} seconds`}>&lt;&lt;</button>
-            <button class="audio-glyph play" type="button" on:click={toggleAudioPlayback} title="Play / pause (Alt+Space)" aria-label="Play / pause">{audioPlaying ? "⏸" : "▶"}</button>
-            <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(mediaSeekSeconds)} title={`Forward ${mediaSeekSeconds} seconds (Alt+D/L)`} aria-label={`Forward ${mediaSeekSeconds} seconds`}>&gt;&gt;</button>
+            <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(-10)} title="Back 10 seconds" aria-label="Back 10 seconds">&lt;&lt;</button>
+            <button class="audio-glyph play" type="button" on:click={toggleAudioPlayback} title="Play / pause" aria-label="Play / pause">{audioPlaying ? "⏸" : "▶"}</button>
+            <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(10)} title="Forward 10 seconds" aria-label="Forward 10 seconds">&gt;&gt;</button>
             <span class="audio-sep">|</span>
-            <button class="audio-rate-text" type="button" on:click={cycleAudioRate} aria-label="Playback speed" title="Playback speed (Alt+R)">{audioRateText}</button>
+            <button class="audio-rate-text" type="button" on:click={cycleAudioRate} aria-label="Playback speed" title="Playback speed">{audioRateText}</button>
             <span class="audio-sep">|</span>
             <span class="audio-time">{formatAudioTime(audioCurrentTime)} / {formatAudioTime(audioDuration)}</span>
-          </div>
-        {:else if showTtsWidget}
-          <div class="audio-widget">
-            <span class="audio-name">TTS</span>
-            <span class="audio-sep">|</span>
-            <button class="audio-glyph" type="button" on:click={() => seekTtsAndPlay(-1)} title="Previous spoken chunk (Alt+A/H)" aria-label="Previous spoken chunk">&lt;&lt;</button>
-            <button class="audio-glyph play" type="button" on:click={toggleTtsPlayback} title="Play / pause TTS (Alt+Space)" aria-label="Play / pause TTS">{ttsSpeaking && !ttsPaused ? "⏸" : "▶"}</button>
-            <button class="audio-glyph" type="button" on:click={() => seekTtsAndPlay(1)} title="Next spoken chunk (Alt+D/L)" aria-label="Next spoken chunk">&gt;&gt;</button>
-            <span class="audio-sep">|</span>
-            <button class="audio-rate-text" type="button" on:click={cycleAudioRate} aria-label="TTS speed" title="TTS speed (Alt+R)">{audioRateText}</button>
-            <span class="audio-sep">|</span>
-            <span class="audio-time">{ttsProgressText}</span>
           </div>
         {/if}
       </div>
@@ -5001,10 +3240,6 @@ ${body}
       audioDuration = audioElement?.duration ?? 0;
       audioLoaded = true;
       if (audioElement) audioElement.playbackRate = audioRates[audioRateIndex];
-      audioPlaybackRate = audioElement?.playbackRate ?? audioRates[audioRateIndex];
-    }}
-    on:ratechange={() => {
-      audioPlaybackRate = audioElement?.playbackRate ?? audioPlaybackRate;
     }}
     on:timeupdate={() => {
       audioCurrentTime = audioElement?.currentTime ?? 0;
@@ -5075,10 +3310,6 @@ ${body}
         </div>
 
         <div class="pdf-modal-footer">
-          <label class="sidebar-toggle">
-            <input type="checkbox" bind:checked={divideImportSentences} />
-            Divide sentences into lines
-          </label>
           <span>{pdfIsParsing ? "Extracting text..." : `${pdfDraftText.length} characters`}</span>
           <button class="toolbar-btn load-confirm-btn" on:click={loadPdfDraft} disabled={pdfIsParsing}>Load text</button>
         </div>
@@ -5092,7 +3323,6 @@ ${body}
   :global(body) { background: var(--bg); font-family: "Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, monospace; }
 
   .app {
-    position: relative;
     height: 100vh;
     display: grid;
     grid-template-rows: auto 1fr auto auto;
@@ -5122,190 +3352,6 @@ ${body}
     color: var(--fg-muted);
     margin-left: auto;
     margin-right: 10px;
-  }
-
-  .settings-btn {
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    font-size: 14px;
-    line-height: 1;
-    background: transparent;
-  }
-
-  .settings-btn.active {
-    border-color: var(--orange);
-    color: var(--orange);
-  }
-
-  .settings-popover {
-    position: absolute;
-    top: 42px;
-    left: 12px;
-    z-index: 80;
-    width: min(420px, calc(100vw - 24px));
-    max-height: calc(100vh - 58px);
-    display: grid;
-    grid-template-rows: auto minmax(0, 1fr);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--bg-hard);
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.36);
-    overflow: hidden;
-  }
-
-  .settings-tabs {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-alt);
-  }
-
-  .settings-tabs button {
-    height: 32px;
-    border: none;
-    border-right: 1px solid var(--border);
-    background: transparent;
-    color: var(--fg-muted);
-    font: inherit;
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    cursor: pointer;
-  }
-
-  .settings-tabs button:last-child {
-    border-right: none;
-  }
-
-  .settings-tabs button.active,
-  .settings-tabs button:hover,
-  .settings-tabs button:focus-visible {
-    color: var(--orange);
-    background: var(--bg-hard);
-    outline: none;
-  }
-
-  .settings-panel {
-    display: grid;
-    gap: 12px;
-    min-height: 0;
-    overflow: auto;
-    padding: 12px;
-  }
-
-  .settings-radio-group {
-    display: grid;
-    gap: 6px;
-  }
-
-  .settings-section {
-    display: grid;
-    gap: 6px;
-  }
-
-  .settings-section-heading {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--orange);
-    font-size: 11px;
-    font-weight: 700;
-    line-height: 1.1;
-    text-transform: uppercase;
-  }
-
-  .settings-section-icon,
-  .settings-control-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex: 0 0 auto;
-    font-family: "Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, monospace;
-    font-weight: 700;
-    line-height: 1;
-  }
-
-  .settings-section-icon {
-    width: 18px;
-    height: 18px;
-    border: 1px solid color-mix(in srgb, var(--orange) 42%, transparent);
-    border-radius: 4px;
-    color: var(--orange);
-    font-size: 10px;
-  }
-
-  .settings-control-icon {
-    width: 18px;
-    height: 18px;
-    color: var(--fg-muted);
-    font-size: 12px;
-  }
-
-  .settings-toggle-row,
-  .settings-choice-row {
-    display: grid;
-    grid-template-columns: 18px minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 6px;
-    color: var(--fg);
-    font-size: 11px;
-    cursor: pointer;
-    user-select: none;
-  }
-
-  .settings-toggle-row input,
-  .settings-choice-row input {
-    accent-color: #7c6f64;
-    cursor: pointer;
-  }
-
-  .settings-field {
-    display: grid;
-    gap: 5px;
-  }
-
-  .settings-field-label {
-    color: var(--fg);
-    font-size: 11px;
-  }
-
-  .settings-input {
-    width: 100%;
-    min-width: 0;
-    box-sizing: border-box;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--bg);
-    color: var(--fg);
-    padding: 6px 8px;
-    font-size: 11px;
-    line-height: 1.35;
-    outline: none;
-  }
-
-  .settings-input:focus {
-    border-color: var(--orange);
-  }
-
-  .settings-textarea {
-    resize: vertical;
-    min-height: 68px;
-  }
-
-  .transcribe-status,
-  .transcribe-error {
-    font-size: 10px;
-    line-height: 1.35;
-  }
-
-  .transcribe-status {
-    color: var(--fg-muted);
-  }
-
-  .transcribe-error {
-    color: var(--yellow);
   }
 
   .main {
@@ -5386,7 +3432,7 @@ ${body}
   .summary-resize-handle:hover::after,
   .summary-resize-handle:focus-visible::after,
   .summary-sidebar.resizing .summary-resize-handle::after {
-    background: var(--orange);
+    background: var(--yellow);
   }
 
   .summary-resize-handle:focus-visible {
@@ -5430,35 +3476,13 @@ ${body}
   }
 
   .summary-icon-btn[aria-pressed="true"] {
-    color: var(--orange);
+    color: var(--yellow);
     border-color: var(--border);
   }
 
   .summary-icon-btn:hover,
   .summary-icon-btn:focus-visible {
-    color: var(--orange);
-    border-color: var(--border);
-    outline: none;
-  }
-
-  .summary-export-btn {
-    min-width: 0;
-    padding: 0 8px;
-    height: 24px;
-    border: 1px solid transparent;
-    background: transparent;
-    color: var(--fg-muted);
-    font: inherit;
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    cursor: pointer;
-  }
-
-  .summary-export-btn:hover,
-  .summary-export-btn:focus-visible {
-    color: var(--orange);
+    color: var(--yellow);
     border-color: var(--border);
     outline: none;
   }
@@ -5528,7 +3552,7 @@ ${body}
     width: 100%;
     min-width: 0;
     display: grid;
-    grid-template-columns: 16px minmax(0, 1fr) auto auto auto;
+    grid-template-columns: 16px minmax(0, 1fr) auto auto;
     gap: 8px;
     align-items: center;
     padding: 9px 12px;
@@ -5541,22 +3565,10 @@ ${body}
     cursor: pointer;
   }
 
-  .summary-group-header.reorderable {
-    cursor: default;
-  }
-
   .summary-group-header:hover,
   .summary-group-header:focus-visible {
     background: var(--bg-alt);
     outline: none;
-  }
-
-  .summary-group-header.drop-before {
-    box-shadow: inset 0 2px 0 var(--orange);
-  }
-
-  .summary-group-header.drop-after {
-    box-shadow: inset 0 -2px 0 var(--orange);
   }
 
   .summary-group-label {
@@ -5591,15 +3603,9 @@ ${body}
 
   .summary-title-action:hover,
   .summary-title-action:focus-visible {
-    color: var(--orange);
+    color: var(--yellow);
     outline: none;
     text-decoration: underline;
-  }
-
-  .summary-group-title-action {
-    display: inline-block;
-    width: fit-content;
-    max-width: 100%;
   }
 
   .summary-title-input {
@@ -5618,7 +3624,7 @@ ${body}
   }
 
   .summary-title-input:focus {
-    border-color: var(--orange);
+    border-color: var(--yellow);
   }
 
   .summary-group-title-input {
@@ -5653,7 +3659,7 @@ ${body}
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    color: var(--orange);
+    color: var(--yellow);
     font-size: 18px;
     font-weight: 700;
     line-height: 1;
@@ -5734,7 +3740,7 @@ ${body}
   }
 
   .summary-comment-action.has-comment {
-    color: var(--orange);
+    color: var(--yellow);
   }
 
   .summary-comment-action:hover,
@@ -5749,7 +3755,7 @@ ${body}
     border-bottom: 1px solid var(--internal-border);
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
   }
 
   .sidebar-label {
@@ -5768,6 +3774,11 @@ ${body}
     cursor: pointer;
     user-select: none;
     color: var(--fg);
+  }
+
+  .sidebar-toggle input[type="radio"] {
+    accent-color: var(--orange);
+    cursor: pointer;
   }
 
   .mode-switch {
@@ -5829,7 +3840,7 @@ ${body}
   }
 
   .load-btn:hover {
-    color: var(--orange);
+    color: var(--yellow);
   }
 
   .file-actions {
@@ -5858,7 +3869,7 @@ ${body}
     align-items: baseline;
   }
 
-  .kb-key { color: var(--orange); white-space: nowrap; font-size: 11px; font-weight: 700; }
+  .kb-key { color: var(--yellow); white-space: nowrap; font-size: 11px; }
   .kb-desc { color: var(--fg-muted); font-size: 11px; }
 
   .toolbar-btn {
@@ -5873,7 +3884,6 @@ ${body}
   }
 
   .help-btn {
-    background: transparent;
     font-size: 14px;
     font-weight: 700;
     width: 26px;
@@ -5886,7 +3896,7 @@ ${body}
     color: var(--fg-muted);
     border-color: var(--border);
   }
-  .help-btn:hover { color: var(--orange); border-color: var(--orange); }
+  .help-btn:hover { color: var(--yellow); border-color: var(--yellow); }
 
   .help-overlay {
     position: fixed;
@@ -5940,153 +3950,7 @@ ${body}
     border-radius: 3px;
     font-family: inherit;
   }
-  .help-close:hover { color: var(--orange); background: var(--bg-alt); }
-
-  .style-list {
-    display: grid;
-    gap: 4px;
-    margin-top: 0;
-  }
-
-  .sidebar-style-list {
-    padding: 0;
-    background: transparent;
-    border: 0;
-    border-radius: 0;
-    box-shadow: none;
-  }
-
-  .style-row {
-    display: grid;
-    grid-template-columns: 10px minmax(0, 1fr) auto;
-    gap: 6px;
-    align-items: center;
-    padding: 1px 0;
-  }
-
-  .style-row-plain {
-    grid-template-columns: 10px minmax(0, 1fr);
-  }
-
-  .style-row.reorderable {
-    grid-template-columns: 10px minmax(0, 1fr) 28px 20px;
-  }
-
-  .style-row.reorderable.drop-before {
-    box-shadow: inset 0 2px 0 var(--orange);
-  }
-
-  .style-row.reorderable.drop-after {
-    box-shadow: inset 0 -2px 0 var(--orange);
-  }
-
-  .style-swatch {
-    width: 8px;
-    height: 8px;
-    border-radius: 2px;
-    border: 1px solid rgba(0, 0, 0, 0.2);
-  }
-
-  .style-swatch-box {
-    background: transparent !important;
-    border-width: 2px;
-  }
-
-  .style-name {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--fg);
-    font-size: 10px;
-  }
-
-  .style-key-badge {
-    width: 28px;
-    height: 20px;
-    box-sizing: border-box;
-    padding: 0 2px;
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    background: var(--bg-alt);
-    color: var(--fg);
-    font: inherit;
-    font-size: 10px;
-    font-weight: 700;
-    line-height: 18px;
-    text-align: center;
-    text-transform: lowercase;
-    user-select: none;
-  }
-
-  .reorder-handle {
-    width: 20px;
-    height: 20px;
-    padding: 0;
-    border: 1px solid var(--border);
-    background: var(--bg-alt);
-    color: var(--fg-muted);
-    border-radius: 3px;
-    cursor: grab;
-    font: inherit;
-    font-size: 11px;
-    line-height: 1;
-    opacity: 0.45;
-    transition: opacity 120ms ease, color 120ms ease, border-color 120ms ease;
-  }
-
-  .style-row:hover .reorder-handle,
-  .style-row:focus-within .reorder-handle,
-  .summary-group-header:hover .reorder-handle,
-  .summary-group-header:focus-within .reorder-handle,
-  .reorder-handle:focus-visible,
-  .reorder-handle[draggable="true"]:active {
-    opacity: 1;
-  }
-
-  .reorder-handle:hover,
-  .reorder-handle:focus-visible {
-    color: var(--orange);
-    border-color: var(--orange);
-    outline: none;
-  }
-
-  .reorder-handle:active {
-    cursor: grabbing;
-  }
-
-  .reorder-handle:disabled {
-    opacity: 0.25;
-    cursor: default;
-  }
-
-  .style-footer-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 4px;
-  }
-
-  .style-reset-btn {
-    margin-top: 4px;
-    padding: 0;
-    background: none;
-    border: none;
-    color: var(--fg-muted);
-    font: inherit;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-weight: 600;
-    cursor: pointer;
-    width: fit-content;
-  }
-
-  .style-reset-btn:hover,
-  .style-reset-btn:focus-visible {
-    color: var(--orange);
-    outline: none;
-  }
+  .help-close:hover { color: var(--fg); background: var(--bg-alt); }
 
   .pdf-modal-overlay {
     position: fixed;
@@ -6133,7 +3997,7 @@ ${body}
   .pdf-modal-title {
     font-size: 13px;
     font-weight: 600;
-    color: var(--fg-muted);
+    color: var(--fg);
   }
 
   .pdf-modal-file {
@@ -6212,7 +4076,7 @@ ${body}
     font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    color: var(--fg);
+    color: var(--fg-muted);
     font-weight: 600;
     margin-top: 12px;
     margin-bottom: 4px;
@@ -6229,246 +4093,58 @@ ${body}
     opacity: 0.7;
   }
 
-  .layout-list {
-    display: grid;
-    gap: 10px;
-    margin-top: 0;
-  }
-
-  .layout-panel-section {
-    display: grid;
-    gap: 6px;
-  }
-
-  .layout-panel-heading {
+  .slider-row {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 6px;
-    color: var(--orange);
-    font-size: 11px;
-    font-weight: 700;
-    line-height: 1.1;
-    text-transform: uppercase;
   }
 
-  .font-icon,
-  .layout-control-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex: 0 0 auto;
-    font-family: "Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, monospace;
-    font-weight: 700;
-    line-height: 1;
-  }
-
-  .font-icon {
-    width: 18px;
-    height: 18px;
-    border: 1px solid color-mix(in srgb, var(--orange) 42%, transparent);
-    border-radius: 4px;
-    color: var(--orange);
-    font-size: 10px;
-  }
-
-  .layout-control-icon {
-    width: 18px;
-    height: 18px;
-    color: var(--fg-muted);
-    font-size: 12px;
-  }
-
-  .layout-stepper-grid {
-    display: grid;
-    gap: 5px;
-  }
-
-  .layout-stepper {
-    display: grid;
-    grid-template-columns: 18px minmax(0, 1fr) 42px auto;
-    align-items: center;
-    gap: 6px;
-    min-width: 0;
-    color: var(--fg-muted);
-    font-size: 11px;
-  }
-
-  .layout-stepper-label {
-    min-width: 0;
-    color: var(--fg);
-    font-size: 11px;
-  }
-
-  .layout-stepper-value {
-    color: var(--fg-muted);
-    font-size: 10px;
-    text-align: right;
-  }
-
-  .layout-stepper-buttons {
-    display: flex;
-    gap: 2px;
-  }
-
-  .layout-stepper-buttons button {
-    width: 20px;
-    height: 20px;
-    padding: 0;
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    background: var(--bg-alt);
-    color: var(--fg-muted);
-    font: inherit;
-    font-size: 12px;
-    font-weight: 700;
-    line-height: 1;
-    cursor: pointer;
-  }
-
-  .layout-stepper-buttons button:hover,
-  .layout-stepper-buttons button:focus-visible {
-    border-color: var(--orange);
-    color: var(--orange);
-    outline: none;
-  }
-
-  .layout-toggle-row,
-  .layout-range-row,
-  .layout-segment-row {
-    display: grid;
-    align-items: center;
-    gap: 6px;
-    color: var(--fg);
-    font-size: 11px;
-  }
-
-  .layout-toggle-row {
-    grid-template-columns: 18px minmax(0, 1fr) auto;
-  }
-
-  .layout-toggle-row input {
-    accent-color: #7c6f64;
-  }
-
-  .layout-range-row {
-    grid-template-columns: 18px minmax(68px, 0.8fr) minmax(0, 1fr) 44px;
-  }
-
-  .layout-segment-row {
-    grid-template-columns: 18px minmax(68px, 0.8fr) minmax(0, 1fr);
-  }
-
-  .layout-range-label {
-    min-width: 0;
-    color: var(--fg);
-  }
-
-  .layout-range-value {
-    color: var(--fg-muted);
-    font-size: 10px;
-    text-align: right;
-  }
-
-  .layout-segment-control {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    overflow: hidden;
-    background: var(--bg-alt);
-  }
-
-  .layout-segment-control button {
-    height: 22px;
-    padding: 0;
-    border: 0;
-    border-right: 1px solid var(--border);
-    background: transparent;
-    color: var(--fg-muted);
-    font: inherit;
-    font-size: 12px;
-    cursor: pointer;
-  }
-
-  .layout-segment-control button:last-child {
-    border-right: 0;
-  }
-
-  .layout-segment-control button.active {
-    background: color-mix(in srgb, var(--orange) 16%, transparent);
-    color: var(--orange);
-  }
-
-  .layout-segment-control button:hover:not(:disabled),
-  .layout-segment-control button:focus-visible {
-    color: var(--orange);
-    outline: none;
-  }
-
-  .layout-segment-control button:disabled {
-    cursor: not-allowed;
-    opacity: 0.45;
-  }
-
-  .editor { position: relative; min-height: 0; height: 100%; overflow: hidden; }
-  .right-padding-handle {
+  .slider-row::after {
+    content: attr(data-tooltip);
     position: absolute;
-    top: 0;
-    bottom: 0;
-    right: calc(var(--editor-right-padding, 40px) - 1px);
-    z-index: 40;
-    width: 9px;
-    padding: 0;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-    cursor: ew-resize;
+    right: 0;
+    bottom: calc(100% + 4px);
+    z-index: 20;
+    max-width: 180px;
+    padding: 4px 7px;
+    border: 1px solid color-mix(in srgb, var(--border) 68%, transparent);
+    border-radius: 5px;
+    background: color-mix(in srgb, var(--bg-hard) 92%, transparent);
+    color: var(--fg);
+    font-size: 10px;
+    line-height: 1.25;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(1px);
   }
 
-  .right-padding-handle::after {
-    content: "";
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 4px;
-    width: 1px;
-    background: color-mix(in srgb, var(--fg-muted) 30%, transparent);
+  .slider-row:hover::after,
+  .slider-row:focus-within::after {
+    opacity: 1;
+    transform: translateY(0);
   }
 
-  .right-padding-handle:hover::after,
-  .right-padding-handle:focus-visible::after {
-    background: var(--orange);
+  .slider-lbl {
+    color: var(--fg-muted);
+    font-size: 11px;
+    width: 14px;
+    flex-shrink: 0;
   }
 
-  .right-padding-handle:focus-visible {
-    outline: 1px solid var(--orange);
-    outline-offset: 1px;
+  .slider-val {
+    color: var(--fg-muted);
+    font-size: 11px;
+    width: 30px;
+    text-align: right;
+    flex-shrink: 0;
   }
 
+  .editor { min-height: 0; height: 100%; overflow: hidden; }
   :global(.editor .cm-editor) { width: 100%; height: 100%; }
   :global(.cm-editor.cm-focused) { outline: none; }
   :global(.cm-scroller) { position: relative; }
-  :global(.editor .cm-content),
-  :global(.editor .cm-line) {
-    caret-color: transparent !important;
-  }
-  :global(.editor .cm-cursorLayer),
-  :global(.editor .cm-cursor),
-  :global(.editor .cm-cursor-primary),
-  :global(.editor .cm-cursor-secondary),
-  :global(.editor .cm-secondaryCursor),
-  :global(.editor .cm-dropCursor) {
-    display: none !important;
-    visibility: hidden !important;
-    opacity: 0 !important;
-    animation: none !important;
-    border-left: 0 !important;
-  }
-  :global(.editor .cm-content input),
-  :global(.editor .cm-content textarea),
-  :global(.editor .cm-content [contenteditable="true"]) {
-    caret-color: currentColor !important;
-  }
   :global(.cm-line:not(.cm-srt-timestamp-line)) {
     padding-bottom: var(--paragraph-spacing, 0em);
   }
@@ -6485,7 +4161,7 @@ ${body}
     position: absolute;
     z-index: 2;
     width: 0;
-    border-left: 1px solid var(--active-style-color);
+    border-left: 1px solid var(--orange);
     opacity: 0.45;
     pointer-events: none;
   }
@@ -6549,7 +4225,7 @@ ${body}
   }
   .segment:last-child { border-right: none; }
   .status-right .segment:first-child { border-left: 1px solid var(--internal-border); }
-  .syntax { color: var(--orange); }
+  .syntax { color: var(--yellow); }
   .mode { color: var(--orange); font-weight: 600; }
   .audio-widget {
     display: inline-flex;
@@ -6566,8 +4242,8 @@ ${body}
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: var(--orange);
-    font-weight: 600;
+    color: var(--yellow);
+    font-weight: 500;
     font-size: 11px;
   }
 
@@ -6596,7 +4272,7 @@ ${body}
 
   .audio-rate-text:hover,
   .audio-rate-text:focus-visible {
-    color: var(--orange);
+    color: var(--yellow);
     outline: none;
   }
 
