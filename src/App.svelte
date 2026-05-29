@@ -115,6 +115,8 @@
   let summaryItems: SummaryItem[] = [];
   let summarySections: SummarySection[] = [];
   let expandedSummaryCategories: Record<string, boolean> = {};
+  $: summaryGroupIds = summarySections.filter(section => section.kind === "group").map(section => section.id);
+  $: summaryAllGroupsExpanded = summaryGroupIds.length > 0 && summaryGroupIds.every(id => expandedSummaryCategories[id]);
   let summaryCollapsed = true;
   let summaryFullscreen = false;
   let summarySidebarWidth = 320;
@@ -1449,6 +1451,14 @@ ${body}
       ...expandedSummaryCategories,
       [id]: !expandedSummaryCategories[id]
     };
+  }
+
+  function setAllSummaryCategories(expanded: boolean) {
+    expandedSummaryCategories = Object.fromEntries(summaryGroupIds.map(id => [id, expanded]));
+  }
+
+  function toggleAllSummaryCategories() {
+    setAllSummaryCategories(!summaryAllGroupsExpanded);
   }
 
   function clampSummarySidebarWidth(width: number) {
@@ -2895,6 +2905,18 @@ ${body}
         {/if}
         <div class="summary-header-actions">
           {#if !summaryCollapsed}
+            {#if summaryGroupIds.length > 0}
+              <button
+                class="summary-icon-btn"
+                type="button"
+                title={summaryAllGroupsExpanded ? "Collapse all groups" : "Expand all groups"}
+                aria-label={summaryAllGroupsExpanded ? "Collapse all groups" : "Expand all groups"}
+                aria-pressed={summaryAllGroupsExpanded}
+                on:click={toggleAllSummaryCategories}
+              >
+                {summaryAllGroupsExpanded ? "−" : "+"}
+              </button>
+            {/if}
             <button
               class="summary-icon-btn"
               type="button"
