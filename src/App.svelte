@@ -8,7 +8,7 @@
     WidgetType, showTooltip, type Tooltip,
     type DecorationSet, type ViewUpdate
   } from "@codemirror/view";
-  import { EditorSelection, RangeSet, StateEffect, StateField, type Range, type Text, type Transaction, type TransactionSpec } from "@codemirror/state";
+  import { EditorSelection, RangeSet, StateEffect, StateField, type Range, type Transaction, type TransactionSpec } from "@codemirror/state";
   import {
     defaultKeymap, history, historyKeymap, undo, redo,
     cursorLineStart, cursorLineEnd,
@@ -21,10 +21,9 @@
   import { RangeSetBuilder } from "@codemirror/state";
   import {
     indentOnInput, bracketMatching,
-    syntaxHighlighting, HighlightStyle
+    syntaxHighlighting
   } from "@codemirror/language";
   import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-  import { tags } from "@lezer/highlight";
   import * as pdfjsLib from "pdfjs-dist";
   import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
   import {
@@ -35,6 +34,23 @@
   } from "./lib/annotations";
   import { createNavigationCommands } from "./lib/navigation";
   import { helpSections } from "./lib/shortcuts";
+  import {
+    buildGruvboxTheme,
+    contrastColor,
+    gruvbox,
+    gruvboxHighlight,
+    highlightStyles
+  } from "./lib/theme";
+  import {
+    documentHasSrtTimestamps,
+    formatSrtTimestampLabel,
+    formatSrtTranscript,
+    isSrtTimestampLine,
+    parseTimestampToSeconds,
+    srtLineExitPosition,
+    srtPattern,
+    srtTimestampForTranscriptLine
+  } from "./lib/srt";
 
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -424,49 +440,6 @@
     return mediaExtensions.some(extension => name.endsWith(extension));
   }
 
-  function formatSrtTranscript(text: string) {
-    const cues = text
-      .replace(/^\uFEFF/, "")
-      .replace(/\r\n?/g, "\n")
-      .split(/\n{2,}/)
-      .map(formatSrtCue)
-      .filter(Boolean);
-
-    return cues.join("\n");
-  }
-
-  function formatSrtCue(block: string) {
-    const lines = block
-      .split("\n")
-      .map(line => line.trim())
-      .filter(Boolean);
-    if (!lines.length) return "";
-
-    if (/^\d+$/.test(lines[0])) lines.shift();
-
-    const timeIndex = lines.findIndex(line => /-->/i.test(line));
-    if (timeIndex < 0) return "";
-
-    const timeMatch = /^(\S+)\s*-->\s*(\S+)(?:\s+.*)?$/.exec(lines[timeIndex]);
-    if (!timeMatch) return "";
-
-    const start = normalizeSrtTimestamp(timeMatch[1]);
-    const end = normalizeSrtTimestamp(timeMatch[2]);
-    const cueText = lines
-      .slice(timeIndex + 1)
-      .join(" ")
-      .replace(/<[^>]+>/g, "")
-      .replace(/\s+/g, " ")
-      .trim();
-
-    if (!cueText) return "";
-    return `[${start} --> ${end}]\n${cueText}`;
-  }
-
-  function normalizeSrtTimestamp(timestamp: string) {
-    return timestamp.trim().replace(",", ".");
-  }
-
   function stripEmptyLines(text: string) {
     return text
       .replace(/\r\n?/g, "\n")
@@ -827,23 +800,6 @@
   // Trigger CM6 decoration rebuild when annotationMode changes
   $: annotationMode, view && view.dispatch({});
 
-  const highlightStyles = [
-    { name: "green",   color: "#b8bb26" },
-    { name: "red",     color: "#fb4934" },
-    { name: "steel",   color: "#83a598" },
-    { name: "orange",  color: "#fe8019" },
-    { name: "periwinkle", color: "#8370d0" },
-    { name: "sand",    color: "#d8bd7f" },
-    { name: "mint",    color: "#6fc6a4" },
-    { name: "denim",   color: "#3f5f9f" },
-    { name: "yellow",  color: "#fabd2f" },
-    { name: "indigo",  color: "#4f46e5" },
-    { name: "brown",   color: "#8f6f3f" },
-    { name: "slate",   color: "#586e75" },
-    { name: "sky",     color: "#57a0d5" },
-    { name: "rosewood", color: "#8f3f4d" },
-    { name: "purple",  color: "#d3869b" }
-  ];
   function cycleStyle(delta: number) {
     currentStyle = cycleStyleNumber(currentStyle, delta);
   }
@@ -871,16 +827,6 @@
     const index = highlightStyles.findIndex(s => s.name === name);
     return index < 0 ? 1 : index + 1;
   }
-
-  const gruvbox = {
-    bg: "#282828", bgSoft: "#32302f", bgHard: "#1d2021",
-    bgAlt: "#3c3836", border: "#504945", fg: "#ebdbb2",
-    fgMuted: "#a89984", yellow: "#fabd2f", green: "#b8bb26",
-    blue: "#83a598", aqua: "#8ec07c", orange: "#fe8019",
-    red: "#fb4934", purple: "#d3869b", selection: "#665c54",
-    activeLine: "#3c3836aa", gutterText: "#7c6f64",
-    cursor: "#fe8019", comment: "#928374"
-  };
 
   function starterDoc() {
     const fmt = (d: Date) => d.toLocaleString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).replace(/,/g, "");
@@ -931,64 +877,6 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
 `;
   }
 
-  const gruvboxHighlight = HighlightStyle.define([
-    { tag: tags.heading, color: gruvbox.yellow, fontWeight: "700" },
-    { tag: tags.contentSeparator, color: gruvbox.orange },
-    { tag: tags.emphasis, color: gruvbox.fg, fontStyle: "italic" },
-    { tag: tags.strong, color: gruvbox.fg, fontWeight: "700" },
-    { tag: tags.strikethrough, color: gruvbox.fgMuted, textDecoration: "line-through" },
-    { tag: tags.link, color: gruvbox.blue, textDecoration: "underline" },
-    { tag: tags.url, color: gruvbox.aqua, textDecoration: "underline" },
-    { tag: tags.labelName, color: gruvbox.yellow },
-    { tag: tags.keyword, color: gruvbox.red },
-    { tag: [tags.atom, tags.bool, tags.null], color: gruvbox.purple },
-    { tag: [tags.number, tags.integer, tags.float], color: gruvbox.purple },
-    { tag: [tags.string, tags.special(tags.string)], color: gruvbox.green },
-    { tag: tags.regexp, color: gruvbox.aqua },
-    { tag: tags.escape, color: gruvbox.orange },
-    { tag: [tags.variableName, tags.name], color: gruvbox.fg },
-    { tag: tags.function(tags.variableName), color: gruvbox.green },
-    { tag: [tags.className, tags.typeName], color: gruvbox.yellow },
-    { tag: [tags.operator, tags.compareOperator, tags.logicOperator], color: gruvbox.red },
-    { tag: [tags.punctuation, tags.separator, tags.bracket], color: gruvbox.fgMuted },
-    { tag: tags.comment, color: gruvbox.comment },
-    { tag: tags.meta, color: gruvbox.orange },
-    { tag: tags.monospace, color: "inherit" }
-  ]);
-
-  function buildGruvboxTheme(): Extension {
-    return EditorView.theme({
-      "&": { height: "100%", color: gruvbox.fg, backgroundColor: gruvbox.bg },
-      ".cm-scroller": { overflow: "auto", fontFamily: '"Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, monospace', lineHeight: "1.75" },
-      ".cm-content": { textAlign: "left", padding: "1rem 1.25rem 4rem", minHeight: "100%", caretColor: gruvbox.cursor, whiteSpace: "pre-wrap", wordBreak: "break-word" },
-      ".cm-line": { textAlign: "left" },
-      "&.cm-focused .cm-cursor": { borderLeftColor: gruvbox.cursor },
-      "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { backgroundColor: `${gruvbox.orange} !important`, color: gruvbox.bg, opacity: '50%' },
-      ".cm-gutters": { backgroundColor: gruvbox.bgHard, color: gruvbox.gutterText, borderRight: "none" },
-      ".cm-activeLine": { backgroundColor: "transparent" },
-      ".cm-activeLineGutter": { color: gruvbox.yellow },
-      ".cm-panels": { backgroundColor: gruvbox.bgSoft, color: gruvbox.fg },
-      ".cm-searchMatch": { backgroundColor: "#665c54", outline: `1px solid ${gruvbox.yellow}` },
-      ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: "#7c6f64" },
-      ".cm-matchingBracket, .cm-nonmatchingBracket": { backgroundColor: gruvbox.bgAlt, outline: `1px solid ${gruvbox.blue}` },
-      ...Object.fromEntries(highlightStyles.map(s => [
-        `.cm-annotation-${s.name}`,
-        { color: `${contrastColor(s.color)} !important`, backgroundColor: `${s.color} !important`, border: "none" }
-      ])),
-      ".cm-formatting-code": { color: gruvbox.orange },
-      ".cm-formatting-code-block": { color: gruvbox.orange },
-      ".cm-formatting": { color: gruvbox.fgMuted },
-      ".cm-blockquote-line": {
-        borderLeft: `3px solid ${gruvbox.orange}`,
-        paddingLeft: "0.75em",
-        paddingRight: "0.35em",
-        backgroundColor: "#4a3520",
-        marginBottom: "2px",
-        color: gruvbox.yellow
-      }
-    }, { dark: true });
-  }
-
   function updateStatusFromView(v: EditorView) {
     const sel = v.state.selection.main;
     const pos = sel.head;
@@ -1003,21 +891,6 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     setCurrentBlockquoteFromView(v);
   }
 
-  // Returns theme bg or fg based on which has better contrast against the annotation color
-  function contrastColor(hex: string): string {
-    const toLinear = (c: number) => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-    const luminance = (h: string) => {
-      const r = toLinear(parseInt(h.slice(1, 3), 16) / 255);
-      const g = toLinear(parseInt(h.slice(3, 5), 16) / 255);
-      const b = toLinear(parseInt(h.slice(5, 7), 16) / 255);
-      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    };
-    const contrast = (L1: number, L2: number) => (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
-    const Lann = luminance(hex);
-    return contrast(Lann, luminance(gruvbox.bg)) >= contrast(Lann, luminance(gruvbox.fg)) ? gruvbox.bg : gruvbox.fg;
-  }
-
-  const srtPattern = /\[\s*([0-9:.]+)\s*-->\s*([0-9:.]+)\s*\]/g;
   const styleColorMap: Record<string, string> = Object.fromEntries(highlightStyles.map(s => [s.name, s.color]));
   let editingSpan: number | null = null;
   type BlockquoteAlign = "left" | "center" | "right";
@@ -1846,65 +1719,6 @@ ${body}
     provide: field => lineNumberMarkers.from(field)
   });
 
-  function formatSrtTimestampLabel(matchText: string) {
-    const parsed = /^\[\s*([0-9:.]+)\s*-->\s*([0-9:.]+)\s*\]$/.exec(matchText.trim());
-    if (!parsed) return matchText;
-    const start = shortenTimestamp(parsed[1]);
-    const end = shortenTimestamp(parsed[2]);
-    return `${start} → ${end}`;
-  }
-
-  function shortenTimestamp(timestamp: string) {
-    const cleaned = timestamp.trim().replace(",", ".");
-    const parts = cleaned.split(":");
-    if (parts.length >= 3) {
-      const minutes = parts[parts.length - 2];
-      const seconds = parts[parts.length - 1].slice(0, 2);
-      return `${minutes}:${seconds}`;
-    }
-    if (parts.length === 2) return `${parts[0]}:${parts[1].slice(0, 2)}`;
-    return cleaned;
-  }
-
-  function parseTimestampToSeconds(timestamp: string) {
-    const cleaned = timestamp.trim().replace(",", ".");
-    const parts = cleaned.split(":");
-    if (parts.length === 3) {
-      const hours = +parts[0];
-      const minutes = +parts[1];
-      const seconds = +parts[2];
-      return hours * 3600 + minutes * 60 + seconds;
-    }
-    if (parts.length === 2) {
-      const minutes = +parts[0];
-      const seconds = +parts[1];
-      return minutes * 60 + seconds;
-    }
-    const numeric = Number(cleaned);
-    return Number.isFinite(numeric) ? numeric : null;
-  }
-
-  function isSrtTimestampLine(text: string) {
-    return /^\[\s*[0-9:.]+\s*-->\s*[0-9:.]+\s*\]$/.test(text.trim());
-  }
-
-  function documentHasSrtTimestamps(state: EditorState) {
-    return /^\[\s*[0-9:.]+\s*-->\s*[0-9:.]+\s*\]$/m.test(state.doc.toString());
-  }
-
-  function srtTimestampForTranscriptLine(state: EditorState, lineNumber: number) {
-    if (lineNumber <= 1 || lineNumber > state.doc.lines) return null;
-    const previousLine = state.doc.line(lineNumber - 1);
-    if (!isSrtTimestampLine(previousLine.text)) return null;
-    srtPattern.lastIndex = 0;
-    const match = srtPattern.exec(previousLine.text);
-    if (!match) return null;
-    return {
-      label: formatSrtTimestampLabel(match[0]),
-      startSeconds: parseTimestampToSeconds(match[1])
-    };
-  }
-
   function formatEditorLineNumber(lineNumber: number, state: EditorState) {
     const hasSrt = documentHasSrtTimestamps(state);
     if (lineNumber > state.doc.lines) return hasSrt ? "00:00 → 00:00" : String(lineNumber);
@@ -1913,22 +1727,6 @@ ${body}
     const timestamp = srtTimestampForTranscriptLine(state, lineNumber);
     if (timestamp) return timestamp.label;
     return String(lineNumber);
-  }
-
-  function srtLineExitPosition(doc: Text, lineNumber: number, direction: "left" | "right") {
-    if (direction === "right") {
-      for (let number = lineNumber + 1; number <= doc.lines; number += 1) {
-        const line = doc.line(number);
-        if (line.text.trim() && !isSrtTimestampLine(line.text)) return line.from;
-      }
-      return doc.length;
-    }
-
-    for (let number = lineNumber - 1; number >= 1; number -= 1) {
-      const line = doc.line(number);
-      if (line.text.trim() && !isSrtTimestampLine(line.text)) return line.to;
-    }
-    return 0;
   }
 
   function snapSelectionAroundProtectedRange(
