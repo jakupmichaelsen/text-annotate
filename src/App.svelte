@@ -3,7 +3,7 @@
   import { Compartment, EditorState, Prec, type Extension } from "@codemirror/state";
   import {
     EditorView, keymap, lineNumbers, drawSelection, runScopeHandlers,
-    ViewPlugin, Decoration,
+    highlightActiveLineGutter, ViewPlugin, Decoration,
     GutterMarker, lineNumberMarkers,
     WidgetType, showTooltip, type Tooltip,
     type DecorationSet, type ViewUpdate
@@ -30,9 +30,9 @@
   let editorEl: HTMLDivElement;
   let view: EditorView;
   let fileInput: HTMLInputElement;
-  let padLeft = 0;
-  let padRight = 24;
-  let padTop = 0;
+  let padLeft = 24;
+  let padRight = 40;
+  let padTop = 16;
   let padBottom = 64;
   let editorViewportHeight = 0;
   let lineHeight = 1.6;
@@ -48,7 +48,6 @@
   let pdfParseError = "";
   let activeSaveHandle: any = null;
   let activeSaveName = "";
-  let loadedDocumentName = "Untitled";
   let pendingAutosaveText: string | null = null;
   let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
   let autosaveWriting = false;
@@ -64,7 +63,6 @@
   let audioPlaybackRate = 1;
   const audioRates = [1, 1.25, 1.5, 1.75, 2];
   const mediaSeekSeconds = 5;
-  const manualPauseRewindSeconds = 3;
   const audioDbName = "textAnnotate-state";
   const audioStoreName = "audio";
   const openAiApiKeyStorageKey = "textAnnotate-openai-api-key";
@@ -95,15 +93,9 @@
   $: audioRateText = formatPlaybackRate(audioPlaybackRate);
   $: showTtsWidget = ttsAvailable && !audioUrl && loadedFileType !== "SRT";
   $: ttsProgressText = ttsStatus || (ttsSegments.length ? `${Math.min(ttsIndex + 1, ttsSegments.length)}/${ttsSegments.length}` : "ready");
-  $: statusFileName = activeSaveName || loadedDocumentName || "Untitled";
 
-  const styleShortcutModeStorageKey = "cm6-style-shortcut-mode";
-  const manualAnnotationColorStorageKey = "cm6-manual-annotation-color";
   let currentStyle = 0;
   let themeMode = loadThemeMode();
-  type StyleShortcutMode = "hardcoded" | "manual";
-  let styleShortcutMode = loadStyleShortcutMode();
-  let manualAnnotationColor = loadManualAnnotationColor();
   let annotationMode: "clean" | "raw" | "all" = "clean";
   let divideImportSentences = false;
   let blockquoteAlign: "left" | "center" | "right" = "left";
@@ -138,12 +130,6 @@
   let editingSummaryTitleKey: string | null = null;
   let summaryTitleDraft = "";
   let summaryTitleInput: HTMLInputElement | null = null;
-  let editingStyleTitleName: string | null = null;
-  let styleTitleDraft = "";
-  let styleTitleInput: HTMLInputElement | null = null;
-  let editingStyleKeyName: string | null = null;
-  let styleKeyDraft = "";
-  let styleKeyInput: HTMLInputElement | null = null;
   let resizingSummarySidebar = false;
   let finishSummaryResize: (() => void) | null = null;
   let finishRightPaddingDrag: (() => void) | null = null;
@@ -179,7 +165,7 @@
       items: [
         ["h l", "left / right"],
         ["← ↓ ↑ →", "left / down / up / right"],
-        ["Tab", "edit note / cue playback"],
+        ["Tab", "center cursor in view"],
         ["w k", "line up"],
         ["s j", "line down"],
         ["a d", "word left / right"],
@@ -189,8 +175,7 @@
         ["Ctrl+↑/↓", "paragraph start / end"],
         ["CapsLock+h/l or a/d", "jump 3 words left / right"],
         ["CapsLock+k/j or w/s", "visual line up / down"],
-        ["Alt+w/k, Alt+s/j", "scroll viewport up / down"],
-        ["f", "play / pause media or TTS"]
+        ["f", "toggle slow word follow"]
       ]
     },
     {
@@ -234,6 +219,8 @@
         ["r / Alt+r", "cycle playback / TTS speed"],
         ["Alt+n/p", "next / previous annotation"],
         ["Alt+A/H, D/L", "back / forward"],
+        ["Alt+W/K", "play current line"],
+        ["Alt+S/J", "play / pause media or TTS"],
         ["F1 / ?", "toggle this help"]
       ]
     }
@@ -337,7 +324,6 @@
     audioUrl = URL.createObjectURL(file);
     audioFileName = file.name;
     audioSourceFile = file;
-    loadedDocumentName = file.name;
     loadedFileType = file.name.split(".").pop()?.toUpperCase() || "MP3";
     if (audioElement) {
       audioElement.src = audioUrl;
@@ -350,13 +336,7 @@
   function toggleAudioPlayback() {
     if (!audioElement || !audioLoaded) return;
     if (audioElement.paused) void audioElement.play();
-    else pauseAudioFromUser();
-  }
-
-  function pauseAudioFromUser() {
-    if (!audioElement || !audioLoaded || audioElement.paused) return;
-    audioElement.pause();
-    seekAudio(-manualPauseRewindSeconds);
+    else audioElement.pause();
   }
 
   function toggleMediaPlayback() {
@@ -679,13 +659,13 @@
     return event.key === " " || event.key === "Spacebar" || event.code === "Space";
   }
 
-  function isPlainRightNavigation(event: KeyboardEvent) {
+  function isPlainRightArrow(event: KeyboardEvent) {
     return !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey &&
-      (event.key === "ArrowRight" || event.key === "Right" || event.key.toLowerCase() === "d" || event.key.toLowerCase() === "l");
+      (event.key === "ArrowRight" || event.key === "Right");
   }
 
   function throttleAnnotateRightRepeat(event: KeyboardEvent) {
-    if (editorMode !== "normal" || !isPlainRightNavigation(event)) {
+    if (editorMode !== "normal" || !isPlainRightArrow(event)) {
       if (!event.repeat) lastAnnotateRightRepeatAt = 0;
       return false;
     }
@@ -725,27 +705,16 @@
     return event.altKey && !event.ctrlKey && !event.metaKey && "ahdl".includes(event.key.toLowerCase());
   }
 
-  function isViewportScrollShortcut(event: KeyboardEvent) {
-    return event.altKey && !event.ctrlKey && !event.metaKey &&
-      (
-        "wsjk".includes(event.key.toLowerCase()) ||
-        event.key === "ArrowUp" ||
-        event.key === "Up" ||
-        event.key === "ArrowDown" ||
-        event.key === "Down"
-      );
+  function isMediaControlShortcut(event: KeyboardEvent) {
+    return event.altKey && !event.ctrlKey && !event.metaKey && "wsjk".includes(event.key.toLowerCase());
   }
 
   function isAnnotationJumpShortcut(event: KeyboardEvent) {
     return event.altKey && !event.ctrlKey && !event.metaKey && "np".includes(event.key.toLowerCase());
   }
 
-  function isTabAnnotationShortcut(event: KeyboardEvent) {
+  function isTabScrollShortcut(event: KeyboardEvent) {
     return event.key === "Tab" && !event.ctrlKey && !event.metaKey && !event.altKey;
-  }
-
-  function isBlockquoteEditShortcut(event: KeyboardEvent) {
-    return editorMode === "normal" && event.code === "IntlBackslash" && !event.ctrlKey && !event.metaKey && !event.altKey;
   }
 
   function isHelpCloseShortcut(event: KeyboardEvent) {
@@ -761,11 +730,10 @@
 
   function isAppShortcutCandidate(event: KeyboardEvent) {
     if (event.metaKey) return false;
-    if (isTabAnnotationShortcut(event)) return true;
-    if (isModeShortcut(event) || isAudioShortcut(event) || isAudioRateShortcut(event) || isPlaybackShortcut(event) || isViewportScrollShortcut(event) || isAnnotationJumpShortcut(event)) return true;
+    if (isTabScrollShortcut(event)) return true;
+    if (isModeShortcut(event) || isAudioShortcut(event) || isAudioRateShortcut(event) || isPlaybackShortcut(event) || isMediaControlShortcut(event) || isAnnotationJumpShortcut(event)) return true;
     if (event.ctrlKey && !event.altKey && (event.key === "z" || event.key === "y" || event.key === "Z")) return true;
     if (editorMode !== "normal" || event.altKey) return false;
-    if (isBlockquoteEditShortcut(event)) return true;
     if (!event.ctrlKey && styleNumberForKey(event.key) !== null) return true;
 
     if (event.ctrlKey) {
@@ -795,7 +763,7 @@
 
   function handleAudioKeydown(event: KeyboardEvent) {
     if (event.defaultPrevented) return;
-    if (!isAudioShortcut(event) && !isPlaybackShortcut(event) && !isAnnotationJumpShortcut(event)) return;
+    if (!isAudioShortcut(event) && !isPlaybackShortcut(event) && !isMediaControlShortcut(event) && !isAnnotationJumpShortcut(event)) return;
     if (isTextEntryTarget(event.target)) return;
 
     event.preventDefault();
@@ -808,6 +776,14 @@
     }
     if (key === "p") {
       jumpToAdjacentAnnotation(-1);
+      return;
+    }
+    if (key === "s" || key === "j") {
+      toggleMediaPlayback();
+      return;
+    }
+    if (view && (key === "w" || key === "k")) {
+      toggleAssociatedSrtPlayback(view);
       return;
     }
     if (!audioElement || !audioLoaded) {
@@ -858,10 +834,10 @@
       requestAnimationFrame(() => view?.focus());
       return;
     }
-    if (view && editorMode === "normal" && isTabAnnotationShortcut(event) && !isTextEntryTarget(event.target)) {
+    if (view && isTabScrollShortcut(event) && !isTextEntryTarget(event.target)) {
       event.preventDefault();
       event.stopPropagation();
-      handleEnterInAnnotationMode(view);
+      scrollCursorIntoView(view, true);
       requestAnimationFrame(() => view?.focus());
       return;
     }
@@ -944,7 +920,6 @@
     if (audioFile) await loadAudioFile(audioFile);
     else if (!srtFile) clearAudioSession();
     if (srtFile) {
-      loadedDocumentName = srtFile.name;
       loadedFileType = "SRT";
       replaceDocument(formatSrtTranscript(await srtFile.text()), true);
       return;
@@ -954,14 +929,12 @@
     if (!file) return;
 
     if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
-      loadedDocumentName = file.name;
       loadedFileType = "PDF";
       await openPdfModal(file);
       return;
     }
 
     if (file.name.toLowerCase().endsWith(".docx")) {
-      loadedDocumentName = file.name;
       loadedFileType = "DOCX";
       const buffer = await file.arrayBuffer();
       const mammoth = await import("mammoth");
@@ -970,7 +943,6 @@
       return;
     }
 
-    loadedDocumentName = file.name;
     loadedFileType = file.name.split(".").pop()?.toUpperCase() || "TEXT";
     replaceDocument(stripEmptyLines(await file.text()));
   }
@@ -1097,7 +1069,6 @@
       const transcript = transcriptionPayloadToText(payload);
       if (!transcript.trim()) throw new Error("The transcription completed, but no text was returned.");
 
-      loadedDocumentName = audioFileName ? `${stripExtension(audioFileName)} transcript` : "Transcript";
       loadedFileType = transcriptionModel === "whisper-1" && transcript.includes("-->") ? "SRT" : "TRANSCRIPT";
       replaceDocument(transcript, loadedFileType === "SRT");
       transcriptionStatus = `Loaded transcript from ${audioFileName || "media"}.`;
@@ -1194,11 +1165,11 @@
 
   function adjustLayoutValue(kind: "lineHeight" | "fontSize" | "paragraphSpacing", delta: number) {
     if (kind === "lineHeight") {
-      lineHeight = Math.round(clampNumber(lineHeight + delta * 0.15, 1, 3) * 100) / 100;
+      lineHeight = Math.round(clampNumber(lineHeight + delta * 0.05, 1, 3) * 100) / 100;
     } else if (kind === "fontSize") {
       fontSize = Math.round(clampNumber(fontSize + delta, 10, 28));
     } else {
-      paragraphSpacing = Math.round(clampNumber(paragraphSpacing + delta * 0.15, 0, 2) * 100) / 100;
+      paragraphSpacing = Math.round(clampNumber(paragraphSpacing + delta * 0.05, 0, 2) * 100) / 100;
     }
   }
 
@@ -1725,7 +1696,7 @@ ${body}
   // Trigger CM6 decoration rebuild when annotationMode changes
   $: annotationMode, view && view.dispatch({});
 
-  const baseHighlightStyles = [
+  const highlightStyles = [
     { name: "green",   color: "#b8bb26" },
     { name: "red",     color: "#fb4934" },
     { name: "steel",   color: "#83a598" },
@@ -1742,29 +1713,14 @@ ${body}
     { name: "rosewood", color: "#8f3f4d" },
     { name: "purple",  color: "#d3869b" }
   ];
-  const manualStyleName = "manual";
   const styleOrderStorageKey = "cm6-style-order";
-  const styleTitlesStorageKey = "cm6-style-titles";
-  const styleKeysStorageKey = "cm6-style-keys";
   const annotationBoxSuffix = "_box";
   const defaultStyleKeyOrder = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "z", "x", "c", "v", "b", "n", "m", ",", ".", "/"];
-  const defaultStyleOrder = [...baseHighlightStyles.map(s => s.name), manualStyleName];
+  const defaultStyleOrder = highlightStyles.map(s => s.name);
   let styleOrder = loadStyleOrder();
-  let styleTitles = loadStyleTitles();
-  let styleKeys = loadStyleKeys();
-  $: manualStyleColor = currentManualStyleColor(activeTheme);
-  $: highlightStyles = currentHighlightStyles(activeTheme);
-  $: orderedHighlightStyles = (styleShortcutMode === "manual" ? styleOrder : defaultStyleOrder)
+  $: orderedHighlightStyles = styleOrder
     .map(name => highlightStyles.find(s => s.name === name))
     .filter((style): style is typeof highlightStyles[number] => !!style);
-
-  function currentManualStyleColor(theme = activeTheme) {
-    return normalizedManualAnnotationColor(manualAnnotationColor) || theme.orange;
-  }
-
-  function currentHighlightStyles(theme = activeTheme) {
-    return [...baseHighlightStyles, { name: manualStyleName, color: currentManualStyleColor(theme) }];
-  }
 
   function cycleStyle(delta: number) {
     currentStyle = cycleStyleNumber(currentStyle, delta);
@@ -1813,49 +1769,26 @@ ${body}
     return index < 0 ? 1 : index + 1;
   }
 
-  function styleColorForName(name: string, theme = activeTheme) {
+  function styleColorForName(name: string) {
     const base = baseStyleName(name);
-    if (base === "plain") return theme.orange;
-    if (base === manualStyleName) return currentManualStyleColor(theme);
-    return baseHighlightStyles.find(s => s.name === base)?.color ?? theme.yellow;
+    if (base === "plain") return activeTheme.orange;
+    return highlightStyles.find(s => s.name === base)?.color ?? activeTheme.yellow;
   }
 
   function styleKeyForName(name: string) {
-    const base = baseStyleName(name);
-    return styleKeys[base] || defaultStyleKeyForName(base);
+    const index = orderedHighlightStyles.findIndex(style => style.name === baseStyleName(name));
+    return index < 0 ? "" : defaultStyleKeyOrder[index] ?? "";
   }
 
   function styleKeyForStyle(style: number) {
     return style <= 0 ? "" : styleKeyForName(styleName(style));
   }
 
-  function defaultStyleTitle(name: string) {
-    return baseStyleName(name);
-  }
-
-  function styleDisplayTitle(name: string) {
-    return styleTitles[baseStyleName(name)] || defaultStyleTitle(name);
-  }
-
-  function customStyleTitle(name: string) {
-    return styleTitles[baseStyleName(name)] || "";
-  }
-
-  function annotationTitlePartForStyle(name: string) {
-    const title = customStyleTitle(name);
-    return title ? `, title: "${title}"` : "";
-  }
-
-  function annotationWithStoredTitle(match: RegExpExecArray, title: string) {
-    const titlePart = title ? `, title: "${title}"` : "";
-    return `\`${match[1]}\`<!-- ${match[2]}, ${match[3]}: "${match[4]}"${titlePart} -->`;
-  }
-
   function styleNumberForKey(key: string) {
     const normalized = normalizeStyleKey(key);
     if (!normalized) return null;
-    const index = orderedHighlightStyles.findIndex(style => styleKeyForName(style.name) === normalized);
-    return index < 0 ? null : index + 1;
+    const index = defaultStyleKeyOrder.indexOf(normalized);
+    return index < 0 || index >= orderedHighlightStyles.length ? null : index + 1;
   }
 
   function styleShortcutSummary() {
@@ -1870,55 +1803,6 @@ ${body}
     return key.toLowerCase();
   }
 
-  function defaultStyleKeyForName(name: string) {
-    const index = orderedHighlightStyles.findIndex(style => style.name === baseStyleName(name));
-    return index < 0 ? "" : defaultStyleKeyOrder[index] ?? "";
-  }
-
-  function normalizedManualAnnotationColor(value: string) {
-    const color = value.trim();
-    return /^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(color) ? color : "";
-  }
-
-  function loadStyleShortcutMode(): StyleShortcutMode {
-    const stored = typeof localStorage === "undefined" ? null : localStorage.getItem(styleShortcutModeStorageKey);
-    return stored === "manual" ? "manual" : "hardcoded";
-  }
-
-  function persistStyleShortcutMode() {
-    if (typeof localStorage !== "undefined") {
-      localStorage.setItem(styleShortcutModeStorageKey, styleShortcutMode);
-    }
-  }
-
-  function loadManualAnnotationColor() {
-    if (typeof localStorage === "undefined") return "";
-    return normalizedManualAnnotationColor(localStorage.getItem(manualAnnotationColorStorageKey) ?? "");
-  }
-
-  function colorPickerManualColor() {
-    const normalized = normalizedManualAnnotationColor(manualAnnotationColor) || activeTheme.orange;
-    if (/^#[0-9a-f]{3}$/i.test(normalized)) {
-      return `#${normalized.slice(1).split("").map(char => `${char}${char}`).join("")}`;
-    }
-    return normalized.slice(0, 7);
-  }
-
-  function persistManualAnnotationColor() {
-    const normalized = normalizedManualAnnotationColor(manualAnnotationColor);
-    manualAnnotationColor = normalized;
-    if (typeof localStorage !== "undefined") {
-      if (normalized) localStorage.setItem(manualAnnotationColorStorageKey, normalized);
-      else localStorage.removeItem(manualAnnotationColorStorageKey);
-    }
-    view?.dispatch({ effects: themeCompartment.reconfigure(buildThemeExtensions(getTheme(themeMode))) });
-  }
-
-  function resetManualAnnotationColor() {
-    manualAnnotationColor = "";
-    persistManualAnnotationColor();
-  }
-
   function loadStyleOrder() {
     const stored = typeof localStorage === "undefined" ? null : localStorage.getItem(styleOrderStorageKey);
     if (!stored) return defaultStyleOrder;
@@ -1931,80 +1815,6 @@ ${body}
       return [...order, ...missing];
     } catch {
       return defaultStyleOrder;
-    }
-  }
-
-  function loadStyleTitles() {
-    const stored = typeof localStorage === "undefined" ? null : localStorage.getItem(styleTitlesStorageKey);
-    if (!stored) return {};
-
-    try {
-      const parsed = JSON.parse(stored);
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-      return Object.fromEntries(
-        Object.entries(parsed)
-          .filter((entry): entry is [string, string] =>
-            typeof entry[0] === "string" &&
-            defaultStyleOrder.includes(entry[0]) &&
-            typeof entry[1] === "string" &&
-            entry[1].trim().length > 0
-          )
-          .map(([name, title]) => [name, normalizeStyleTitle(title)])
-          .filter(([name, title]) => title.length > 0 && title.toLowerCase() !== defaultStyleTitle(name).toLowerCase())
-      );
-    } catch {
-      return {};
-    }
-  }
-
-  function loadStyleKeys() {
-    const stored = typeof localStorage === "undefined" ? null : localStorage.getItem(styleKeysStorageKey);
-    if (!stored) return {};
-
-    try {
-      const parsed = JSON.parse(stored);
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-      const used = new Set<string>();
-      return Object.fromEntries(
-        Object.entries(parsed)
-          .filter((entry): entry is [string, string] =>
-            typeof entry[0] === "string" &&
-            defaultStyleOrder.includes(entry[0]) &&
-            typeof entry[1] === "string"
-          )
-          .map(([name, key]) => [name, normalizeStyleKey(key)])
-          .filter(([, key]) => {
-            if (!key || used.has(key)) return false;
-            used.add(key);
-            return true;
-          })
-      );
-    } catch {
-      return {};
-    }
-  }
-
-  function normalizeStyleTitle(title: string) {
-    return title.trim().replace(/\s+/g, " ").replace(/"/g, "'").replace(/[<>]/g, "").replace(/--+/g, "-");
-  }
-
-  function persistStyleTitles(titles: Record<string, string>) {
-    styleTitles = titles;
-    if (typeof localStorage === "undefined") return;
-    if (Object.keys(titles).length) {
-      localStorage.setItem(styleTitlesStorageKey, JSON.stringify(titles));
-    } else {
-      localStorage.removeItem(styleTitlesStorageKey);
-    }
-  }
-
-  function persistStyleKeys(keys: Record<string, string>) {
-    styleKeys = keys;
-    if (typeof localStorage === "undefined") return;
-    if (Object.keys(keys).length) {
-      localStorage.setItem(styleKeysStorageKey, JSON.stringify(keys));
-    } else {
-      localStorage.removeItem(styleKeysStorageKey);
     }
   }
 
@@ -2063,147 +1873,6 @@ ${body}
     moveStyleOrderById(reorderDragState.id, targetId, after);
   }
 
-  function startStyleTitleEdit(event: MouseEvent, name: string) {
-    event.preventDefault();
-    event.stopPropagation();
-    editingStyleTitleName = baseStyleName(name);
-    styleTitleDraft = styleDisplayTitle(name);
-    void focusStyleTitleInput();
-  }
-
-  async function focusStyleTitleInput() {
-    await tick();
-    focusInputAtEnd(styleTitleInput);
-  }
-
-  function focusInputAtEnd(input: HTMLInputElement | null) {
-    if (!input) return;
-    input.focus();
-    const end = input.value.length;
-    input.setSelectionRange(end, end);
-  }
-
-  function saveStyleTitle() {
-    if (!editingStyleTitleName) return;
-    const name = editingStyleTitleName;
-    editingStyleTitleName = null;
-    persistStyleTitle(name, styleTitleDraft);
-  }
-
-  function startStyleKeyEdit(event: MouseEvent, name: string) {
-    event.preventDefault();
-    event.stopPropagation();
-    editingStyleKeyName = baseStyleName(name);
-    styleKeyDraft = styleKeyForName(name);
-    void focusStyleKeyInput();
-  }
-
-  async function focusStyleKeyInput() {
-    await tick();
-    focusInputAtEnd(styleKeyInput);
-  }
-
-  function saveStyleKey() {
-    if (!editingStyleKeyName) return;
-    const name = editingStyleKeyName;
-    editingStyleKeyName = null;
-    persistStyleKey(name, styleKeyDraft);
-  }
-
-  function persistStyleKey(name: string, key: string) {
-    const normalized = normalizeStyleKey(key) || defaultStyleKeyForName(name);
-    const oldKey = styleKeyForName(name);
-    if (!normalized) return;
-
-    const nextKeys = { ...styleKeys };
-    const otherStyle = orderedHighlightStyles.find(style =>
-      style.name !== name && styleKeyForName(style.name) === normalized
-    );
-    if (otherStyle && oldKey) {
-      nextKeys[otherStyle.name] = oldKey;
-    }
-    nextKeys[name] = normalized;
-    persistStyleKeys(nextKeys);
-  }
-
-  function cancelStyleKeyEdit() {
-    editingStyleKeyName = null;
-  }
-
-  function handleStyleKeyKeydown(event: KeyboardEvent) {
-    event.stopPropagation();
-    if (event.key === "Enter") {
-      event.preventDefault();
-      saveStyleKey();
-      return;
-    }
-    if (event.key === "Escape") {
-      event.preventDefault();
-      cancelStyleKeyEdit();
-      return;
-    }
-    if (event.key === "Backspace" || event.key === "Delete") {
-      event.preventDefault();
-      styleKeyDraft = "";
-      return;
-    }
-    if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
-      const key = normalizeStyleKey(event.key);
-      if (!key) return;
-      event.preventDefault();
-      styleKeyDraft = key;
-      saveStyleKey();
-    }
-  }
-
-  function persistStyleTitle(name: string, title: string) {
-    const normalized = normalizeStyleTitle(title);
-    const defaultTitle = defaultStyleTitle(name);
-    const customTitle = normalized && normalized.toLowerCase() !== defaultTitle.toLowerCase() ? normalized : "";
-    const nextTitles = { ...styleTitles };
-    if (customTitle) nextTitles[name] = customTitle;
-    else delete nextTitles[name];
-
-    persistStyleTitles(nextTitles);
-    if (!view) return;
-    syncStyleTitleAnnotations(view, name, customTitle);
-    updateSummaryFromView(view);
-  }
-
-  function syncStyleTitleAnnotations(v: EditorView, name: string, customTitle: string) {
-    const docText = v.state.doc.toString();
-    const changes: { from: number; to: number; insert: string }[] = [];
-
-    annotationPattern.lastIndex = 0;
-    let match: RegExpExecArray | null;
-    while ((match = annotationPattern.exec(docText)) !== null) {
-      if (baseStyleName(match[2]) !== name) continue;
-
-      const insert = annotationWithStoredTitle(match, customTitle);
-      if (insert === match[0]) continue;
-      changes.push({ from: match.index, to: match.index + match[0].length, insert });
-    }
-    annotationPattern.lastIndex = 0;
-
-    if (changes.length) v.dispatch({ changes });
-    else v.dispatch({});
-  }
-
-  function cancelStyleTitleEdit() {
-    editingStyleTitleName = null;
-  }
-
-  function handleStyleTitleKeydown(event: KeyboardEvent) {
-    event.stopPropagation();
-    if (event.key === "Enter") {
-      event.preventDefault();
-      saveStyleTitle();
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      cancelStyleTitleEdit();
-    }
-  }
-
   function commitSummaryReorder(targetId: string, after: boolean) {
     if (!reorderDragState || reorderDragState.kind !== "summary") return;
     moveSummaryCategoryById(reorderDragState.id, targetId, after);
@@ -2240,6 +1909,8 @@ ${body}
     blockquoteBg: string;
     blockquoteFg: string;
     plainCodeBg: string;
+    activeLineEdit: string;
+    activeGutterEdit: string;
   };
 
   const themes: Record<ThemeMode, ThemePalette> = {
@@ -2250,11 +1921,11 @@ ${body}
       fgMuted: "#a89984", yellow: "#fabd2f", green: "#b8bb26",
       blue: "#83a598", aqua: "#8ec07c", orange: "#fe8019",
       red: "#fb4934", purple: "#d3869b", selection: "#665c54",
-      activeLine: "transparent", gutterText: "#7c6f64",
+      activeLine: "#3c3836aa", gutterText: "#7c6f64",
       cursor: "#fe8019", comment: "#928374",
       searchMatch: "#665c54", searchMatchSelected: "#7c6f64",
       blockquoteBg: "#4a3520", blockquoteFg: "#fabd2f",
-      plainCodeBg: "#32302f"
+      plainCodeBg: "#32302f", activeLineEdit: "#2f4a3aaa", activeGutterEdit: "#2f4a3a"
     },
     nord: {
       dark: false,
@@ -2263,11 +1934,11 @@ ${body}
       fgMuted: "#4c566a", yellow: "#ebcb8b", green: "#a3be8c",
       blue: "#81a1c1", aqua: "#8fbcbb", orange: "#d08770",
       red: "#bf616a", purple: "#b48ead", selection: "#d8dee9",
-      activeLine: "transparent", gutterText: "#5e6472",
+      activeLine: "#e5e9f0", gutterText: "#5e6472",
       cursor: "#5e81ac", comment: "#4c566a",
       searchMatch: "#d8dee9", searchMatchSelected: "#cfd7e3",
       blockquoteBg: "#e5e9f0", blockquoteFg: "#5e81ac",
-      plainCodeBg: "#e5e9f0"
+      plainCodeBg: "#e5e9f0", activeLineEdit: "#d8dee9", activeGutterEdit: "#d8dee9"
     }
   };
 
@@ -2390,11 +2061,10 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
         opacity: "0 !important",
         visibility: "hidden !important"
       },
-      "&.mode-normal.cm-focused .cm-selectionBackground, &.mode-normal .cm-selectionBackground, &.mode-normal .cm-content ::selection": { backgroundColor: `${theme.orange} !important`, opacity: "50%" },
-      "&.mode-insert.cm-focused .cm-selectionBackground, &.mode-insert .cm-selectionBackground, &.mode-insert .cm-content ::selection": { backgroundColor: `${theme.selection} !important` },
+      "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { backgroundColor: `${theme.orange} !important`, color: theme.bg, opacity: "50%" },
       ".cm-gutters": { backgroundColor: theme.bgHard, color: theme.gutterText, borderRight: "none" },
       ".cm-activeLine": { backgroundColor: theme.activeLine },
-      ".cm-activeLineGutter": { color: theme.gutterText, backgroundColor: theme.bgHard },
+      ".cm-activeLineGutter": { color: theme.yellow },
       ".cm-panels": { backgroundColor: theme.bgSoft, color: theme.fg },
       ".cm-searchMatch": { backgroundColor: theme.searchMatch, outline: `1px solid ${theme.yellow}` },
       ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: theme.searchMatchSelected },
@@ -2404,8 +2074,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
       ".cm-formatting": { color: theme.fgMuted },
       ".cm-blockquote-line": {
         borderLeft: `3px solid ${theme.orange}`,
-        marginLeft: "0.175em",  
-        paddingLeft: "0.35em",
+        paddingLeft: "0.75em",
         paddingRight: "0.35em",
         backgroundColor: theme.blockquoteBg,
         color: theme.blockquoteFg
@@ -2711,11 +2380,11 @@ ${body}
   }
 
   function summaryAnnotationTitle(item: SummaryAnnotationItem) {
-    return styleDisplayTitle(item.colorName);
+    return item.title || baseStyleName(item.colorName).toUpperCase();
   }
 
   function annotationTitleKey(item: SummaryAnnotationItem) {
-    return styleDisplayTitle(item.colorName);
+    return item.title.trim() || baseStyleName(item.colorName);
   }
 
   function isSummaryAnnotationItem(item: SummaryItem): item is SummaryAnnotationItem {
@@ -3096,7 +2765,7 @@ ${body}
     event.preventDefault();
     event.stopPropagation();
     editingSummaryTitleKey = key;
-    summaryTitleDraft = styleDisplayTitle(item.colorName);
+    summaryTitleDraft = item.title || baseStyleName(item.colorName);
     void focusSummaryTitleInput();
   }
 
@@ -3106,25 +2775,60 @@ ${body}
     const firstAnnotation = summaryAnnotationItems(section.items)[0];
     if (!firstAnnotation) return;
     editingSummaryTitleKey = section.id;
-    summaryTitleDraft = styleDisplayTitle(firstAnnotation.colorName);
+    summaryTitleDraft = firstAnnotation.title || baseStyleName(firstAnnotation.colorName);
     void focusSummaryTitleInput();
   }
 
   async function focusSummaryTitleInput() {
     await tick();
-    focusInputAtEnd(summaryTitleInput);
+    summaryTitleInput?.focus();
+    summaryTitleInput?.select();
+  }
+
+  function normalizeSummaryTitle(title: string, colorName: string) {
+    const normalized = title.trim().replace(/\s+/g, " ").replace(/"/g, "'").replace(/[<>]/g, "").replace(/--+/g, "-");
+    return normalized.toLowerCase() === baseStyleName(colorName).toLowerCase() ? "" : normalized;
+  }
+
+  function annotationMatchAt(docText: string, spanStart: number) {
+    annotationPattern.lastIndex = spanStart;
+    const match = annotationPattern.exec(docText);
+    annotationPattern.lastIndex = 0;
+    return match?.index === spanStart ? match : null;
+  }
+
+  function annotationWithTitle(match: RegExpExecArray, title: string) {
+    const colorName = match[2];
+    const normalizedTitle = normalizeSummaryTitle(title, colorName);
+    const titlePart = normalizedTitle ? `, title: "${normalizedTitle}"` : "";
+    return `\`${match[1]}\`<!-- ${colorName}, ${match[3]}: "${match[4]}"${titlePart} -->`;
   }
 
   function saveSummaryTitle(items: SummaryAnnotationItem[]) {
     if (!editingSummaryTitleKey) return;
-    if (items.length === 0) {
+    if (!view || items.length === 0) {
       editingSummaryTitleKey = null;
       return;
     }
 
-    const styleName = baseStyleName(items[0].colorName);
+    const docText = view.state.doc.toString();
+    const changes = items
+      .map(item => {
+        const match = annotationMatchAt(docText, item.spanStart);
+        if (!match) return null;
+        return {
+          from: item.spanStart,
+          to: item.spanStart + match[0].length,
+          insert: annotationWithTitle(match, summaryTitleDraft)
+        };
+      })
+      .filter((change): change is { from: number; to: number; insert: string } => !!change)
+      .sort((a, b) => a.from - b.from);
+
     editingSummaryTitleKey = null;
-    persistStyleTitle(styleName, summaryTitleDraft);
+    if (changes.length) {
+      view.dispatch({ changes });
+    }
   }
 
   function cancelSummaryTitleEdit() {
@@ -3253,7 +2957,6 @@ ${body}
           const colorName = m[2];
           const timestamp = m[3] || "";
           const comment   = m[4] || "";
-          const title = styleDisplayTitle(colorName);
           const color = styleColorForName(colorName);
           return [{
             pos: wordStart, above: true, strictSide: true, arrow: false,
@@ -3263,7 +2966,7 @@ ${body}
               dom.style.cssText = `background:${activeTheme.bgAlt};border:1px solid ${activeTheme.border};border-left:3px solid ${color};border-radius:4px;padding:4px 10px;font-size:11px;color:${activeTheme.fg};line-height:1.6;white-space:nowrap;pointer-events:none;`;
               const meta = document.createElement("div");
               meta.style.color = activeTheme.fgMuted;
-              meta.textContent = `${title}  ${timestamp}`;
+              meta.textContent = `${colorName}  ${timestamp}`;
               dom.appendChild(meta);
               const line2 = document.createElement("div");
               line2.textContent = comment || "Enter to add note";
@@ -3572,8 +3275,8 @@ ${body}
 
   function buildHighlightDecorator(theme: ThemePalette): Extension {
     const colorTheme = EditorView.theme(Object.fromEntries(
-      currentHighlightStyles(theme).flatMap(s => {
-        const color = styleColorForName(s.name, theme);
+      highlightStyles.flatMap(s => {
+        const color = styleColorForName(s.name);
         return [
           [`.cm-annotation-${s.name}`, { backgroundColor: color, color: contrastColor(color, theme.bg, theme.fg), borderRadius: "3px", padding: "0 2px" }],
           [`.cm-annotation-${boxStyleName(s.name)}`, { backgroundColor: "transparent", color, border: `1px solid ${color}`, borderRadius: "3px", padding: "0 2px" }]
@@ -3796,7 +3499,7 @@ ${body}
       const now = new Date();
       const ts = now.toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).replace(/,/g, "");
       const name = annotationStyleName || styleName(style);
-      return `\`${text}\`<!-- ${name}, ${ts}: ""${annotationTitlePartForStyle(name)} -->`;
+      return `\`${text}\`<!-- ${name}, ${ts}: "" -->`;
     };
     if (!range.empty) {
       const trimmedRange = trimTrailingWhitespaceRange(state.doc.toString(), range.from, range.to);
@@ -3865,18 +3568,6 @@ ${body}
     return wrapSelectionOrWord(v, style);
   }
 
-  function enterBlockquoteEditMode(v: EditorView) {
-    const head = v.state.selection.main.head;
-    const insert = "\n> ";
-    setMode("insert");
-    v.dispatch({
-      changes: { from: head, to: head, insert },
-      selection: { anchor: head + insert.length },
-      effects: cursorScrollEffect(v, head + insert.length)
-    });
-    return true;
-  }
-
   function cycleAnnotationColorOrStyle(v: EditorView, delta: number) {
     const cursor = v.state.selection.main.head;
     const docText = v.state.doc.toString();
@@ -3932,6 +3623,10 @@ ${body}
     return false;
   }
 
+  // Status bar reactive values
+  $: styleLabel = currentStyle === 0
+    ? "Style: plain"
+    : `Style: ${currentStyle}/${highlightStyles.length} (${styleName(currentStyle)})${styleKeyForStyle(currentStyle) ? ` [${styleKeyForStyle(currentStyle)}]` : ""}`;
   $: currentStyleColor = styleColor(currentStyle);
 
   const statusPlugin = ViewPlugin.fromClass(class {
@@ -4029,16 +3724,9 @@ ${body}
       this.scheduled = true;
       this.view.requestMeasure({
         read: view => {
-          if (!view.hasFocus || editorMode === "insert") return null;
-          const head = view.state.selection.main.head;
-          if (head === view.state.doc.lineAt(head).from) return null;
-          const coords = view.coordsAtPos(head);
+          if (!view.hasFocus || !view.state.selection.main.empty) return null;
+          const coords = view.coordsAtPos(view.state.selection.main.head);
           if (!coords) return null;
-          const contentRect = view.contentDOM.getBoundingClientRect();
-          const visualLineY = coords.top + Math.max(1, (coords.bottom - coords.top) / 2);
-          const visualLineStart = view.posAtCoords({ x: contentRect.left + 1, y: visualLineY });
-          const visualLineStartCoords = visualLineStart === null ? null : view.coordsAtPos(visualLineStart);
-          if (visualLineStartCoords && Math.abs(coords.left - visualLineStartCoords.left) < 2) return null;
           const scroller = view.scrollDOM;
           const scrollerRect = scroller.getBoundingClientRect();
           return {
@@ -4092,7 +3780,6 @@ ${body}
       this.scheduled = true;
       this.view.requestMeasure({
         read: view => {
-          if (editorMode === "insert") return null;
           const head = view.state.selection.main.head;
           const scroller = view.scrollDOM;
           const scrollerRect = scroller.getBoundingClientRect();
@@ -4102,7 +3789,8 @@ ${body}
             top: coords.top - scrollerRect.top + scroller.scrollTop,
             left: scroller.scrollLeft,
             width: scroller.clientWidth,
-            height: Math.max(1, coords.bottom - coords.top)
+            height: Math.max(1, coords.bottom - coords.top),
+            isEdit: editorMode === "insert"
           };
         },
         write: data => {
@@ -4111,6 +3799,7 @@ ${body}
             this.marker.style.display = "none";
             return;
           }
+          this.marker.classList.toggle("is-edit", data.isEdit);
           this.marker.style.display = "block";
           this.marker.style.top = `${data.top}px`;
           this.marker.style.left = `${data.left}px`;
@@ -4319,22 +4008,6 @@ ${body}
     return true;
   }
 
-  function visibleLineTargetPosition(v: EditorView, line: Text, measuredHead: number) {
-    if (annotationMode !== "clean") return measuredHead;
-    const lineText = line.text;
-    annotationPattern.lastIndex = 0;
-    let match: RegExpExecArray | null;
-    while ((match = annotationPattern.exec(lineText)) !== null) {
-      const spanStart = line.from + match.index;
-      const wordStart = spanStart + 1;
-      const wordEnd = wordStart + match[1].length;
-      const spanEnd = spanStart + match[0].length;
-      if (measuredHead >= spanStart && measuredHead < wordStart) return wordStart;
-      if (measuredHead > wordEnd && measuredHead <= spanEnd) return wordStart;
-    }
-    return measuredHead;
-  }
-
   function moveVisualLineSkippingSrt(v: EditorView, direction: "up" | "down", extend = false) {
     const selection = v.state.selection.main;
     const isSkippableLine = (text: string) => isSrtTimestampLine(text) || text.trimStart().startsWith(">");
@@ -4357,14 +4030,9 @@ ${body}
         targetY = maxY - linePx * 0.5;
       }
 
-      const measuredHead = visualLineStartAtY(v, targetY);
-      if (measuredHead === null) break;
-      const line = v.state.doc.lineAt(measuredHead);
-      const head = visibleLineTargetPosition(v, line, measuredHead);
-      if (head === selection.head) {
-        targetY += step * linePx;
-        continue;
-      }
+      const head = visualLineStartAtY(v, targetY);
+      if (head === null) break;
+      const line = v.state.doc.lineAt(head);
       if (!isSkippableLine(line.text) && line.text.trim()) {
         v.dispatch({
           selection: { anchor: extend ? selection.anchor : head, head },
@@ -4437,10 +4105,10 @@ ${body}
 
   const tabScrollBehavior = EditorView.domEventHandlers({
     keydown(event, v) {
-      if (editorMode !== "normal" || event.key !== "Tab" || event.ctrlKey || event.metaKey || event.altKey) return false;
+      if (event.key !== "Tab" || event.ctrlKey || event.metaKey || event.altKey) return false;
       event.preventDefault();
       event.stopPropagation();
-      handleEnterInAnnotationMode(v);
+      scrollCursorIntoView(v, true);
       return true;
     }
   });
@@ -4456,10 +4124,16 @@ ${body}
       // Always: F2 toggles edit mode
       { key: "F2", run: v => { setMode(editorMode === "insert" ? "normal" : "insert"); return true; } },
       { key: "F1", run: () => { showHelp = !showHelp; return true; } },
-      { key: "Tab", run: normal(v => handleEnterInAnnotationMode(v)) },
+      { key: "Tab", run: normal(v => { scrollCursorIntoView(v, true); return true; }) },
+      { key: "q", run: normal(v => cycleAnnotationColorOrStyle(v, -1)) },
+      { key: "e", run: normal(v => cycleAnnotationColorOrStyle(v, +1)) },
+      { key: "r", run: normal(() => { cycleAudioRate(); return true; }) },
+      { key: "f", run: normal(v => toggleFollowMode(v)) },
+      { key: "i", run: normal(v => cycleAnnotationColorOrStyle(v, -1)) },
+      { key: "o", run: normal(v => cycleAnnotationColorOrStyle(v, +1)) },
+      { any: (v, event) => handleCapsLockNavigation(v, event) },
       {
         any: (v, event) => {
-          if (isBlockquoteEditShortcut(event)) return enterBlockquoteEditMode(v);
           if (
             editorMode !== "normal" ||
             event.key.length !== 1 ||
@@ -4472,13 +4146,6 @@ ${body}
           return style === null ? false : setAnnotationColorOrStyle(v, style);
         }
       },
-      { key: "q", run: normal(v => cycleAnnotationColorOrStyle(v, -1)) },
-      { key: "e", run: normal(v => cycleAnnotationColorOrStyle(v, +1)) },
-      { key: "r", run: normal(() => { cycleAudioRate(); return true; }) },
-      { key: "f", run: normal(() => { toggleMediaPlayback(); return true; }) },
-      { key: "i", run: normal(v => cycleAnnotationColorOrStyle(v, -1)) },
-      { key: "o", run: normal(v => cycleAnnotationColorOrStyle(v, +1)) },
-      { any: (v, event) => handleCapsLockNavigation(v, event) },
 
       // Normal-mode only: Navigation
       { key: "ArrowLeft",        run: normal(v => runLeftWithCursorScroll(v, cursorCharLeft)) },
@@ -4559,12 +4226,10 @@ ${body}
       { key: "Alt-l", run: () => { seekAudio(mediaSeekSeconds); return true; } },
       { key: "Alt-n", run: () => { jumpToAdjacentAnnotation(1); return true; } },
       { key: "Alt-p", run: () => { jumpToAdjacentAnnotation(-1); return true; } },
-      { key: "Alt-w", run: () => { scrollEditorViewport(-1); return true; } },
-      { key: "Alt-k", run: () => { scrollEditorViewport(-1); return true; } },
-      { key: "Alt-ArrowUp", run: () => { scrollEditorViewport(-1); return true; } },
-      { key: "Alt-s", run: () => { scrollEditorViewport(1); return true; } },
-      { key: "Alt-j", run: () => { scrollEditorViewport(1); return true; } },
-      { key: "Alt-ArrowDown", run: () => { scrollEditorViewport(1); return true; } },
+      { key: "Alt-w", run: v => { toggleAssociatedSrtPlayback(v); return true; } },
+      { key: "Alt-k", run: v => { toggleAssociatedSrtPlayback(v); return true; } },
+      { key: "Alt-s", run: () => { toggleMediaPlayback(); return true; } },
+      { key: "Alt-j", run: () => { toggleMediaPlayback(); return true; } },
       {
         any: (_view, event) =>
           editorMode === "normal" &&
@@ -4604,6 +4269,7 @@ ${body}
       history(),
       indentOnInput(),
       bracketMatching(),
+      highlightActiveLineGutter(),
       themeCompartment.of(buildThemeExtensions(getTheme(themeMode))),
       buildKeymap(),
       keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
@@ -4678,7 +4344,10 @@ ${body}
     --fg-muted: ${activeTheme.fgMuted}; --yellow: ${activeTheme.yellow}; --green: ${activeTheme.green};
     --blue: ${activeTheme.blue}; --orange: ${activeTheme.orange}; --selection: ${activeTheme.selection};
     --active-style-color: ${currentStyleColor};
-    --active-line-annotate: color-mix(in srgb, var(--active-style-color) 14%, transparent);
+    --active-line-annotate: color-mix(in srgb, var(--active-style-color) 34%, transparent);
+    --active-line-edit: ${activeTheme.activeLineEdit};
+    --active-gutter-annotate: color-mix(in srgb, var(--active-style-color) 58%, var(--bg-hard));
+    --active-gutter-edit: ${activeTheme.activeGutterEdit};
   `}
 >
   <div class="toolbar">
@@ -4766,7 +4435,7 @@ ${body}
                 </div>
                 <div class="layout-stepper">
                   <span class="layout-control-icon" aria-hidden="true">¶</span>
-                  <span class="layout-stepper-label">Paragraph spacing</span>
+                  <span class="layout-stepper-label">Paragraph gap</span>
                   <span class="layout-stepper-value">{paragraphSpacing.toFixed(2)}</span>
                   <span class="layout-stepper-buttons">
                     <button type="button" on:click={() => adjustLayoutValue("paragraphSpacing", -1)} aria-label="Decrease paragraph spacing">−</button>
@@ -4788,6 +4457,24 @@ ${body}
                 />
               </label>
               <label class="layout-range-row">
+                <span class="layout-control-icon" aria-hidden="true">⇤</span>
+                <span class="layout-range-label">Left margin</span>
+                <input type="range" min="0" max="400" step="2" bind:value={padLeft} class="slider" aria-label="Left padding" />
+                <span class="layout-range-value">{padLeft}px</span>
+              </label>
+              <label class="layout-range-row">
+                <span class="layout-control-icon" aria-hidden="true">⇥</span>
+                <span class="layout-range-label">Right border</span>
+                <input type="range" min="0" max="720" step="2" bind:value={padRight} class="slider" aria-label="Right padding" />
+                <span class="layout-range-value">{padRight}px</span>
+              </label>
+              <label class="layout-range-row">
+                <span class="layout-control-icon" aria-hidden="true">↥</span>
+                <span class="layout-range-label">Top margin</span>
+                <input type="range" min="0" max="400" step="2" bind:value={padTop} class="slider" aria-label="Top padding" />
+                <span class="layout-range-value">{padTop}px</span>
+              </label>
+              <label class="layout-range-row">
                 <span class="layout-control-icon" aria-hidden="true">→</span>
                 <span class="layout-range-label">Right hold delay</span>
                 <input
@@ -4804,6 +4491,36 @@ ${body}
               </label>
             </section>
 
+            <section class="layout-panel-section">
+              <div class="layout-panel-heading"><span class="font-icon" aria-hidden="true">◫</span><span>Notes</span></div>
+              <div class="layout-segment-row">
+                <span class="layout-control-icon" aria-hidden="true">≡</span>
+                <span class="layout-range-label">Alignment</span>
+                <div class="layout-segment-control" role="group" aria-label="Notes alignment">
+                  <button type="button" class:active={blockquoteAlign === "left"} disabled={!blockquoteActive} on:click={() => view && updateCurrentBlockquote(view, { align: "left" })} aria-label="Align notes left">⇤</button>
+                  <button type="button" class:active={blockquoteAlign === "center"} disabled={!blockquoteActive} on:click={() => view && updateCurrentBlockquote(view, { align: "center" })} aria-label="Align notes center">↔</button>
+                  <button type="button" class:active={blockquoteAlign === "right"} disabled={!blockquoteActive} on:click={() => view && updateCurrentBlockquote(view, { align: "right" })} aria-label="Align notes right">⇥</button>
+                </div>
+              </div>
+              <label class="layout-range-row">
+                <span class="layout-control-icon" aria-hidden="true">▰</span>
+                <span class="layout-range-label">Background width</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  class="slider"
+                  aria-label="Notes width"
+                  disabled={!blockquoteActive}
+                  value={blockquoteBgWidth}
+                  on:input={e => {
+                    if (view) updateCurrentBlockquote(view, { width: +(e.target as HTMLInputElement).value });
+                  }}
+                />
+                <span class="layout-range-value">{blockquoteBgWidth}%</span>
+              </label>
+            </section>
           </div>
         </div>
       {:else if settingsTab === "transcribe"}
@@ -4877,117 +4594,6 @@ ${body}
   >
     <div class="sidebar">
       <div class="sidebar-section">
-        <input type="file" accept=".srt,.txt,.md,.docx,.pdf,.mp3,.wav,.m4a,.ogg,.oga,.webm,.aac,.flac,.mp4,.mov,.mkv" multiple style="display:none" bind:this={fileInput} on:change={loadFile} />
-        <button class="sidebar-label load-btn" on:click={() => fileInput.click()}>LOAD</button>
-        <div class="file-actions">
-          <button class="sidebar-label load-btn" on:click={saveDocument}>Save</button>
-          <button class="sidebar-label load-btn" on:click={exportCleanHtml}>Export</button>
-        </div>
-        {#if audioSourceFile}
-          <button class="sidebar-label load-btn" on:click={transcribeLoadedAudio} disabled={transcriptionBusy}>
-            {transcriptionBusy ? "Transcribing..." : "Transcribe"}
-          </button>
-        {/if}
-        {#if transcriptionBusy || transcriptionStatus || transcriptionError}
-          <div class:transcribe-error={Boolean(transcriptionError)} class:transcribe-status={!transcriptionError}>
-            {transcriptionError || transcriptionStatus}
-          </div>
-        {/if}
-      </div>
-
-      <div class="sidebar-section">
-        <div class="sidebar-label">Annotation styles</div>
-        <div class="style-list sidebar-style-list">
-          {#each orderedHighlightStyles as style, index}
-            <div
-              class="style-row"
-              class:active-style={style.name === baseStyleName(styleName(currentStyle))}
-              class:reorderable={styleShortcutMode === "manual"}
-              role="listitem"
-              class:drag-over={styleShortcutMode === "manual" && reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name}
-              class:drop-after={styleShortcutMode === "manual" && reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name && reorderDropTarget.after}
-              class:drop-before={styleShortcutMode === "manual" && reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name && !reorderDropTarget.after}
-              on:dragover={event => styleShortcutMode === "manual" && updateReorderDropTarget("style", style.name, event)}
-              on:drop={event => {
-                if (styleShortcutMode === "manual" && reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name) {
-                  event.preventDefault();
-                  commitStyleReorder(style.name, reorderDropTarget.after);
-                }
-                finishReorderDrag();
-              }}
-              on:dragend={finishReorderDrag}
-            >
-              <span class="style-swatch" style={`background: ${style.color}`}></span>
-              {#if editingStyleKeyName === style.name}
-                <input
-                  class="style-key-badge style-key-input"
-                  bind:this={styleKeyInput}
-                  bind:value={styleKeyDraft}
-                  aria-label={`Shortcut key for ${styleDisplayTitle(style.name)}`}
-                  on:click={event => event.stopPropagation()}
-                  on:blur={saveStyleKey}
-                  on:keydown={handleStyleKeyKeydown}
-                />
-              {:else}
-                <button
-                  class="style-key-badge style-key-action"
-                  type="button"
-                  title={`Edit shortcut key for ${styleDisplayTitle(style.name)}`}
-                  on:click={event => startStyleKeyEdit(event, style.name)}
-                  on:keydown={event => event.stopPropagation()}
-                >
-                  {styleKeyForName(style.name)}
-                </button>
-              {/if}
-              <span class="style-separator" aria-hidden="true">:</span>
-              {#if editingStyleTitleName === style.name}
-                <input
-                  class="style-name style-title-input"
-                  bind:this={styleTitleInput}
-                  bind:value={styleTitleDraft}
-                  aria-label={`Title for ${style.name}`}
-                  on:click={event => event.stopPropagation()}
-                  on:focus={event => focusInputAtEnd(event.target as HTMLInputElement)}
-                  on:blur={saveStyleTitle}
-                  on:keydown={handleStyleTitleKeydown}
-                />
-              {:else}
-                <button
-                  class="style-name style-title-action"
-                  type="button"
-                  title={`Edit ${styleDisplayTitle(style.name)} title`}
-                  on:click={event => startStyleTitleEdit(event, style.name)}
-                  on:keydown={event => event.stopPropagation()}
-                >
-                  {styleDisplayTitle(style.name)}
-                </button>
-              {/if}
-              {#if styleShortcutMode === "manual"}
-                <button
-                  class="reorder-handle"
-                  type="button"
-                  draggable="true"
-                  aria-label={`Drag ${styleDisplayTitle(style.name)} to reorder`}
-                  title={`Drag ${styleDisplayTitle(style.name)} to reorder`}
-                  on:mousedown={event => event.stopPropagation()}
-                  on:click={event => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                  }}
-                  on:dragstart={event => setReorderDragState("style", style.name, event)}
-                >↕</button>
-              {/if}
-            </div>
-          {/each}
-        </div>
-        {#if styleShortcutMode === "manual"}
-          <div class="style-footer-actions">
-            <button class="style-reset-btn" type="button" on:click={resetStyleOrder}>Reset order</button>
-          </div>
-        {/if}
-      </div>
-
-      <div class="sidebar-section sidebar-bottom">
         <label class="mode-switch" aria-label="Switch between Annotate and Edit mode">
           <span class:active={editorMode === "normal"}>Annotate</span>
           <input
@@ -5001,6 +4607,75 @@ ${body}
           <span class:active={editorMode === "insert"}>Edit</span>
         </label>
         <button class="sidebar-label load-btn theme-toggle" on:click={toggleThemeMode}>Theme: {activeThemeName}</button>
+      </div>
+
+      <div class="sidebar-section">
+        <input type="file" accept=".srt,.txt,.md,.docx,.pdf,.mp3,.wav,.m4a,.ogg,.oga,.webm,.aac,.flac,.mp4,.mov,.mkv" multiple style="display:none" bind:this={fileInput} on:change={loadFile} />
+        <button class="sidebar-label load-btn" on:click={() => fileInput.click()}>LOAD FILE(S)...</button>
+        <div class="file-actions">
+          <button class="sidebar-label load-btn" on:click={saveDocument}>Save</button>
+          <button class="sidebar-label load-btn" on:click={exportCleanHtml}>Export</button>
+          <button class="sidebar-label load-btn" on:click={transcribeLoadedAudio} disabled={transcriptionBusy}>
+            {transcriptionBusy ? "Transcribing..." : "Transcribe"}
+          </button>
+        </div>
+        {#if transcriptionBusy || transcriptionStatus || transcriptionError}
+          <div class:transcribe-error={Boolean(transcriptionError)} class:transcribe-status={!transcriptionError}>
+            {transcriptionError || transcriptionStatus}
+          </div>
+        {/if}
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-label">Annotation styles</div>
+        <div class="style-list sidebar-style-list">
+          <div class="style-row style-row-plain">
+            <span class="style-swatch" style={`background: ${styleColor(0)}`}></span>
+            <span class="style-name">Space. plain</span>
+          </div>
+          <div class="style-row style-row-plain">
+            <span class="style-swatch style-swatch-box" style={`border-color: ${styleColor(currentStyle)}; color: ${styleColor(currentStyle)}`}></span>
+            <span class="style-name">0. box counterpart</span>
+          </div>
+          {#each orderedHighlightStyles as style, index}
+            <div
+              class="style-row reorderable"
+              role="listitem"
+              class:drag-over={reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name}
+              class:drop-after={reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name && reorderDropTarget.after}
+              class:drop-before={reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name && !reorderDropTarget.after}
+              on:dragover={event => updateReorderDropTarget("style", style.name, event)}
+              on:drop={event => {
+                if (reorderDropTarget?.kind === "style" && reorderDropTarget.id === style.name) {
+                  event.preventDefault();
+                  commitStyleReorder(style.name, reorderDropTarget.after);
+                }
+                finishReorderDrag();
+              }}
+              on:dragend={finishReorderDrag}
+            >
+              <span class="style-swatch" style={`background: ${style.color}`}></span>
+              <span class="style-name">{index + 1}. {style.name}</span>
+              <span class="style-key-badge" title={`Shortcut key for ${style.name}`}>{styleKeyForName(style.name)}</span>
+              <button
+                class="reorder-handle"
+                type="button"
+                draggable="true"
+                aria-label={`Drag ${style.name} to reorder`}
+                title={`Drag ${style.name} to reorder`}
+                on:mousedown={event => event.stopPropagation()}
+                on:click={event => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+                on:dragstart={event => setReorderDragState("style", style.name, event)}
+              >↕</button>
+            </div>
+          {/each}
+        </div>
+        <div class="style-footer-actions">
+          <button class="style-reset-btn" type="button" on:click={resetStyleOrder}>Reset order</button>
+        </div>
       </div>
 
     </div>
@@ -5096,7 +4771,7 @@ ${body}
                           bind:value={summaryTitleDraft}
                           aria-label="Annotation title"
                           on:click={event => event.stopPropagation()}
-                          on:focus={event => focusInputAtEnd(event.target as HTMLInputElement)}
+                          on:focus={event => (event.target as HTMLInputElement).select()}
                           on:blur={() => saveSummaryTitle([section.item])}
                           on:keydown={event => handleSummaryTitleKeydown(event, [section.item])}
                         />
@@ -5171,7 +4846,7 @@ ${body}
                     bind:value={summaryTitleDraft}
                     aria-label="Annotation group title"
                     on:click={event => event.stopPropagation()}
-                    on:focus={event => focusInputAtEnd(event.target as HTMLInputElement)}
+                    on:focus={event => (event.target as HTMLInputElement).select()}
                     on:blur={() => saveSummaryTitle(summaryAnnotationItems(section.items))}
                     on:keydown={event => handleSummaryTitleKeydown(event, summaryAnnotationItems(section.items))}
                   />
@@ -5225,7 +4900,7 @@ ${body}
                               bind:value={summaryTitleDraft}
                               aria-label="Annotation title"
                               on:click={event => event.stopPropagation()}
-                              on:focus={event => focusInputAtEnd(event.target as HTMLInputElement)}
+                              on:focus={event => (event.target as HTMLInputElement).select()}
                               on:blur={() => saveSummaryTitle([item])}
                               on:keydown={event => handleSummaryTitleKeydown(event, [item])}
                             />
@@ -5278,14 +4953,18 @@ ${body}
   {#if !summaryFullscreen}
     <div class="statusbar">
       <div class="status-left">
+        <span class="segment mode" style="color: {editorMode === 'insert' ? activeTheme.green : activeTheme.orange}">{editorModeLabel}</span>
         <span class="segment">{selectionInfo}</span>
         <span class="segment">{wordCountInfo}</span>
+        <span class="segment style" style="color: {currentStyleColor}">{styleLabel}</span>
       </div>
       <div class="status-center">
         {#if audioUrl}
           <div class="audio-widget">
+            <span class="audio-name">{audioFileName}</span>
+            <span class="audio-sep">|</span>
             <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(-mediaSeekSeconds)} title={`Back ${mediaSeekSeconds} seconds (Alt+A/H)`} aria-label={`Back ${mediaSeekSeconds} seconds`}>&lt;&lt;</button>
-            <button class="audio-glyph play" type="button" on:click={toggleAudioPlayback} title="Play / pause (F, Alt+Space)" aria-label="Play / pause">{audioPlaying ? "⏸" : "▶"}</button>
+            <button class="audio-glyph play" type="button" on:click={toggleAudioPlayback} title="Play / pause (Alt+Space)" aria-label="Play / pause">{audioPlaying ? "⏸" : "▶"}</button>
             <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(mediaSeekSeconds)} title={`Forward ${mediaSeekSeconds} seconds (Alt+D/L)`} aria-label={`Forward ${mediaSeekSeconds} seconds`}>&gt;&gt;</button>
             <span class="audio-sep">|</span>
             <button class="audio-rate-text" type="button" on:click={cycleAudioRate} aria-label="Playback speed" title="Playback speed (Alt+R)">{audioRateText}</button>
@@ -5297,7 +4976,7 @@ ${body}
             <span class="audio-name">TTS</span>
             <span class="audio-sep">|</span>
             <button class="audio-glyph" type="button" on:click={() => seekTtsAndPlay(-1)} title="Previous spoken chunk (Alt+A/H)" aria-label="Previous spoken chunk">&lt;&lt;</button>
-            <button class="audio-glyph play" type="button" on:click={toggleTtsPlayback} title="Play / pause TTS (F, Alt+Space)" aria-label="Play / pause TTS">{ttsSpeaking && !ttsPaused ? "⏸" : "▶"}</button>
+            <button class="audio-glyph play" type="button" on:click={toggleTtsPlayback} title="Play / pause TTS (Alt+Space)" aria-label="Play / pause TTS">{ttsSpeaking && !ttsPaused ? "⏸" : "▶"}</button>
             <button class="audio-glyph" type="button" on:click={() => seekTtsAndPlay(1)} title="Next spoken chunk (Alt+D/L)" aria-label="Next spoken chunk">&gt;&gt;</button>
             <span class="audio-sep">|</span>
             <button class="audio-rate-text" type="button" on:click={cycleAudioRate} aria-label="TTS speed" title="TTS speed (Alt+R)">{audioRateText}</button>
@@ -5307,7 +4986,9 @@ ${body}
         {/if}
       </div>
       <div class="status-right">
-        <span class="segment file-name" title={statusFileName}>{statusFileName}</span>
+        <span class="segment">Ln {line}</span>
+        <span class="segment">Col {column}</span>
+        <span class="segment syntax">{loadedFileType}</span>
       </div>
     </div>
   {/if}
@@ -5450,10 +5131,10 @@ ${body}
     font-size: 14px;
     line-height: 1;
     background: transparent;
-    border: 0;
   }
 
   .settings-btn.active {
+    border-color: var(--orange);
     color: var(--orange);
   }
 
@@ -6071,12 +5752,6 @@ ${body}
     gap: 6px;
   }
 
-  .sidebar-bottom {
-    margin-top: auto;
-    border-top: 1px solid var(--internal-border);
-    border-bottom: 0;
-  }
-
   .sidebar-label {
     font-size: 10px;
     text-transform: uppercase;
@@ -6199,7 +5874,6 @@ ${body}
 
   .help-btn {
     background: transparent;
-    border: 0;
     font-size: 14px;
     font-weight: 700;
     width: 26px;
@@ -6210,19 +5884,9 @@ ${body}
     justify-content: center;
     border-radius: 50%;
     color: var(--fg-muted);
+    border-color: var(--border);
   }
-  .help-btn:hover,
-  .help-btn:focus-visible {
-    color: var(--orange);
-    outline: none;
-  }
-
-  .toolbar-btn.settings-btn,
-  .toolbar-btn.help-btn {
-    background: transparent;
-    border: 0;
-    box-shadow: none;
-  }
+  .help-btn:hover { color: var(--orange); border-color: var(--orange); }
 
   .help-overlay {
     position: fixed;
@@ -6294,14 +5958,18 @@ ${body}
 
   .style-row {
     display: grid;
-    grid-template-columns: 16px 22px max-content minmax(0, 1fr);
-    column-gap: 3px;
+    grid-template-columns: 10px minmax(0, 1fr) auto;
+    gap: 6px;
     align-items: center;
-    padding: 0;
+    padding: 1px 0;
+  }
+
+  .style-row-plain {
+    grid-template-columns: 10px minmax(0, 1fr);
   }
 
   .style-row.reorderable {
-    grid-template-columns: 16px 22px max-content minmax(0, 1fr) 20px;
+    grid-template-columns: 10px minmax(0, 1fr) 28px 20px;
   }
 
   .style-row.reorderable.drop-before {
@@ -6313,15 +5981,15 @@ ${body}
   }
 
   .style-swatch {
-    width: 14px;
-    height: 14px;
-    border-radius: 3px;
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
     border: 1px solid rgba(0, 0, 0, 0.2);
   }
 
-  .style-row.active-style .style-swatch {
-    width: 16px;
-    height: 16px;
+  .style-swatch-box {
+    background: transparent !important;
+    border-width: 2px;
   }
 
   .style-name {
@@ -6330,86 +5998,25 @@ ${body}
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--fg);
-    font-size: 13px;
-  }
-
-  .style-separator {
-    color: var(--fg);
-    font-size: 13px;
-    line-height: inherit;
-    user-select: none;
-  }
-
-  .style-title-action {
-    width: 100%;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    font: inherit;
-    font-size: 13px;
-    text-align: left;
-    cursor: text;
-  }
-
-  .style-title-action:hover,
-  .style-title-action:focus-visible {
-    color: var(--orange);
-    outline: none;
-  }
-
-  .style-title-input {
-    box-sizing: border-box;
-    width: 100%;
-    padding: 1px 3px;
-    border: 1px solid var(--border);
-    background: var(--bg);
-    color: var(--fg);
-    font: inherit;
-    font-size: 13px;
-    outline: none;
-  }
-
-  .style-title-input:focus {
-    border-color: var(--orange);
+    font-size: 10px;
   }
 
   .style-key-badge {
+    width: 28px;
+    height: 20px;
     box-sizing: border-box;
-    padding: 0;
-    border: 0;
-    background: transparent;
+    padding: 0 2px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: var(--bg-alt);
     color: var(--fg);
     font: inherit;
-    font-size: 13px;
-    font-weight: 400;
-    line-height: inherit;
-    text-align: right;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 18px;
+    text-align: center;
     text-transform: lowercase;
     user-select: none;
-  }
-
-  .style-key-action,
-  .style-key-input {
-    cursor: text;
-  }
-
-  .style-key-action:hover,
-  .style-key-action:focus-visible {
-    color: var(--orange);
-    outline: none;
-  }
-
-  .style-key-input {
-    height: 20px;
-    width: 22px;
-    padding: 1px 3px;
-    border: 1px solid var(--border);
-    background: var(--bg);
-    outline: none;
-  }
-
-  .style-key-input:focus {
-    border-color: var(--orange);
   }
 
   .reorder-handle {
@@ -6726,7 +6333,8 @@ ${body}
   }
 
   .layout-toggle-row,
-  .layout-range-row {
+  .layout-range-row,
+  .layout-segment-row {
     display: grid;
     align-items: center;
     gap: 6px;
@@ -6746,6 +6354,10 @@ ${body}
     grid-template-columns: 18px minmax(68px, 0.8fr) minmax(0, 1fr) 44px;
   }
 
+  .layout-segment-row {
+    grid-template-columns: 18px minmax(68px, 0.8fr) minmax(0, 1fr);
+  }
+
   .layout-range-label {
     min-width: 0;
     color: var(--fg);
@@ -6755,6 +6367,47 @@ ${body}
     color: var(--fg-muted);
     font-size: 10px;
     text-align: right;
+  }
+
+  .layout-segment-control {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    background: var(--bg-alt);
+  }
+
+  .layout-segment-control button {
+    height: 22px;
+    padding: 0;
+    border: 0;
+    border-right: 1px solid var(--border);
+    background: transparent;
+    color: var(--fg-muted);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .layout-segment-control button:last-child {
+    border-right: 0;
+  }
+
+  .layout-segment-control button.active {
+    background: color-mix(in srgb, var(--orange) 16%, transparent);
+    color: var(--orange);
+  }
+
+  .layout-segment-control button:hover:not(:disabled),
+  .layout-segment-control button:focus-visible {
+    color: var(--orange);
+    outline: none;
+  }
+
+  .layout-segment-control button:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
   }
 
   .editor { position: relative; min-height: 0; height: 100%; overflow: hidden; }
@@ -6825,6 +6478,9 @@ ${body}
     pointer-events: none;
     background: var(--active-line-annotate);
   }
+  :global(.cm-visual-line-marker.is-edit) {
+    background: var(--active-line-edit);
+  }
   :global(.cm-column-guide) {
     position: absolute;
     z-index: 2;
@@ -6848,6 +6504,12 @@ ${body}
       box-shadow: 0 0 0 0 rgba(250, 189, 47, 0);
       background: transparent;
     }
+  }
+  :global(.mode-normal .cm-activeLineGutter) {
+    background: var(--active-gutter-annotate) !important;
+  }
+  :global(.mode-insert .cm-activeLineGutter) {
+    background: var(--active-gutter-edit) !important;
   }
   :global(.cm-content),
   :global(.cm-gutters) {
@@ -6887,11 +6549,8 @@ ${body}
   }
   .segment:last-child { border-right: none; }
   .status-right .segment:first-child { border-left: 1px solid var(--internal-border); }
-  .file-name {
-    max-width: 220px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
+  .syntax { color: var(--orange); }
+  .mode { color: var(--orange); font-weight: 600; }
   .audio-widget {
     display: inline-flex;
     align-items: center;
