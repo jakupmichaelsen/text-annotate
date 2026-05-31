@@ -159,6 +159,7 @@
   let styleKeyInput: HTMLInputElement | null = null;
   let resizingSummarySidebar = false;
   let finishSummaryResize: (() => void) | null = null;
+  let finishRightPaddingDrag: (() => void) | null = null;
   const summarySidebarMinWidth = 240;
   const summarySidebarMaxWidth = 720;
   const styleTitlesStorageKey = "cm6-style-titles";
@@ -685,6 +686,33 @@
     } else {
       paragraphSpacing = Math.round(clampNumber(paragraphSpacing + delta * 0.15, 0, 2) * 100) / 100;
     }
+  }
+
+  function setRightPaddingFromClientX(clientX: number) {
+    if (!editorEl) return;
+    const rect = editorEl.getBoundingClientRect();
+    const maxPadding = Math.max(0, Math.min(720, rect.width - 120));
+    padRight = Math.round(clampNumber(rect.right - clientX, 0, maxPadding));
+  }
+
+  function startRightPaddingDrag(event: PointerEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    finishRightPaddingDrag?.();
+    setRightPaddingFromClientX(event.clientX);
+
+    const move = (moveEvent: PointerEvent) => setRightPaddingFromClientX(moveEvent.clientX);
+    const finish = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+      finishRightPaddingDrag = null;
+    };
+
+    finishRightPaddingDrag = finish;
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
   }
 
   function updateEditorViewportHeight() {
@@ -3192,6 +3220,7 @@ ${body}
     return () => {
       window.removeEventListener("keydown", onWindowKeydown);
       finishSummaryResize?.();
+      finishRightPaddingDrag?.();
       editorResizeObserver.disconnect();
       clearAudioTarget();
       view?.destroy();
@@ -3572,7 +3601,15 @@ ${body}
 
     </div>
 
-    <div class="editor" bind:this={editorEl}></div>
+    <div class="editor" bind:this={editorEl} style={`--editor-right-padding: ${padRight}px;`}>
+      <button
+        class="right-padding-handle"
+        type="button"
+        aria-label="Drag right text border"
+        title="Drag right text border"
+        on:pointerdown={startRightPaddingDrag}
+      ></button>
+    </div>
 
     <aside class="summary-sidebar" class:collapsed={summaryCollapsed} class:fullscreen={summaryFullscreen} class:resizing={resizingSummarySidebar} aria-label="Annotation summary">
       {#if !summaryCollapsed && !summaryFullscreen}
