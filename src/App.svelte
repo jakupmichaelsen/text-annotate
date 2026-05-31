@@ -66,6 +66,9 @@
   let fontSize = 14;
   let paragraphSpacing = 0;
   let showHelp = false;
+  let settingsOpen = false;
+  let settingsTab: "markup" | "layout" | "transcribe" = "markup";
+  let divideImportSentences = true;
   let pdfModalOpen = false;
   let pdfDraftText = "";
   let pdfPreviewUrl = "";
@@ -84,11 +87,20 @@
   let audioDuration = 0;
   let audioPlaying = false;
   let audioLoaded = false;
+  let audioSourceFile: File | null = null;
   let audioRateIndex = 0;
   const audioRates = [1, 1.5, 2];
   const audioDbName = "textAnnotate-state";
   const audioStoreName = "audio";
   const mediaExtensions = [".mp3", ".wav", ".m4a", ".ogg", ".oga", ".webm", ".aac", ".flac", ".mp4", ".mov", ".mkv"];
+  const openAiApiKeyStorageKey = "textAnnotate-openai-api-key";
+  let openAiApiKey = "";
+  let rememberOpenAiApiKey = false;
+  let transcriptionModel = "whisper-1";
+  let transcriptionPrompt = "";
+  let transcriptionBusy = false;
+  let transcriptionStatus = "";
+  let transcriptionError = "";
   let loadedFileType = "Markdown";
   $: pdfFrameSrc = pdfPreviewUrl ? `${pdfPreviewUrl}#zoom=75` : "";
   $: if (audioElement) audioElement.playbackRate = audioRates[audioRateIndex];
@@ -159,6 +171,7 @@
     if (audioUrl) URL.revokeObjectURL(audioUrl);
     audioUrl = "";
     audioFileName = "";
+    audioSourceFile = null;
     audioCurrentTime = 0;
     audioDuration = 0;
     audioPlaying = false;
@@ -226,6 +239,7 @@
 
   async function loadAudioFile(file: File) {
     clearAudioTarget();
+    audioSourceFile = file;
     audioUrl = URL.createObjectURL(file);
     audioFileName = file.name;
     loadedFileType = file.name.split(".").pop()?.toUpperCase() || "MP3";
@@ -385,7 +399,8 @@
 
   function replaceDocument(text: string, preserveLineBreaks = false) {
     if (!view) return;
-    const insert = preserveLineBreaks ? text.replace(/\r\n?/g, "\n").trim() : sentenceLineBreaks(text);
+    const normalized = text.replace(/\r\n?/g, "\n").trim();
+    const insert = preserveLineBreaks || !divideImportSentences ? normalized : sentenceLineBreaks(normalized);
     const initialCursor = firstVisibleDocumentPosition(insert);
     view.dispatch({
       changes: { from: 0, to: view.state.doc.length, insert },
@@ -471,6 +486,140 @@
       .map(line => line.trimEnd())
       .filter(line => line.trim().length > 0)
       .join("\n");
+  }
+
+  function loadOpenAiApiKey() {
+    if (typeof localStorage === "undefined") return "";
+    return localStorage.getItem(openAiApiKeyStorageKey) ?? "";
+  }
+
+  function persistOpenAiApiKey() {
+    if (typeof localStorage === "undefined") return;
+    if (rememberOpenAiApiKey && openAiApiKey.trim()) {
+      localStorage.setItem(openAiApiKeyStorageKey, openAiApiKey.trim());
+    } else {
+      localStorage.removeItem(openAiApiKeyStorageKey);
+    }
+  }
+
+  function handleOpenAiKeyInput(event: Event) {
+    openAiApiKey = (event.target as HTMLInputElement).value;
+    persistOpenAiApiKey();
+  }
+
+  function toggleRememberOpenAiKey(event: Event) {
+    rememberOpenAiApiKey = (event.target as HTMLInputElement).checked;
+    persistOpenAiApiKey();
+  }
+
+  async function transcribeLoadedAudio() {
+    transcriptionError = "";
+    transcriptionStatus = "";
+    if (!audioSourceFile) {
+      transcriptionError = "Load an audio or video file first.";
+      return;
+    }
+
+    let apiKey = openAiApiKey.trim();
+    if (!apiKey) {
+      const enteredKey = prompt("OpenAI API key");
+      apiKey = enteredKey?.trim() ?? "";
+      if (!apiKey) {
+        transcriptionError = "OpenAI API key is required for transcription.";
+        return;
+      }
+      openAiApiKey = apiKey;
+      persistOpenAiApiKey();
+    }
+
+    transcriptionBusy = true;
+    transcriptionStatus = `Uploading ${audioFileName || "media"}...`;
+
+    try {
+      const formData = new FormData();
+      formData.append("file", audioSourceFile, audioSourceFile.name);
+      formData.append("model", transcriptionModel);
+      if (transcriptionPrompt.trim()) formData.append("prompt", transcriptionPrompt.trim());
+      if (transcriptionModel === "whisper-1") {
+        formData.append("response_format", "verbose_json");
+        formData.append("timestamp_granularities[]", "segment");
+      } else {
+        formData.append("response_format", "text");
+      }
+
+      const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: formData
+      });
+      const contentType = response.headers.get("content-type") ?? "";
+      const payload = contentType.includes("application/json") ? await response.json() : await response.text();
+      if (!response.ok) throw new Error(openAiErrorMessage(payload, response.status));
+
+      const transcript = transcriptionPayloadToText(payload);
+      if (!transcript.trim()) throw new Error("The transcription completed, but no text was returned.");
+      loadedFileType = transcriptionModel === "whisper-1" && transcript.includes("-->") ? "SRT" : "TRANSCRIPT";
+      replaceDocument(transcript, loadedFileType === "SRT");
+      transcriptionStatus = `Loaded transcript from ${audioFileName || "media"}.`;
+      persistOpenAiApiKey();
+    } catch (error) {
+      transcriptionError = error instanceof Error ? error.message : "Transcription failed.";
+      transcriptionStatus = "";
+    } finally {
+      transcriptionBusy = false;
+    }
+  }
+
+  function transcriptionPayloadToText(payload: unknown) {
+    if (typeof payload === "string") return stripEmptyLines(payload);
+    if (!payload || typeof payload !== "object") return "";
+
+    const data = payload as { text?: string; segments?: { start?: number; end?: number; text?: string }[] };
+    if (Array.isArray(data.segments) && data.segments.length) {
+      return data.segments
+        .map(segment => {
+          const text = (segment.text ?? "").replace(/\s+/g, " ").trim();
+          if (!text) return "";
+          return `[${formatSrtTime(segment.start ?? 0)} --> ${formatSrtTime(segment.end ?? segment.start ?? 0)}]\n${text}`;
+        })
+        .filter(Boolean)
+        .join("\n");
+    }
+
+    return stripEmptyLines(data.text ?? "");
+  }
+
+  function formatSrtTime(seconds: number) {
+    const value = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
+    const totalMs = Math.round(value * 1000);
+    const hours = Math.floor(totalMs / 3_600_000);
+    const minutes = Math.floor((totalMs % 3_600_000) / 60_000);
+    const wholeSeconds = Math.floor((totalMs % 60_000) / 1000);
+    const milliseconds = totalMs % 1000;
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(wholeSeconds).padStart(2, "0")}.${String(milliseconds).padStart(3, "0")}`;
+  }
+
+  function openAiErrorMessage(payload: unknown, status: number) {
+    if (payload && typeof payload === "object" && "error" in payload) {
+      const error = (payload as { error?: { message?: string } }).error;
+      if (error?.message) return error.message;
+    }
+    if (typeof payload === "string" && payload.trim()) return payload.trim();
+    return `OpenAI transcription request failed (${status}).`;
+  }
+
+  function clampNumber(value: number, min: number, max: number) {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  function adjustLayoutValue(kind: "lineHeight" | "fontSize" | "paragraphSpacing", delta: number) {
+    if (kind === "lineHeight") {
+      lineHeight = Math.round(clampNumber(lineHeight + delta * 0.15, 1, 3) * 100) / 100;
+    } else if (kind === "fontSize") {
+      fontSize = Math.round(clampNumber(fontSize + delta, 10, 28));
+    } else {
+      paragraphSpacing = Math.round(clampNumber(paragraphSpacing + delta * 0.15, 0, 2) * 100) / 100;
+    }
   }
 
   function updateEditorViewportHeight() {
@@ -2965,6 +3114,8 @@ ${body}
     updateEditorViewportHeight();
     if (editorEl) editorResizeObserver.observe(editorEl);
     updateStatusFromView(view);
+    openAiApiKey = loadOpenAiApiKey();
+    rememberOpenAiApiKey = Boolean(openAiApiKey);
     void restoreAudioFile();
 
     return () => {
@@ -2995,8 +3146,215 @@ ${body}
   <div class="toolbar">
     <div class="title">textAnnotate</div>
     <span class="subtitle">paste or load .srt, .txt, .md, .docx, .pdf</span>
+    <button
+      class="toolbar-btn settings-btn"
+      class:active={settingsOpen}
+      on:click={() => settingsOpen = !settingsOpen}
+      title="Settings"
+      aria-label="Settings"
+      aria-expanded={settingsOpen}
+    >⚙</button>
     <button class="toolbar-btn help-btn" on:click={() => showHelp = !showHelp} title="Keyboard shortcuts (?)">?</button>
   </div>
+
+  {#if settingsOpen}
+    <div class="settings-popover" role="dialog" aria-label="Settings">
+      <div class="settings-tabs" role="tablist" aria-label="Settings sections">
+        <button type="button" class:active={settingsTab === "markup"} on:click={() => settingsTab = "markup"}>Markup</button>
+        <button type="button" class:active={settingsTab === "layout"} on:click={() => settingsTab = "layout"}>Layout</button>
+        <button type="button" class:active={settingsTab === "transcribe"} on:click={() => settingsTab = "transcribe"}>Transcribe</button>
+      </div>
+
+      {#if settingsTab === "markup"}
+        <div class="settings-panel">
+          <section class="settings-section">
+            <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">↵</span><span>Import</span></div>
+            <label class="settings-toggle-row">
+              <span class="settings-control-icon" aria-hidden="true">¶</span>
+              <span>Divide imported sentences into lines</span>
+              <input type="checkbox" bind:checked={divideImportSentences} />
+            </label>
+          </section>
+          <section class="settings-section">
+            <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">`</span><span>Markup Visibility</span></div>
+            <div class="settings-radio-group" aria-label="Markup visibility">
+              <label class="settings-choice-row">
+                <span class="settings-control-icon" aria-hidden="true">✓</span>
+                <span>Clean</span>
+                <input type="radio" name="annotationMode" value="clean"
+                  checked={annotationMode === "clean"}
+                  on:change={() => { annotationMode = "clean"; view?.dispatch({}); view?.focus(); }} />
+              </label>
+              <label class="settings-choice-row">
+                <span class="settings-control-icon" aria-hidden="true">•</span>
+                <span>Raw (current)</span>
+                <input type="radio" name="annotationMode" value="raw"
+                  checked={annotationMode === "raw"}
+                  on:change={() => { annotationMode = "raw"; view?.dispatch({}); view?.focus(); }} />
+              </label>
+              <label class="settings-choice-row">
+                <span class="settings-control-icon" aria-hidden="true">≡</span>
+                <span>Raw (all)</span>
+                <input type="radio" name="annotationMode" value="all"
+                  checked={annotationMode === "all"}
+                  on:change={() => { annotationMode = "all"; view?.dispatch({}); view?.focus(); }} />
+              </label>
+            </div>
+          </section>
+        </div>
+      {:else if settingsTab === "layout"}
+        <div class="settings-panel">
+          <section class="settings-section">
+            <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">Aa</span><span>Typography</span></div>
+            <div class="layout-stepper-grid">
+              <div class="layout-stepper">
+                <span class="layout-control-icon" aria-hidden="true">↕</span>
+                <span class="layout-stepper-label">Line height</span>
+                <span class="layout-stepper-value">{lineHeight.toFixed(2)}</span>
+                <span class="layout-stepper-buttons">
+                  <button type="button" on:click={() => adjustLayoutValue("lineHeight", -1)} aria-label="Decrease line height">−</button>
+                  <button type="button" on:click={() => adjustLayoutValue("lineHeight", 1)} aria-label="Increase line height">+</button>
+                </span>
+              </div>
+              <div class="layout-stepper">
+                <span class="layout-control-icon" aria-hidden="true">T</span>
+                <span class="layout-stepper-label">Font size</span>
+                <span class="layout-stepper-value">{fontSize}px</span>
+                <span class="layout-stepper-buttons">
+                  <button type="button" on:click={() => adjustLayoutValue("fontSize", -1)} aria-label="Decrease font size">−</button>
+                  <button type="button" on:click={() => adjustLayoutValue("fontSize", 1)} aria-label="Increase font size">+</button>
+                </span>
+              </div>
+              <div class="layout-stepper">
+                <span class="layout-control-icon" aria-hidden="true">¶</span>
+                <span class="layout-stepper-label">Paragraph spacing</span>
+                <span class="layout-stepper-value">{paragraphSpacing.toFixed(2)}</span>
+                <span class="layout-stepper-buttons">
+                  <button type="button" on:click={() => adjustLayoutValue("paragraphSpacing", -1)} aria-label="Decrease paragraph spacing">−</button>
+                  <button type="button" on:click={() => adjustLayoutValue("paragraphSpacing", 1)} aria-label="Increase paragraph spacing">+</button>
+                </span>
+              </div>
+            </div>
+          </section>
+          <section class="settings-section">
+            <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">▣</span><span>Editor Frame</span></div>
+            <label class="settings-range-row">
+              <span class="settings-control-icon" aria-hidden="true">L</span>
+              <span class="settings-range-label">Left padding</span>
+              <input type="range" min="0" max="400" step="4" bind:value={padLeft} class="slider" aria-label="Left padding" />
+              <span class="settings-range-value">{padLeft}</span>
+            </label>
+            <label class="settings-range-row">
+              <span class="settings-control-icon" aria-hidden="true">R</span>
+              <span class="settings-range-label">Right padding</span>
+              <input type="range" min="0" max="400" step="4" bind:value={padRight} class="slider" aria-label="Right padding" />
+              <span class="settings-range-value">{padRight}</span>
+            </label>
+            <label class="settings-range-row">
+              <span class="settings-control-icon" aria-hidden="true">T</span>
+              <span class="settings-range-label">Top padding</span>
+              <input type="range" min="0" max="400" step="4" bind:value={padTop} class="slider" aria-label="Top padding" />
+              <span class="settings-range-value">{padTop}</span>
+            </label>
+            <label class="settings-range-row">
+              <span class="settings-control-icon" aria-hidden="true">B</span>
+              <span class="settings-range-label">Bottom padding</span>
+              <input type="range" min="0" max={Math.max(0, editorViewportHeight - 48)} step="4" bind:value={padBottom} class="slider" aria-label="Bottom padding" />
+              <span class="settings-range-value">{padBottom}</span>
+            </label>
+          </section>
+          <section class="settings-section">
+            <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">❝</span><span>Notes</span></div>
+            <label class="settings-range-row">
+              <span class="settings-control-icon" aria-hidden="true">A</span>
+              <span class="settings-range-label">Alignment</span>
+              <input
+                type="range"
+                min="0"
+                max="2"
+                step="1"
+                class="slider"
+                aria-label="Notes alignment"
+                disabled={!blockquoteActive}
+                value={blockquoteAlign === "left" ? 0 : blockquoteAlign === "center" ? 1 : 2}
+                on:input={e => {
+                  const align = ["left", "center", "right"][+(e.target as HTMLInputElement).value] as BlockquoteAlign;
+                  if (view) updateCurrentBlockquote(view, { align });
+                }}
+              />
+              <span class="settings-range-value">{blockquoteAlign[0].toUpperCase()}</span>
+            </label>
+            <label class="settings-range-row">
+              <span class="settings-control-icon" aria-hidden="true">W</span>
+              <span class="settings-range-label">Width</span>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                class="slider"
+                aria-label="Notes width"
+                disabled={!blockquoteActive}
+                value={blockquoteBgWidth}
+                on:input={e => {
+                  if (view) updateCurrentBlockquote(view, { width: +(e.target as HTMLInputElement).value });
+                }}
+              />
+              <span class="settings-range-value">{blockquoteBgWidth}</span>
+            </label>
+          </section>
+        </div>
+      {:else if settingsTab === "transcribe"}
+        <div class="settings-panel">
+          <section class="settings-section">
+            <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">⎋</span><span>Connection</span></div>
+            <label class="settings-field">
+              <span class="settings-field-label">OpenAI API key</span>
+              <input
+                class="settings-input"
+                type="password"
+                autocomplete="off"
+                placeholder="sk-..."
+                value={openAiApiKey}
+                on:input={handleOpenAiKeyInput}
+              />
+            </label>
+            <label class="settings-toggle-row">
+              <span class="settings-control-icon" aria-hidden="true">◎</span>
+              <span>Remember key on this device</span>
+              <input type="checkbox" checked={rememberOpenAiApiKey} on:change={toggleRememberOpenAiKey} />
+            </label>
+          </section>
+          <section class="settings-section">
+            <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">▣</span><span>Transcription</span></div>
+            <label class="settings-field">
+              <span class="settings-field-label">Model</span>
+              <select class="settings-input" bind:value={transcriptionModel}>
+                <option value="whisper-1">whisper-1 (timestamps)</option>
+                <option value="gpt-4o-transcribe">gpt-4o-transcribe</option>
+                <option value="gpt-4o-mini-transcribe">gpt-4o-mini-transcribe</option>
+              </select>
+            </label>
+            <label class="settings-field">
+              <span class="settings-field-label">Prompt</span>
+              <textarea
+                class="settings-input settings-textarea"
+                rows="3"
+                bind:value={transcriptionPrompt}
+                placeholder="Names, terms, or context"
+              ></textarea>
+            </label>
+            {#if transcriptionStatus}
+              <div class="transcribe-status">{transcriptionStatus}</div>
+            {/if}
+            {#if transcriptionError}
+              <div class="transcribe-error">{transcriptionError}</div>
+            {/if}
+          </section>
+        </div>
+      {/if}
+    </div>
+  {/if}
 
   <div
     class="main"
@@ -3023,6 +3381,16 @@ ${body}
           <button class="sidebar-label load-btn" on:click={saveDocument}>Save</button>
           <button class="sidebar-label load-btn" on:click={exportCleanHtml}>Export</button>
         </div>
+        {#if audioSourceFile}
+          <button class="sidebar-label load-btn" on:click={transcribeLoadedAudio} disabled={transcriptionBusy}>
+            {transcriptionBusy ? "Transcribing..." : "Transcribe"}
+          </button>
+        {/if}
+        {#if transcriptionBusy || transcriptionStatus || transcriptionError}
+          <div class="transcribe-inline-status" class:error={!!transcriptionError}>
+            {transcriptionError || transcriptionStatus || "Transcribing..."}
+          </div>
+        {/if}
       </div>
 
       <div class="sidebar-section">
@@ -3104,68 +3472,6 @@ ${body}
             </div>
           {/each}
         </div>
-      </div>
-
-      <div class="sidebar-section">
-        <div class="sidebar-label">Layout</div>
-        <div class="slider-row" data-tooltip="Left padding"><span class="slider-lbl">L</span><input type="range" min="0" max="400" step="4" bind:value={padLeft}   class="slider" aria-label="Left padding" /><span class="slider-val">{padLeft}</span></div>
-        <div class="slider-row" data-tooltip="Right padding"><span class="slider-lbl">R</span><input type="range" min="0" max="400" step="4" bind:value={padRight}  class="slider" aria-label="Right padding" /><span class="slider-val">{padRight}</span></div>
-        <div class="slider-row" data-tooltip="Top padding"><span class="slider-lbl">T</span><input type="range" min="0" max="400" step="4" bind:value={padTop}    class="slider" aria-label="Top padding" /><span class="slider-val">{padTop}</span></div>
-        <div class="slider-row" data-tooltip="Bottom padding"><span class="slider-lbl">B</span><input type="range" min="0" max={Math.max(0, editorViewportHeight - 48)} step="4" bind:value={padBottom} class="slider" aria-label="Bottom padding" /><span class="slider-val">{padBottom}</span></div>
-        <div class="slider-row" data-tooltip="Line height"><span class="slider-lbl">LH</span><input type="range" min="1" max="3" step="0.05" bind:value={lineHeight} class="slider" aria-label="Line height" /><span class="slider-val">{lineHeight.toFixed(2)}</span></div>
-        <div class="slider-row" data-tooltip="Spacing after each line"><span class="slider-lbl">PS</span><input type="range" min="0" max="2" step="0.05" bind:value={paragraphSpacing} class="slider" aria-label="Paragraph spacing" /><span class="slider-val">{paragraphSpacing.toFixed(2)}</span></div>
-        <div class="slider-row" data-tooltip="Font size"><span class="slider-lbl">FS</span><input type="range" min="10" max="28" step="1" bind:value={fontSize} class="slider" aria-label="Font size" /><span class="slider-val">{fontSize}</span></div>
-        <div class="slider-row" data-tooltip="Notes alignment">
-          <span class="slider-lbl">A</span>
-          <input type="range" min="0" max="2" step="1" class="slider"
-            aria-label="Notes alignment"
-            disabled={!blockquoteActive}
-            value={blockquoteAlign === "left" ? 0 : blockquoteAlign === "center" ? 1 : 2}
-            on:input={e => {
-              const align = ["left", "center", "right"][+(e.target as HTMLInputElement).value] as BlockquoteAlign;
-              if (view) updateCurrentBlockquote(view, { align });
-            }} />
-          <span class="slider-val">{blockquoteAlign[0].toUpperCase()}</span>
-        </div>
-        <div class="slider-row" data-tooltip="Notes width">
-          <span class="slider-lbl">BG</span>
-          <input
-            type="range"
-            min="0"
-            max="100"
-            step="1"
-            class="slider"
-            aria-label="Notes width"
-            disabled={!blockquoteActive}
-            value={blockquoteBgWidth}
-            on:input={e => {
-              if (view) updateCurrentBlockquote(view, { width: +(e.target as HTMLInputElement).value });
-            }}
-          />
-          <span class="slider-val">{blockquoteBgWidth}</span>
-        </div>
-      </div>
-
-      <div class="sidebar-section">
-        <div class="sidebar-label">Display</div>
-        <label class="sidebar-toggle">
-          <input type="radio" name="annotationMode" value="clean"
-            checked={annotationMode === "clean"}
-            on:change={() => { annotationMode = "clean"; view?.dispatch({}); view?.focus(); }} />
-          Clean
-        </label>
-        <label class="sidebar-toggle">
-          <input type="radio" name="annotationMode" value="raw"
-            checked={annotationMode === "raw"}
-            on:change={() => { annotationMode = "raw"; view?.dispatch({}); view?.focus(); }} />
-          Raw (current)
-        </label>
-        <label class="sidebar-toggle">
-          <input type="radio" name="annotationMode" value="all"
-            checked={annotationMode === "all"}
-            on:change={() => { annotationMode = "all"; view?.dispatch({}); view?.focus(); }} />
-          Raw (all)
-        </label>
       </div>
 
     </div>

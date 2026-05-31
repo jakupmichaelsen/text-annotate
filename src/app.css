@@ -596,6 +596,271 @@
     cursor: pointer;
   }
 
+  .settings-btn {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    font-size: 14px;
+    line-height: 1;
+    background: transparent;
+    border: 0;
+  }
+
+  .settings-btn.active {
+    color: var(--orange);
+  }
+
+  .settings-popover {
+    position: absolute;
+    top: 42px;
+    left: 12px;
+    z-index: 80;
+    width: min(420px, calc(100vw - 24px));
+    max-height: calc(100vh - 58px);
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-hard);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.36);
+    overflow: hidden;
+  }
+
+  .settings-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-alt);
+  }
+
+  .settings-tabs button {
+    height: 32px;
+    border: none;
+    border-right: 1px solid var(--border);
+    background: transparent;
+    color: var(--fg-muted);
+    font: inherit;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    cursor: pointer;
+  }
+
+  .settings-tabs button:last-child {
+    border-right: none;
+  }
+
+  .settings-tabs button.active,
+  .settings-tabs button:hover,
+  .settings-tabs button:focus-visible {
+    color: var(--orange);
+    background: var(--bg-hard);
+    outline: none;
+  }
+
+  .settings-panel {
+    display: grid;
+    gap: 12px;
+    min-height: 0;
+    overflow: auto;
+    padding: 12px;
+  }
+
+  .settings-radio-group {
+    display: grid;
+    gap: 6px;
+  }
+
+  .settings-section {
+    display: grid;
+    gap: 6px;
+  }
+
+  .settings-section-heading {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--orange);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.1;
+    text-transform: uppercase;
+  }
+
+  .settings-section-icon,
+  .settings-control-icon,
+  .layout-control-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    font-family: "Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .settings-section-icon {
+    width: 18px;
+    height: 18px;
+    border: 1px solid color-mix(in srgb, var(--orange) 42%, transparent);
+    border-radius: 4px;
+    color: var(--orange);
+    font-size: 10px;
+  }
+
+  .settings-control-icon,
+  .layout-control-icon {
+    width: 18px;
+    height: 18px;
+    color: var(--fg-muted);
+    font-size: 12px;
+  }
+
+  .settings-toggle-row,
+  .settings-choice-row {
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px;
+    color: var(--fg);
+    font-size: 11px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .settings-toggle-row input,
+  .settings-choice-row input {
+    accent-color: #7c6f64;
+    cursor: pointer;
+  }
+
+  .settings-field {
+    display: grid;
+    gap: 5px;
+  }
+
+  .settings-field-label {
+    color: var(--fg);
+    font-size: 11px;
+  }
+
+  .settings-input {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg);
+    color: var(--fg);
+    padding: 6px 8px;
+    font-family: inherit;
+    font-size: 11px;
+    line-height: 1.35;
+    outline: none;
+  }
+
+  .settings-input:focus {
+    border-color: var(--orange);
+  }
+
+  .settings-textarea {
+    resize: vertical;
+    min-height: 68px;
+  }
+
+  .layout-stepper-grid {
+    display: grid;
+    gap: 5px;
+  }
+
+  .layout-stepper {
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr) 42px auto;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    color: var(--fg-muted);
+    font-size: 11px;
+  }
+
+  .layout-stepper-label {
+    min-width: 0;
+    color: var(--fg);
+  }
+
+  .layout-stepper-value {
+    color: var(--fg-muted);
+    font-size: 10px;
+    text-align: right;
+  }
+
+  .layout-stepper-buttons {
+    display: flex;
+    gap: 2px;
+  }
+
+  .layout-stepper-buttons button {
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: var(--bg-alt);
+    color: var(--fg-muted);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .layout-stepper-buttons button:hover,
+  .layout-stepper-buttons button:focus-visible {
+    border-color: var(--orange);
+    color: var(--orange);
+    outline: none;
+  }
+
+  .settings-range-row {
+    display: grid;
+    grid-template-columns: 18px minmax(68px, 0.8fr) minmax(0, 1fr) 40px;
+    align-items: center;
+    gap: 6px;
+    color: var(--fg);
+    font-size: 11px;
+  }
+
+  .settings-range-label {
+    min-width: 0;
+  }
+
+  .settings-range-value {
+    color: var(--fg-muted);
+    font-size: 10px;
+    text-align: right;
+  }
+
+  .transcribe-status,
+  .transcribe-error,
+  .transcribe-inline-status {
+    font-size: 10px;
+    line-height: 1.35;
+  }
+
+  .transcribe-status {
+    color: var(--fg-muted);
+  }
+
+  .transcribe-error,
+  .transcribe-inline-status.error {
+    color: var(--yellow);
+  }
+
+  .transcribe-inline-status {
+    color: var(--fg-muted);
+  }
+
   .help-btn {
     font-size: 14px;
     font-weight: 700;
