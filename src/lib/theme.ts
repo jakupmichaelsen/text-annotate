@@ -4,21 +4,9 @@ import { EditorView } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 
 export const highlightStyles = [
-  { name: "green", color: "#b8bb26" },
   { name: "red", color: "#fb4934" },
-  { name: "steel", color: "#83a598" },
-  { name: "orange", color: "#fe8019" },
-  { name: "periwinkle", color: "#8370d0" },
-  { name: "sand", color: "#d8bd7f" },
-  { name: "mint", color: "#6fc6a4" },
-  { name: "denim", color: "#3f5f9f" },
-  { name: "yellow", color: "#fabd2f" },
-  { name: "indigo", color: "#4f46e5" },
-  { name: "brown", color: "#8f6f3f" },
-  { name: "slate", color: "#586e75" },
-  { name: "sky", color: "#57a0d5" },
-  { name: "rosewood", color: "#8f3f4d" },
-  { name: "purple", color: "#d3869b" }
+  { name: "green", color: "#b8bb26" },
+  { name: "callout", color: "currentColor" }
 ];
 
 export const gruvbox = {
@@ -137,10 +125,6 @@ export function buildEditorTheme(theme: ThemePalette): Extension {
     ".cm-searchMatch": { backgroundColor: theme.searchMatch, outline: `1px solid ${theme.yellow}` },
     ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: theme.searchMatchSelected },
     ".cm-matchingBracket, .cm-nonmatchingBracket": { backgroundColor: theme.bgAlt, outline: `1px solid ${theme.blue}` },
-    ...Object.fromEntries(highlightStyles.map(s => [
-      `.cm-annotation-${s.name}`,
-      { color: `${contrastColor(s.color, theme.bg, theme.fg)} !important`, backgroundColor: `${s.color} !important`, border: "none" }
-    ])),
     ".cm-formatting-code": { color: theme.orange },
     ".cm-formatting-code-block": { color: theme.orange },
     ".cm-formatting": { color: theme.fgMuted },

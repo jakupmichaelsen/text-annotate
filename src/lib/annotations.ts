@@ -1,9 +1,9 @@
-export const annotationPattern = /`([^`]+)`<!--\s*(\w+),\s*(.+?):\s*"([^"]*)"(?:,\s*title:\s*"([^"]*)")?\s*-->/g;
+export const annotationPattern = /`([^`]+)`<!--\s*(\w+(?:\s+\w+)?),\s*(.+?):\s*"([^"]*)"(?:,\s*title:\s*"([^"]*)")?\s*-->/g;
 export const blockquoteMetaPattern = /<!--\s*align:(left|center|right)\s+width:(\d{1,3})\s*-->/i;
 
 export function summaryVisibleText(text: string) {
   return text
-    .replace(/`([^`]+)`<!--\s*\w+,\s*.+?:\s*"[^"]*"(?:,\s*title:\s*"[^"]*")?\s*-->/g, "$1")
+    .replace(/`([^`]+)`<!--\s*\w+(?:\s+\w+)?,\s*.+?:\s*"[^"]*"(?:,\s*title:\s*"[^"]*")?\s*-->/g, "$1")
     .replace(/<!--\s*align:(left|center|right)\s+width:\d{1,3}\s*-->/gi, " ")
     .replace(/<!--[\s\S]*?-->/g, " ")
     .replace(/^\s*\[\s*[0-9:.]+\s*-->\s*[0-9:.]+\s*\]\s*$/gm, " ")

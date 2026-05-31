@@ -101,8 +101,6 @@
   const mediaExtensions = [".mp3", ".wav", ".m4a", ".ogg", ".oga", ".webm", ".aac", ".flac", ".mp4", ".mov", ".mkv"];
   const openAiApiKeyStorageKey = "textAnnotate-openai-api-key";
   const themeStorageKey = "cm6-theme";
-  const manualStyleName = "manual";
-  const manualAnnotationColorStorageKey = "cm6-manual-annotation-color";
   let openAiApiKey = "";
   let rememberOpenAiApiKey = false;
   let transcriptionModel = "whisper-1";
@@ -111,13 +109,16 @@
   let transcriptionStatus = "";
   let transcriptionError = "";
   let themeMode = loadThemeMode();
-  let manualAnnotationColor = loadManualAnnotationColor();
   let loadedFileType = "Markdown";
   $: pdfFrameSrc = pdfPreviewUrl ? `${pdfPreviewUrl}#zoom=75` : "";
   $: if (audioElement) audioElement.playbackRate = audioRates[audioRateIndex];
   $: audioRateText = audioRateIndex === 0 ? "x1" : audioRateIndex === 1 ? "x1½" : "x2";
 
   let currentStyle = 0;
+  type AnnotationVariant = "fill" | "box" | "underline" | "rail" | "bars";
+  const annotationVariants: AnnotationVariant[] = ["fill", "box", "underline", "rail", "bars"];
+  let currentAnnotationVariant: AnnotationVariant = "fill";
+  let variantPickerOpen = false;
   let annotationMode: "clean" | "raw" | "all" = "clean";
   let blockquoteAlign: "left" | "center" | "right" = "left";
   let blockquoteBgWidth = 100;
@@ -167,14 +168,13 @@
   const summarySidebarMaxWidth = 720;
   const styleTitlesStorageKey = "cm6-style-titles";
   const styleKeysStorageKey = "cm6-style-keys";
-  const defaultStyleKeyOrder = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "z", "c", "v", "b", "m", ",", ".", "/"];
-  const reservedStyleKeys = new Set(["h", "j", "k", "l", "w", "a", "s", "d", "q", "e", "n", "u", "x", "?", " "]);
+  const defaultStyleKeyOrder = ["1", "2", "3"];
+  const reservedStyleKeys = new Set(["h", "j", "k", "l", "w", "a", "s", "d", "q", "e", "n", "u", "x", "4", "?", " "]);
   let styleTitles = loadStyleTitles();
   let styleKeys = loadStyleKeys();
   const themeCompartment = new Compartment();
   $: activeTheme = getTheme(themeMode);
   $: activeThemeName = themeMode === "nord" ? "Nord" : "Gruvbox";
-  $: manualStyleColor = currentManualStyleColor(activeTheme);
   $: highlightStyles = currentHighlightStyles(activeTheme);
   $: editorModeLabel = editorMode === "insert" ? "EDIT" : "ANNOTATE";
   $: summaryFontSize = Math.round((11 + ((summarySidebarWidth - summarySidebarMinWidth) / 110)) * 10) / 10;
@@ -361,7 +361,7 @@
     if (isModeShortcut(event) || isAudioShortcut(event) || isAudioRateShortcut(event)) return true;
     if (event.ctrlKey && !event.altKey && (event.key === "z" || event.key === "y" || event.key === "Z")) return true;
     if (editorMode !== "normal" || event.altKey) return false;
-    if (!event.ctrlKey && styleNumberForKey(event.key) !== null) return true;
+    if (!event.ctrlKey && (styleNumberForKey(event.key) !== null || event.key === "4")) return true;
 
     if (event.ctrlKey) {
       if (event.key === "ArrowLeft" || event.key === "ArrowRight" || event.key === "ArrowUp" || event.key === "ArrowDown") return true;
@@ -523,35 +523,6 @@
   function loadThemeMode(): ThemeMode {
     const stored = typeof localStorage === "undefined" ? null : localStorage.getItem(themeStorageKey);
     return stored === "gruvbox" ? "gruvbox" : "nord";
-  }
-
-  function loadManualAnnotationColor() {
-    if (typeof localStorage === "undefined") return "";
-    return normalizedManualAnnotationColor(localStorage.getItem(manualAnnotationColorStorageKey) ?? "");
-  }
-
-  function normalizedManualAnnotationColor(value: string) {
-    const normalized = value.trim().toLowerCase();
-    return /^#[0-9a-f]{6}$/i.test(normalized) ? normalized : "";
-  }
-
-  function colorPickerManualColor() {
-    return normalizedManualAnnotationColor(manualAnnotationColor) || activeTheme.orange;
-  }
-
-  function persistManualAnnotationColor() {
-    const normalized = normalizedManualAnnotationColor(manualAnnotationColor);
-    manualAnnotationColor = normalized;
-    if (typeof localStorage !== "undefined") {
-      if (normalized) localStorage.setItem(manualAnnotationColorStorageKey, normalized);
-      else localStorage.removeItem(manualAnnotationColorStorageKey);
-    }
-    view?.dispatch({ effects: themeCompartment.reconfigure(buildThemeExtensions(activeTheme)) });
-  }
-
-  function resetManualAnnotationColor() {
-    manualAnnotationColor = "";
-    persistManualAnnotationColor();
   }
 
   function buildThemeExtensions(theme: ThemePalette): Extension[] {
@@ -1102,7 +1073,7 @@
   $: annotationMode, view && view.dispatch({});
 
   function cycleStyle(delta: number) {
-    currentStyle = cycleStyleNumber(currentStyle, delta);
+    currentStyle = cycleStyleNumber(currentStyle || 1, delta, false);
   }
 
   function cycleStyleNumber(style: number, delta: number, includePlain = true) {
@@ -1120,16 +1091,12 @@
     return style === 0 ? "" : highlightStyles[style - 1]?.name ?? "";
   }
 
-  function currentManualStyleColor(theme = activeTheme) {
-    return normalizedManualAnnotationColor(manualAnnotationColor) || theme.orange;
-  }
-
   function currentHighlightStyles(theme = activeTheme) {
-    return [...baseHighlightStyles, { name: manualStyleName, color: currentManualStyleColor(theme) }];
+    return baseHighlightStyles.map(style => style.name === "callout" ? { ...style, color: theme.fg } : style);
   }
 
   function styleColor(style: number) {
-    return style === 0 ? activeTheme.orange : highlightStyles[style - 1]?.color ?? activeTheme.fg;
+    return style === 0 ? activeTheme.orange : annotationColorForStyle(highlightStyles[style - 1]?.name ?? "");
   }
 
   function styleNumberForName(name: string) {
@@ -1144,6 +1111,7 @@
   function styleNumberForKey(key: string) {
     const normalized = normalizeStyleKey(key);
     if (!normalized) return null;
+    if (normalized === "0") return 0;
     const index = highlightStyles.findIndex(style => styleKeyForName(style.name) === normalized);
     return index < 0 ? null : index + 1;
   }
@@ -1151,7 +1119,7 @@
   function normalizeStyleKey(key: string) {
     if (key.length !== 1 || /\s/.test(key)) return "";
     const normalized = key.toLowerCase();
-    return reservedStyleKeys.has(normalized) ? "" : normalized;
+    return normalized === "0" || !reservedStyleKeys.has(normalized) ? normalized : "";
   }
 
   function defaultStyleKeyForName(name: string) {
@@ -1161,11 +1129,66 @@
   }
 
   function defaultStyleTitle(name: string) {
-    return name;
+    return name === "callout" ? "callout" : name;
   }
 
   function styleDisplayTitle(name: string) {
     return styleTitles[name] || defaultStyleTitle(name);
+  }
+
+  function normalizeAnnotationVariant(value: string | undefined): AnnotationVariant {
+    return annotationVariants.includes(value as AnnotationVariant) ? value as AnnotationVariant : "fill";
+  }
+
+  function annotationStyleParts(token: string) {
+    const [style = "", variant = "fill"] = token.trim().toLowerCase().split(/\s+/, 2);
+    return { style, variant: normalizeAnnotationVariant(variant) };
+  }
+
+  function annotationStyleToken(style: string, variant = currentAnnotationVariant) {
+    return `${style} ${normalizeAnnotationVariant(variant)}`;
+  }
+
+  function annotationColorForStyle(name: string, theme = activeTheme) {
+    if (name === "callout") return theme.fg;
+    return highlightStyles.find(style => style.name === name)?.color ?? theme.yellow;
+  }
+
+  function annotationTextColorForStyle(name: string, color: string, theme = activeTheme) {
+    return name === "callout" ? theme.bg : contrastColor(color, theme.bg, theme.fg);
+  }
+
+  function annotationMarkCss(styleName: string, variant: AnnotationVariant, color: string, theme = activeTheme) {
+    const textColor = annotationTextColorForStyle(styleName, color, theme);
+    const softFill = `color-mix(in srgb, ${color} 16%, transparent)`;
+    const base = `border-radius:3px;padding:0 2px;`;
+    if (variant === "fill") return `${base}background-color:${color};color:${textColor};`;
+    if (variant === "box") return `${base}background-color:${softFill};color:${theme.fg};border:1px solid ${color};`;
+    if (variant === "underline") return `${base}color:${theme.fg};border-bottom:2px solid ${color};`;
+    if (variant === "rail") return `${base}color:${theme.fg};border-top:1px solid ${color};border-bottom:1px solid ${color};`;
+    return `${base}color:${theme.fg};border-left:2px solid ${color};border-right:2px solid ${color};`;
+  }
+
+  function cycleAnnotationVariant(delta: number) {
+    const index = annotationVariants.indexOf(currentAnnotationVariant);
+    currentAnnotationVariant = annotationVariants[(index + delta + annotationVariants.length) % annotationVariants.length];
+  }
+
+  function handleVariantPickerKey(event: KeyboardEvent) {
+    if (!variantPickerOpen) return false;
+    if (event.key === "ArrowDown" || event.key === "j" || event.key === "s") {
+      cycleAnnotationVariant(1);
+      return true;
+    }
+    if (event.key === "ArrowUp" || event.key === "k" || event.key === "w") {
+      cycleAnnotationVariant(-1);
+      return true;
+    }
+    if (event.key === "Escape" || event.key === "Enter" || event.key === " " || event.key === "4") {
+      variantPickerOpen = false;
+      return true;
+    }
+    return true;
   }
 
   function customStyleTitle(name: string) {
@@ -1376,25 +1399,25 @@
     const bt = '`';
     return `# The Quick Brown Fox
 
-The quick brown fox jumps over the ${bt}lazy${bt}<!-- yellow, ${t0}: "" --> dog. It was an unremarkable morning in the valley, the kind where mist clings to the hedgerows and the air smells faintly of damp earth and pine.
+The quick brown fox jumps over the ${bt}lazy${bt}<!-- red fill, ${t0}: "" --> dog. It was an unremarkable morning in the valley, the kind where mist clings to the hedgerows and the air smells faintly of damp earth and pine.
 
 ## The Fox
 
-The fox was neither ${bt}quick${bt}<!-- green, ${t1}: "Check spelling" --> nor particularly brown — more of a ${bt}tawny${bt}<!-- orange, ${t2}: "Too informal" --> amber, with a white-tipped tail that flickered like a candle in the undergrowth. She had been awake since before dawn, padding silently along the ridge above the farm.
+The fox was neither ${bt}quick${bt}<!-- green underline, ${t1}: "Check spelling" --> nor particularly brown - more of a ${bt}tawny${bt}<!-- callout box, ${t2}: "Too informal" --> amber, with a white-tipped tail that flickered like a candle in the undergrowth. She had been awake since before dawn, padding silently along the ridge above the farm.
 
 - She was **bold** by nature
 - She was *cautious* by experience
-- She was, above all, ${bt}hungry${bt}<!-- red, ${t3}: "" -->
+- She was, above all, ${bt}hungry${bt}<!-- red bars, ${t3}: "" -->
 
 ## The Dog
 
-The dog, for his part, was not lazy in any meaningful sense. He was simply ${bt}old${bt}<!-- steel, ${t4}: "Consider 'elderly'" -->. His name was Jasper, and he had been guarding the same gate for eleven years. He watched the fox with one open eye and decided, as he always did, that the effort was not worth it.
+The dog, for his part, was not lazy in any meaningful sense. He was simply ${bt}old${bt}<!-- green rail, ${t4}: "Consider 'elderly'" -->. His name was Jasper, and he had been guarding the same gate for eleven years. He watched the fox with one open eye and decided, as he always did, that the effort was not worth it.
 
 > "Some battles," Jasper seemed to say, "are won by not fighting them."
 
 ## The Valley
 
-The valley stretched south toward the river, flanked by two long ridges of ${bt}limestone${bt}<!-- purple, ${t5}: "Geological fact" -->. Farmers had worked this land for generations, leaving behind dry-stone walls, sunken lanes, and the occasional rusted harrow half-buried in a hedgerow.
+The valley stretched south toward the river, flanked by two long ridges of ${bt}limestone${bt}<!-- callout fill, ${t5}: "Geological fact" -->. Farmers had worked this land for generations, leaving behind dry-stone walls, sunken lanes, and the occasional rusted harrow half-buried in a hedgerow.
 
 ### Flora
 
@@ -1428,13 +1451,12 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     setCurrentBlockquoteFromView(v);
   }
 
-  $: styleColorMap = Object.fromEntries(highlightStyles.map(s => [s.name, s.color]));
   let editingSpan: number | null = null;
   type BlockquoteAlign = "left" | "center" | "right";
 
   function countWords(text: string) {
     const visibleText = text
-      .replace(/`([^`]+)`<!--\s*\w+,\s*.+?:\s*"[^"]*"\s*-->/g, "$1")
+      .replace(/`([^`]+)`<!--\s*\w+(?:\s+\w+)?,\s*.+?:\s*"[^"]*"\s*-->/g, "$1")
       .replace(/<!--[\s\S]*?-->/g, " ")
       .replace(/`([^`\n]+)`/g, "$1");
     return visibleText.match(/[\p{L}\p{N}]+(?:[’'-][\p{L}\p{N}]+)*/gu)?.length ?? 0;
@@ -1701,15 +1723,16 @@ ${body}
   }
 
   function renderInlineHtml(text: string) {
-    const pattern = /`([^`]+)`<!--\s*(\w+),\s*(.+?):\s*"([^"]*)"(?:,\s*title:\s*"([^"]*)")?\s*-->/g;
+    const pattern = /`([^`]+)`<!--\s*(\w+(?:\s+\w+)?),\s*(.+?):\s*"([^"]*)"(?:,\s*title:\s*"([^"]*)")?\s*-->/g;
     let html = "";
     let lastIndex = 0;
     let match: RegExpExecArray | null;
 
     while ((match = pattern.exec(text)) !== null) {
       html += renderPlainInlineHtml(text.slice(lastIndex, match.index));
-      const color = styleColorMap[match[2]] || gruvbox.yellow;
-      html += `<span class="annotation-token" style="background:${escapeHtml(color)};color:${escapeHtml(contrastColor(color))};">${escapeHtml(match[1])}</span>`;
+      const { style, variant } = annotationStyleParts(match[2]);
+      const color = annotationColorForStyle(style);
+      html += `<span class="annotation-token" style="${escapeHtml(annotationMarkCss(style, variant, color))}">${escapeHtml(match[1])}</span>`;
       html += `<span class="annotation-timestamp" title="${escapeHtml(match[3])}">${escapeHtml(match[3])}</span>`;
       lastIndex = match.index + match[0].length;
     }
@@ -1808,13 +1831,13 @@ ${body}
       const spanStart = annotation.index;
       const wordStart = spanStart + 1;
       const wordEnd = wordStart + annotation[1].length;
-      const colorName = annotation[2];
+      const { style: colorName } = annotationStyleParts(annotation[2]);
       items.push({
         type: "annotation",
         id: `annotation-${spanStart}`,
         colorName,
         title: annotation[5]?.trim() ?? "",
-        color: styleColorMap[colorName] ?? gruvbox.fgMuted,
+        color: annotationColorForStyle(colorName),
         text: annotation[1],
         context: annotationSentenceContext(docText, spanStart, spanStart + annotation[0].length),
         timestamp: annotation[3],
@@ -2287,10 +2310,10 @@ ${body}
         const wordEnd   = wordStart + m[1].length;
         const spanEnd   = spanStart + m[0].length;
         if (cursor >= wordStart && cursor <= wordEnd) {
-          const colorName = m[2];
+          const { style: colorName } = annotationStyleParts(m[2]);
           const timestamp = m[3] || "";
           const comment   = m[4] || "";
-          const color = styleColorMap[colorName] ?? gruvbox.fgMuted;
+          const color = annotationColorForStyle(colorName);
           return [{
             pos: wordStart, above: true, strictSide: true, arrow: false,
             create() {
@@ -2530,10 +2553,6 @@ ${body}
   }
 
   function buildHighlightDecorator(theme = activeTheme): Extension {
-    const colorTheme = EditorView.theme(Object.fromEntries(
-      highlightStyles.map(s => [`.cm-annotation-${s.name}`, { backgroundColor: s.color, color: contrastColor(s.color, theme.bg, theme.fg), borderRadius: "3px", padding: "0 2px" }])
-    ));
-
     const plugin = ViewPlugin.fromClass(class {
       decorations: DecorationSet;
       constructor(v: EditorView) { this.decorations = this.build(v); }
@@ -2550,10 +2569,9 @@ ${body}
           annotationPattern.lastIndex = 0;
           let match: RegExpExecArray | null;
           while ((match = annotationPattern.exec(text)) !== null) {
-            const colorName = match[2];
+            const { style: colorName, variant } = annotationStyleParts(match[2]);
             const comment   = match[4] || "";
-            const color = styleColorMap[colorName];
-            if (!color) continue;
+            const color = annotationColorForStyle(colorName, theme);
             const spanStart = from + match.index;
             const spanEnd   = spanStart + match[0].length;
             const wordStart = spanStart + 1;
@@ -2563,16 +2581,16 @@ ${body}
 
             if (mode === "raw" || mode === "all") {
               if (mode === "all" || cursorInside) {
-                builder.add(spanStart, spanEnd, Decoration.mark({ attributes: { style: `background-color:${color}30;border-radius:3px;` } }));
+                builder.add(spanStart, spanEnd, Decoration.mark({ attributes: { style: `background-color:color-mix(in srgb, ${color} 18%, transparent);border-radius:3px;` } }));
               } else {
                 builder.add(spanStart, wordStart, Decoration.replace({ widget: new EmptyWidget(color), inclusive: false }));
-                builder.add(wordStart, wordEnd, Decoration.mark({ class: `cm-annotation-${colorName}` }));
+                builder.add(wordStart, wordEnd, Decoration.mark({ attributes: { style: annotationMarkCss(colorName, variant, color, theme) } }));
                 builder.add(wordEnd, spanEnd, Decoration.replace({ widget: new EmptyWidget() }));
               }
               continue;
             }
             builder.add(spanStart, wordStart, Decoration.replace({ widget: new EmptyWidget(color), inclusive: false }));
-            builder.add(wordStart, wordEnd, Decoration.mark({ class: `cm-annotation-${colorName}` }));
+            builder.add(wordStart, wordEnd, Decoration.mark({ attributes: { style: annotationMarkCss(colorName, variant, color, theme) } }));
             if (isEditing) {
               builder.add(wordEnd, spanEnd, Decoration.replace({ widget: new EditWidget(color, comment, spanStart, spanEnd, v) }));
             } else {
@@ -2733,7 +2751,7 @@ ${body}
       return tr;
     });
 
-    return [colorTheme, plugin, plainTheme, plainPlugin, atomicPlugin, srtPlugin, snapFilter, srtSnapFilter];
+    return [plugin, plainTheme, plainPlugin, atomicPlugin, srtPlugin, snapFilter, srtSnapFilter];
   }
 
   function wrapSelectionOrWord(v: EditorView, style: number = 0) {
@@ -2746,7 +2764,7 @@ ${body}
       const name = styleName(style);
       const title = customStyleTitle(name);
       const titlePart = title ? `, title: "${title}"` : "";
-      return `\`${text}\`<!-- ${name}, ${ts}: ""${titlePart} -->`;
+      return `\`${text}\`<!-- ${annotationStyleToken(name)}, ${ts}: ""${titlePart} -->`;
     };
     if (!range.empty) {
       const insert = makeInsert(state.doc.sliceString(range.from, range.to));
@@ -2770,9 +2788,10 @@ ${body}
     while ((m = annotationPattern.exec(docText)) !== null) {
       const spanStart = m.index, spanEnd = spanStart + m[0].length;
       if (cursor >= spanStart && cursor <= spanEnd) {
-        const newStyle = cycleStyleNumber(styleNumberForName(m[2]), delta, false);
+        const { style: oldStyle, variant } = annotationStyleParts(m[2]);
+        const newStyle = cycleStyleNumber(styleNumberForName(oldStyle), delta, false);
         const newName = styleName(newStyle);
-        const updated = m[0].replace(/^`([^`]+)`<!--\s*\w+,/, `\`$1\`<!-- ${newName},`);
+        const updated = m[0].replace(/^`([^`]+)`<!--\s*\w+(?:\s+\w+)?,/, `\`$1\`<!-- ${annotationStyleToken(newName, variant)},`);
         currentStyle = newStyle;
         v.dispatch({ changes: { from: spanStart, to: spanEnd, insert: updated } });
         return true;
@@ -2789,8 +2808,18 @@ ${body}
     while ((m = annotationPattern.exec(docText)) !== null) {
       const spanStart = m.index, spanEnd = spanStart + m[0].length;
       if (cursor >= spanStart && cursor <= spanEnd) {
+        if (style === 0) {
+          const updated = `\`${m[1]}\``;
+          currentStyle = 0;
+          v.dispatch({
+            changes: { from: spanStart, to: spanEnd, insert: updated },
+            selection: { anchor: spanStart + updated.length }
+          });
+          return true;
+        }
         const newName = styleName(style);
-        const updated = m[0].replace(/^`([^`]+)`<!--\s*\w+,/, `\`$1\`<!-- ${newName},`);
+        const { variant } = annotationStyleParts(m[2]);
+        const updated = m[0].replace(/^`([^`]+)`<!--\s*\w+(?:\s+\w+)?,/, `\`$1\`<!-- ${annotationStyleToken(newName, variant)},`);
         currentStyle = style;
         v.dispatch({ changes: { from: spanStart, to: spanEnd, insert: updated } });
         return true;
@@ -3085,6 +3114,7 @@ ${body}
       (v: EditorView) => editorMode === "normal" ? fn(v) : false;
 
     return Prec.high(keymap.of([
+      { any: (_v, event) => editorMode === "normal" && handleVariantPickerKey(event) },
       // Always: Escape returns to normal
       { key: "Escape", run: v => { setMode("normal"); return true; } },
       // Always: F2 enters edit
@@ -3158,6 +3188,7 @@ ${body}
       { key: "Space",  run: normal(v => wrapSelectionOrWord(v, currentStyle)) },
       { key: "Enter",  run: normal(v => handleEnterInAnnotationMode(v)) },
       { key: "x",      run: normal(v => removeAnnotation(v)) },
+      { key: "4",      run: normal(() => { variantPickerOpen = !variantPickerOpen; return true; }) },
       { key: "q",      run: normal(v => { if (!cycleAnnotationColor(v, -1)) cycleStyle(-1); return true; }) },
       { key: "e",      run: normal(v => { if (!cycleAnnotationColor(v, +1)) cycleStyle(+1); return true; }) },
       { key: "f",      run: normal(() => { toggleMediaPlayback(); return true; }) },
@@ -3342,23 +3373,6 @@ ${body}
               <span class="settings-control-icon" aria-hidden="true">◐</span>
               <span>Theme: {activeThemeName}</span>
               <button class="settings-mini-button" type="button" on:click={toggleThemeMode}>Toggle</button>
-            </label>
-          </section>
-          <section class="settings-section">
-            <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">✎</span><span>Manual Style</span></div>
-            <label class="settings-color-row">
-              <span class="settings-control-icon" aria-hidden="true">■</span>
-              <span>Manual color</span>
-              <input
-                type="color"
-                value={colorPickerManualColor()}
-                aria-label="Manual annotation color"
-                on:input={event => {
-                  manualAnnotationColor = (event.target as HTMLInputElement).value;
-                  persistManualAnnotationColor();
-                }}
-              />
-              <button class="settings-mini-button" type="button" on:click={resetManualAnnotationColor}>Reset</button>
             </label>
           </section>
         </div>
@@ -3601,7 +3615,12 @@ ${body}
             >
               <button
                 class="style-swatch"
-                style={`background: ${style.color}`}
+                class:variant-fill={currentStyle === index + 1 && currentAnnotationVariant === "fill"}
+                class:variant-box={currentStyle === index + 1 && currentAnnotationVariant === "box"}
+                class:variant-underline={currentStyle === index + 1 && currentAnnotationVariant === "underline"}
+                class:variant-rail={currentStyle === index + 1 && currentAnnotationVariant === "rail"}
+                class:variant-bars={currentStyle === index + 1 && currentAnnotationVariant === "bars"}
+                style={`--swatch-color: ${style.color}; --swatch-text: ${annotationTextColorForStyle(style.name, style.color)}`}
                 type="button"
                 title={`Use ${styleDisplayTitle(style.name)}`}
                 aria-label={`Use ${styleDisplayTitle(style.name)}`}
@@ -3654,6 +3673,29 @@ ${body}
             </div>
           {/each}
         </div>
+        {#if variantPickerOpen}
+          <div class="variant-picker" role="listbox" aria-label="Annotation variants">
+            {#each annotationVariants as variant}
+              <button
+                class="variant-option"
+                class:active={currentAnnotationVariant === variant}
+                type="button"
+                on:click={() => { currentAnnotationVariant = variant; variantPickerOpen = false; view?.focus(); }}
+              >
+                <span
+                  class="variant-preview"
+                  class:variant-fill={variant === "fill"}
+                  class:variant-box={variant === "box"}
+                  class:variant-underline={variant === "underline"}
+                  class:variant-rail={variant === "rail"}
+                  class:variant-bars={variant === "bars"}
+                  style={`--swatch-color: ${currentStyleColor}; --swatch-text: ${annotationTextColorForStyle(styleName(currentStyle), currentStyleColor)}`}
+                ></span>
+                <span>{variant}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
       </div>
 
     </div>
