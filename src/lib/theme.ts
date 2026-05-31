@@ -121,6 +121,14 @@ export function buildEditorTheme(theme: ThemePalette): Extension {
     ".cm-content": { textAlign: "left", padding: "1rem 1.25rem 4rem", minHeight: "100%", caretColor: theme.cursor, whiteSpace: "pre-wrap", wordBreak: "break-word" },
     ".cm-line": { textAlign: "left" },
     "&.cm-focused .cm-cursor": { borderLeftColor: theme.cursor },
+    "&.mode-normal .cm-content, &.mode-normal .cm-line": { caretColor: "transparent !important" },
+    "&.mode-normal .cm-cursorLayer, &.mode-normal .cm-cursor, &.mode-normal .cm-cursor-primary, &.mode-normal .cm-cursor-secondary, &.mode-normal .cm-secondaryCursor, &.mode-normal .cm-dropCursor": {
+      borderLeft: "0 !important",
+      borderLeftColor: "transparent !important",
+      display: "none !important",
+      opacity: "0 !important",
+      visibility: "hidden !important"
+    },
     "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { backgroundColor: `${theme.orange} !important`, color: theme.bg, opacity: "50%" },
     ".cm-gutters": { backgroundColor: theme.bgHard, color: theme.gutterText, borderRight: "none" },
     ".cm-activeLine": { backgroundColor: theme.activeLine },
