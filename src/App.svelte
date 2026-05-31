@@ -1372,14 +1372,21 @@
   function removeCustomStyle(name: string) {
     if (isBuiltInStyleName(name)) return;
     const index = highlightStyles.findIndex(style => style.name === name);
-    persistCustomStyles(customStyles.filter(style => style.name !== name));
+    const nextCustomStyles = customStyles.filter(style => style.name !== name);
+    persistCustomStyles(nextCustomStyles);
     const nextTitles = { ...styleTitles };
     delete nextTitles[name];
     persistStyleTitles(nextTitles);
     const nextKeys = { ...styleKeys };
     delete nextKeys[name];
     persistStyleKeys(nextKeys);
-    if (currentStyle === index + 1) currentStyle = 0;
+    if (currentStyle === index + 1) {
+      currentStyle = Math.min(index, highlightStyles.length - 2);
+      if (currentStyle < 0) currentStyle = 0;
+    } else if (currentStyle > index + 1) {
+      currentStyle -= 1;
+    }
+    view?.dispatch({});
   }
 
   function loadStyleTitles() {
@@ -3537,7 +3544,7 @@ ${body}
       title="Settings"
       aria-label="Settings"
       aria-expanded={settingsOpen}
-    >Aa</button>
+    >⚙</button>
     <button class="toolbar-btn help-btn" on:click={() => showHelp = !showHelp} title="Keyboard shortcuts (?)">?</button>
   </div>
 
@@ -3841,7 +3848,7 @@ ${body}
         </label>
         <button class="sidebar-theme-toggle" type="button" on:click={toggleThemeMode} aria-label="Toggle theme">
           <span aria-hidden="true">◐</span>
-          <span>{activeThemeName}</span>
+          <span>THEME: {activeThemeName}</span>
         </button>
       </div>
 
@@ -3917,7 +3924,7 @@ ${body}
                   type="button"
                   title={`Remove ${styleDisplayTitle(style.name)}`}
                   aria-label={`Remove ${styleDisplayTitle(style.name)}`}
-                  on:click={() => removeCustomStyle(style.name)}
+                  on:click={event => { event.stopPropagation(); removeCustomStyle(style.name); }}
                 >×</button>
               {/if}
             </div>
