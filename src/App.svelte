@@ -93,6 +93,7 @@
   let audioSourceFile: File | null = null;
   let audioRateIndex = 0;
   const audioRates = [1, 1.5, 2];
+  const manualPauseRewindSeconds = 3;
   const audioDbName = "textAnnotate-state";
   const audioStoreName = "audio";
   const mediaExtensions = [".mp3", ".wav", ".m4a", ".ogg", ".oga", ".webm", ".aac", ".flac", ".mp4", ".mov", ".mkv"];
@@ -268,7 +269,17 @@
   function toggleAudioPlayback() {
     if (!audioElement || !audioLoaded) return;
     if (audioElement.paused) void audioElement.play();
-    else audioElement.pause();
+    else pauseAudioFromUser();
+  }
+
+  function pauseAudioFromUser() {
+    if (!audioElement || !audioLoaded || audioElement.paused) return;
+    audioElement.pause();
+    seekAudio(-manualPauseRewindSeconds);
+  }
+
+  function toggleMediaPlayback() {
+    toggleAudioPlayback();
   }
 
   function cycleAudioRate() {
@@ -362,7 +373,7 @@
       event.key === "ArrowRight" ||
       event.key === "ArrowUp" ||
       event.key === "ArrowDown" ||
-      "hjklwasdHJKLWASDxeqnNuU".includes(event.key);
+      "hjklwasdHJKLWASDfxeqnNuU".includes(event.key);
   }
 
   function shouldDeferWindowShortcut(event: KeyboardEvent) {
@@ -383,7 +394,7 @@
 
     if (!audioElement || !audioLoaded) return;
     if (event.key === " ") {
-      toggleAudioPlayback();
+      toggleMediaPlayback();
       return;
     }
     seekAudio(event.key === "ArrowLeft" || event.key === "Left" ? -10 : 10);
@@ -3130,6 +3141,7 @@ ${body}
       { key: "x",      run: normal(v => removeAnnotation(v)) },
       { key: "q",      run: normal(v => { if (!cycleAnnotationColor(v, -1)) cycleStyle(-1); return true; }) },
       { key: "e",      run: normal(v => { if (!cycleAnnotationColor(v, +1)) cycleStyle(+1); return true; }) },
+      { key: "f",      run: normal(() => { toggleMediaPlayback(); return true; }) },
       { key: "n",      run: normal(v => { if (!cycleAnnotationColor(v, +1)) cycleStyle(+1); return true; }) },
       { key: "N",      run: normal(v => { if (!cycleAnnotationColor(v, -1)) cycleStyle(-1); return true; }) },
       // Undo/redo (both modes)
@@ -3140,7 +3152,7 @@ ${body}
       { key: "Ctrl-Z", run: v => redo(v) },
       { key: "?",      run: normal(() => { showHelp = !showHelp; return true; }) },
       { key: "Alt-r", run: () => { cycleAudioRate(); return true; } },
-      { key: "Alt-Space",  run: () => { toggleAudioPlayback(); return true; } },
+      { key: "Alt-Space",  run: () => { toggleMediaPlayback(); return true; } },
       { key: "Alt-ArrowLeft",  run: () => { seekAudio(-10); return true; } },
       { key: "Alt-ArrowRight", run: () => { seekAudio(10); return true; } },
       {
@@ -3885,7 +3897,7 @@ ${body}
             <span class="audio-name">{audioFileName}</span>
             <span class="audio-sep">|</span>
             <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(-10)} title="Back 10 seconds" aria-label="Back 10 seconds">&lt;&lt;</button>
-            <button class="audio-glyph play" type="button" on:click={toggleAudioPlayback} title="Play / pause" aria-label="Play / pause">{audioPlaying ? "⏸" : "▶"}</button>
+            <button class="audio-glyph play" type="button" on:click={toggleMediaPlayback} title="Play / pause" aria-label="Play / pause">{audioPlaying ? "⏸" : "▶"}</button>
             <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(10)} title="Forward 10 seconds" aria-label="Forward 10 seconds">&gt;&gt;</button>
             <span class="audio-sep">|</span>
             <button class="audio-rate-text" type="button" on:click={cycleAudioRate} aria-label="Playback speed" title="Playback speed">{audioRateText}</button>
