@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { EditorState, Prec, type Extension } from "@codemirror/state";
+  import { Compartment, EditorState, Prec, type Extension } from "@codemirror/state";
   import {
     EditorView, keymap, lineNumbers, drawSelection, runScopeHandlers,
     highlightActiveLineGutter, ViewPlugin, Decoration,
@@ -35,11 +35,14 @@
   import { createNavigationCommands } from "./lib/navigation";
   import { helpSections } from "./lib/shortcuts";
   import {
-    buildGruvboxTheme,
+    buildEditorTheme,
+    buildHighlightStyle,
     contrastColor,
+    getTheme,
     gruvbox,
-    gruvboxHighlight,
-    highlightStyles
+    highlightStyles as baseHighlightStyles,
+    type ThemeMode,
+    type ThemePalette
   } from "./lib/theme";
   import {
     documentHasSrtTimestamps,
@@ -94,6 +97,9 @@
   const audioStoreName = "audio";
   const mediaExtensions = [".mp3", ".wav", ".m4a", ".ogg", ".oga", ".webm", ".aac", ".flac", ".mp4", ".mov", ".mkv"];
   const openAiApiKeyStorageKey = "textAnnotate-openai-api-key";
+  const themeStorageKey = "cm6-theme";
+  const manualStyleName = "manual";
+  const manualAnnotationColorStorageKey = "cm6-manual-annotation-color";
   let openAiApiKey = "";
   let rememberOpenAiApiKey = false;
   let transcriptionModel = "whisper-1";
@@ -101,6 +107,8 @@
   let transcriptionBusy = false;
   let transcriptionStatus = "";
   let transcriptionError = "";
+  let themeMode = loadThemeMode();
+  let manualAnnotationColor = loadManualAnnotationColor();
   let loadedFileType = "Markdown";
   $: pdfFrameSrc = pdfPreviewUrl ? `${pdfPreviewUrl}#zoom=75` : "";
   $: if (audioElement) audioElement.playbackRate = audioRates[audioRateIndex];
@@ -159,6 +167,11 @@
   const reservedStyleKeys = new Set(["h", "j", "k", "l", "w", "a", "s", "d", "q", "e", "n", "u", "x", "?", " "]);
   let styleTitles = loadStyleTitles();
   let styleKeys = loadStyleKeys();
+  const themeCompartment = new Compartment();
+  $: activeTheme = getTheme(themeMode);
+  $: activeThemeName = themeMode === "nord" ? "Nord" : "Gruvbox";
+  $: manualStyleColor = currentManualStyleColor(activeTheme);
+  $: highlightStyles = currentHighlightStyles(activeTheme);
   $: editorModeLabel = editorMode === "insert" ? "EDIT" : "ANNOTATE";
   $: summaryFontSize = Math.round((11 + ((summarySidebarWidth - summarySidebarMinWidth) / 110)) * 10) / 10;
   $: clampedSummaryFontSize = Math.max(11, Math.min(15, summaryFontSize));
@@ -491,6 +504,58 @@
   function loadOpenAiApiKey() {
     if (typeof localStorage === "undefined") return "";
     return localStorage.getItem(openAiApiKeyStorageKey) ?? "";
+  }
+
+  function loadThemeMode(): ThemeMode {
+    const stored = typeof localStorage === "undefined" ? null : localStorage.getItem(themeStorageKey);
+    return stored === "gruvbox" ? "gruvbox" : "nord";
+  }
+
+  function loadManualAnnotationColor() {
+    if (typeof localStorage === "undefined") return "";
+    return normalizedManualAnnotationColor(localStorage.getItem(manualAnnotationColorStorageKey) ?? "");
+  }
+
+  function normalizedManualAnnotationColor(value: string) {
+    const normalized = value.trim().toLowerCase();
+    return /^#[0-9a-f]{6}$/i.test(normalized) ? normalized : "";
+  }
+
+  function colorPickerManualColor() {
+    return normalizedManualAnnotationColor(manualAnnotationColor) || activeTheme.orange;
+  }
+
+  function persistManualAnnotationColor() {
+    const normalized = normalizedManualAnnotationColor(manualAnnotationColor);
+    manualAnnotationColor = normalized;
+    if (typeof localStorage !== "undefined") {
+      if (normalized) localStorage.setItem(manualAnnotationColorStorageKey, normalized);
+      else localStorage.removeItem(manualAnnotationColorStorageKey);
+    }
+    view?.dispatch({ effects: themeCompartment.reconfigure(buildThemeExtensions(activeTheme)) });
+  }
+
+  function resetManualAnnotationColor() {
+    manualAnnotationColor = "";
+    persistManualAnnotationColor();
+  }
+
+  function buildThemeExtensions(theme: ThemePalette): Extension[] {
+    return [
+      syntaxHighlighting(buildHighlightStyle(theme)),
+      buildHighlightDecorator(theme),
+      buildEditorTheme(theme)
+    ];
+  }
+
+  function reconfigureTheme(nextMode: ThemeMode) {
+    themeMode = nextMode;
+    if (typeof localStorage !== "undefined") localStorage.setItem(themeStorageKey, nextMode);
+    view?.dispatch({ effects: themeCompartment.reconfigure(buildThemeExtensions(getTheme(nextMode))) });
+  }
+
+  function toggleThemeMode() {
+    reconfigureTheme(themeMode === "nord" ? "gruvbox" : "nord");
   }
 
   function persistOpenAiApiKey() {
@@ -1014,8 +1079,16 @@
     return style === 0 ? "" : highlightStyles[style - 1]?.name ?? "";
   }
 
+  function currentManualStyleColor(theme = activeTheme) {
+    return normalizedManualAnnotationColor(manualAnnotationColor) || theme.orange;
+  }
+
+  function currentHighlightStyles(theme = activeTheme) {
+    return [...baseHighlightStyles, { name: manualStyleName, color: currentManualStyleColor(theme) }];
+  }
+
   function styleColor(style: number) {
-    return style === 0 ? gruvbox.orange : highlightStyles[style - 1]?.color ?? gruvbox.fg;
+    return style === 0 ? activeTheme.orange : highlightStyles[style - 1]?.color ?? activeTheme.fg;
   }
 
   function styleNumberForName(name: string) {
@@ -1314,7 +1387,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     setCurrentBlockquoteFromView(v);
   }
 
-  const styleColorMap: Record<string, string> = Object.fromEntries(highlightStyles.map(s => [s.name, s.color]));
+  $: styleColorMap = Object.fromEntries(highlightStyles.map(s => [s.name, s.color]));
   let editingSpan: number | null = null;
   type BlockquoteAlign = "left" | "center" | "right";
 
@@ -2399,9 +2472,9 @@ ${body}
     return true;
   }
 
-  function buildHighlightDecorator(): Extension {
+  function buildHighlightDecorator(theme = activeTheme): Extension {
     const colorTheme = EditorView.theme(Object.fromEntries(
-      highlightStyles.map(s => [`.cm-annotation-${s.name}`, { backgroundColor: s.color, color: contrastColor(s.color), borderRadius: "3px", padding: "0 2px" }])
+      highlightStyles.map(s => [`.cm-annotation-${s.name}`, { backgroundColor: s.color, color: contrastColor(s.color, theme.bg, theme.fg), borderRadius: "3px", padding: "0 2px" }])
     ));
 
     const plugin = ViewPlugin.fromClass(class {
@@ -2483,7 +2556,7 @@ ${body}
     }, { decorations: v => v.decorations });
 
     const plainTheme = EditorView.theme({
-      ".cm-plain-code": { color: `${gruvbox.yellow} !important`, backgroundColor: gruvbox.bgSoft, border: `1px solid ${gruvbox.border}`, borderRadius: "4px", padding: "0 0.25rem" }
+      ".cm-plain-code": { color: `${theme.yellow} !important`, backgroundColor: theme.plainCodeBg, border: `1px solid ${theme.border}`, borderRadius: "4px", padding: "0 0.25rem" }
     });
 
     const atomicPlugin = ViewPlugin.fromClass(class {
@@ -3076,7 +3149,6 @@ ${body}
       indentOnInput(),
       bracketMatching(),
       highlightActiveLineGutter(),
-      syntaxHighlighting(gruvboxHighlight),
       buildKeymap(),
       keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
       markdown({ base: markdownLanguage }),
@@ -3086,13 +3158,12 @@ ${body}
       blockquoteLinePlugin,
       columnGuidePlugin,
       visualLinePlugin,
-      buildHighlightDecorator(),
       annotationTooltipField,
       EditorView.theme({
         ".cm-tooltip": { background: "transparent", border: "none" },
         ".cm-annotation-bubble": { display: "block" }
       }),
-      buildGruvboxTheme()
+      themeCompartment.of(buildThemeExtensions(activeTheme))
     ];
   }
 
@@ -3131,11 +3202,11 @@ ${body}
 <div
   class="app"
   style={`
-    --bg: ${gruvbox.bg}; --bg-soft: ${gruvbox.bgSoft}; --bg-hard: ${gruvbox.bgHard};
-    --bg-alt: ${gruvbox.bgAlt}; --border: ${gruvbox.border}; --fg: ${gruvbox.fg};
+    --bg: ${activeTheme.bg}; --bg-soft: ${activeTheme.bgSoft}; --bg-hard: ${activeTheme.bgHard};
+    --bg-alt: ${activeTheme.bgAlt}; --border: ${activeTheme.border}; --fg: ${activeTheme.fg};
     --internal-border: transparent;
-    --fg-muted: ${gruvbox.fgMuted}; --yellow: ${gruvbox.yellow}; --green: ${gruvbox.green};
-    --blue: ${gruvbox.blue}; --orange: ${gruvbox.orange}; --selection: ${gruvbox.selection};
+    --fg-muted: ${activeTheme.fgMuted}; --yellow: ${activeTheme.yellow}; --green: ${activeTheme.green};
+    --blue: ${activeTheme.blue}; --orange: ${activeTheme.orange}; --selection: ${activeTheme.selection};
     --active-style-color: ${currentStyleColor};
     --active-line-annotate: color-mix(in srgb, var(--active-style-color) 34%, transparent);
     --active-line-edit: #2f4a3aaa;
@@ -3200,6 +3271,31 @@ ${body}
                   on:change={() => { annotationMode = "all"; view?.dispatch({}); view?.focus(); }} />
               </label>
             </div>
+          </section>
+          <section class="settings-section">
+            <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">◐</span><span>Theme</span></div>
+            <label class="settings-toggle-row">
+              <span class="settings-control-icon" aria-hidden="true">◐</span>
+              <span>Theme: {activeThemeName}</span>
+              <button class="settings-mini-button" type="button" on:click={toggleThemeMode}>Toggle</button>
+            </label>
+          </section>
+          <section class="settings-section">
+            <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">✎</span><span>Manual Style</span></div>
+            <label class="settings-color-row">
+              <span class="settings-control-icon" aria-hidden="true">■</span>
+              <span>Manual color</span>
+              <input
+                type="color"
+                value={colorPickerManualColor()}
+                aria-label="Manual annotation color"
+                on:input={event => {
+                  manualAnnotationColor = (event.target as HTMLInputElement).value;
+                  persistManualAnnotationColor();
+                }}
+              />
+              <button class="settings-mini-button" type="button" on:click={resetManualAnnotationColor}>Reset</button>
+            </label>
           </section>
         </div>
       {:else if settingsTab === "layout"}
@@ -3741,7 +3837,7 @@ ${body}
   {#if !summaryFullscreen}
     <div class="statusbar">
       <div class="status-left">
-        <span class="segment mode" style="color: {editorMode === 'insert' ? gruvbox.green : gruvbox.orange}">{editorModeLabel}</span>
+        <span class="segment mode" style="color: {editorMode === 'insert' ? activeTheme.green : activeTheme.orange}">{editorModeLabel}</span>
         <span class="segment">{selectionInfo}</span>
         <span class="segment">{wordCountInfo}</span>
         <span class="segment style" style="color: {currentStyleColor}">{styleLabel}</span>

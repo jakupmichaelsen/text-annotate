@@ -718,7 +718,8 @@
   }
 
   .settings-toggle-row,
-  .settings-choice-row {
+  .settings-choice-row,
+  .settings-color-row {
     display: grid;
     grid-template-columns: 18px minmax(0, 1fr) auto;
     align-items: center;
@@ -733,6 +734,39 @@
   .settings-choice-row input {
     accent-color: #7c6f64;
     cursor: pointer;
+  }
+
+  .settings-color-row {
+    grid-template-columns: 18px minmax(0, 1fr) 32px auto;
+  }
+
+  .settings-color-row input[type="color"] {
+    width: 28px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .settings-mini-button {
+    height: 22px;
+    padding: 0 7px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: var(--bg-alt);
+    color: var(--fg-muted);
+    font: inherit;
+    font-size: 10px;
+    cursor: pointer;
+  }
+
+  .settings-mini-button:hover,
+  .settings-mini-button:focus-visible {
+    border-color: var(--orange);
+    color: var(--orange);
+    outline: none;
   }
 
   .settings-field {

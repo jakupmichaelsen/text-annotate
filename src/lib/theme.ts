@@ -31,7 +31,48 @@ export const gruvbox = {
   cursor: "#fe8019", comment: "#928374"
 };
 
-export function contrastColor(hex: string): string {
+export type ThemeMode = "gruvbox" | "nord";
+
+export type ThemePalette = typeof gruvbox & {
+  dark: boolean;
+  searchMatch: string;
+  searchMatchSelected: string;
+  blockquoteBg: string;
+  blockquoteFg: string;
+  plainCodeBg: string;
+};
+
+export const themes: Record<ThemeMode, ThemePalette> = {
+  gruvbox: {
+    ...gruvbox,
+    dark: true,
+    activeLine: "transparent",
+    searchMatch: "#665c54",
+    searchMatchSelected: "#7c6f64",
+    blockquoteBg: "#4a3520",
+    blockquoteFg: "#fabd2f",
+    plainCodeBg: "#32302f"
+  },
+  nord: {
+    dark: false,
+    bg: "#eceff4", bgSoft: "#e5e9f0", bgHard: "#d8dee9",
+    bgAlt: "#e5e9f0", border: "#cfd7e3", fg: "#2e3440",
+    fgMuted: "#4c566a", yellow: "#ebcb8b", green: "#a3be8c",
+    blue: "#81a1c1", aqua: "#8fbcbb", orange: "#d08770",
+    red: "#bf616a", purple: "#b48ead", selection: "#d8dee9",
+    activeLine: "transparent", gutterText: "#5e6472",
+    cursor: "#5e81ac", comment: "#4c566a",
+    searchMatch: "#d8dee9", searchMatchSelected: "#cfd7e3",
+    blockquoteBg: "#e5e9f0", blockquoteFg: "#5e81ac",
+    plainCodeBg: "#e5e9f0"
+  }
+};
+
+export function getTheme(mode: ThemeMode): ThemePalette {
+  return themes[mode];
+}
+
+export function contrastColor(hex: string, bg = gruvbox.bg, fg = gruvbox.fg): string {
   const toLinear = (c: number) => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
   const luminance = (h: string) => {
     const r = toLinear(parseInt(h.slice(1, 3), 16) / 255);
@@ -41,63 +82,71 @@ export function contrastColor(hex: string): string {
   };
   const contrast = (L1: number, L2: number) => (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
   const Lann = luminance(hex);
-  return contrast(Lann, luminance(gruvbox.bg)) >= contrast(Lann, luminance(gruvbox.fg)) ? gruvbox.bg : gruvbox.fg;
+  return contrast(Lann, luminance(bg)) >= contrast(Lann, luminance(fg)) ? bg : fg;
 }
 
-export const gruvboxHighlight = HighlightStyle.define([
-  { tag: tags.heading, color: gruvbox.yellow, fontWeight: "700" },
-  { tag: tags.contentSeparator, color: gruvbox.orange },
-  { tag: tags.emphasis, color: gruvbox.fg, fontStyle: "italic" },
-  { tag: tags.strong, color: gruvbox.fg, fontWeight: "700" },
-  { tag: tags.strikethrough, color: gruvbox.fgMuted, textDecoration: "line-through" },
-  { tag: tags.link, color: gruvbox.blue, textDecoration: "underline" },
-  { tag: tags.url, color: gruvbox.aqua, textDecoration: "underline" },
-  { tag: tags.labelName, color: gruvbox.yellow },
-  { tag: tags.keyword, color: gruvbox.red },
-  { tag: [tags.atom, tags.bool, tags.null], color: gruvbox.purple },
-  { tag: [tags.number, tags.integer, tags.float], color: gruvbox.purple },
-  { tag: [tags.string, tags.special(tags.string)], color: gruvbox.green },
-  { tag: tags.regexp, color: gruvbox.aqua },
-  { tag: tags.escape, color: gruvbox.orange },
-  { tag: [tags.variableName, tags.name], color: gruvbox.fg },
-  { tag: tags.function(tags.variableName), color: gruvbox.green },
-  { tag: [tags.className, tags.typeName], color: gruvbox.yellow },
-  { tag: [tags.operator, tags.compareOperator, tags.logicOperator], color: gruvbox.red },
-  { tag: [tags.punctuation, tags.separator, tags.bracket], color: gruvbox.fgMuted },
-  { tag: tags.comment, color: gruvbox.comment },
-  { tag: tags.meta, color: gruvbox.orange },
+export function buildHighlightStyle(theme: ThemePalette) {
+  return HighlightStyle.define([
+  { tag: tags.heading, color: theme.yellow, fontWeight: "700" },
+  { tag: tags.contentSeparator, color: theme.orange },
+  { tag: tags.emphasis, color: theme.fg, fontStyle: "italic" },
+  { tag: tags.strong, color: theme.fg, fontWeight: "700" },
+  { tag: tags.strikethrough, color: theme.fgMuted, textDecoration: "line-through" },
+  { tag: tags.link, color: theme.blue, textDecoration: "underline" },
+  { tag: tags.url, color: theme.aqua, textDecoration: "underline" },
+  { tag: tags.labelName, color: theme.yellow },
+  { tag: tags.keyword, color: theme.red },
+  { tag: [tags.atom, tags.bool, tags.null], color: theme.purple },
+  { tag: [tags.number, tags.integer, tags.float], color: theme.purple },
+  { tag: [tags.string, tags.special(tags.string)], color: theme.green },
+  { tag: tags.regexp, color: theme.aqua },
+  { tag: tags.escape, color: theme.orange },
+  { tag: [tags.variableName, tags.name], color: theme.fg },
+  { tag: tags.function(tags.variableName), color: theme.green },
+  { tag: [tags.className, tags.typeName], color: theme.yellow },
+  { tag: [tags.operator, tags.compareOperator, tags.logicOperator], color: theme.red },
+  { tag: [tags.punctuation, tags.separator, tags.bracket], color: theme.fgMuted },
+  { tag: tags.comment, color: theme.comment },
+  { tag: tags.meta, color: theme.orange },
   { tag: tags.monospace, color: "inherit" }
-]);
+  ]);
+}
 
-export function buildGruvboxTheme(): Extension {
+export const gruvboxHighlight = buildHighlightStyle(themes.gruvbox);
+
+export function buildEditorTheme(theme: ThemePalette): Extension {
   return EditorView.theme({
-    "&": { height: "100%", color: gruvbox.fg, backgroundColor: gruvbox.bg },
+    "&": { height: "100%", color: theme.fg, backgroundColor: theme.bg },
     ".cm-scroller": { overflow: "auto", fontFamily: '"Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, monospace', lineHeight: "1.75" },
-    ".cm-content": { textAlign: "left", padding: "1rem 1.25rem 4rem", minHeight: "100%", caretColor: gruvbox.cursor, whiteSpace: "pre-wrap", wordBreak: "break-word" },
+    ".cm-content": { textAlign: "left", padding: "1rem 1.25rem 4rem", minHeight: "100%", caretColor: theme.cursor, whiteSpace: "pre-wrap", wordBreak: "break-word" },
     ".cm-line": { textAlign: "left" },
-    "&.cm-focused .cm-cursor": { borderLeftColor: gruvbox.cursor },
-    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { backgroundColor: `${gruvbox.orange} !important`, color: gruvbox.bg, opacity: "50%" },
-    ".cm-gutters": { backgroundColor: gruvbox.bgHard, color: gruvbox.gutterText, borderRight: "none" },
-    ".cm-activeLine": { backgroundColor: "transparent" },
-    ".cm-activeLineGutter": { color: gruvbox.yellow },
-    ".cm-panels": { backgroundColor: gruvbox.bgSoft, color: gruvbox.fg },
-    ".cm-searchMatch": { backgroundColor: "#665c54", outline: `1px solid ${gruvbox.yellow}` },
-    ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: "#7c6f64" },
-    ".cm-matchingBracket, .cm-nonmatchingBracket": { backgroundColor: gruvbox.bgAlt, outline: `1px solid ${gruvbox.blue}` },
+    "&.cm-focused .cm-cursor": { borderLeftColor: theme.cursor },
+    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { backgroundColor: `${theme.orange} !important`, color: theme.bg, opacity: "50%" },
+    ".cm-gutters": { backgroundColor: theme.bgHard, color: theme.gutterText, borderRight: "none" },
+    ".cm-activeLine": { backgroundColor: theme.activeLine },
+    ".cm-activeLineGutter": { color: theme.gutterText, backgroundColor: theme.bgHard },
+    ".cm-panels": { backgroundColor: theme.bgSoft, color: theme.fg },
+    ".cm-searchMatch": { backgroundColor: theme.searchMatch, outline: `1px solid ${theme.yellow}` },
+    ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: theme.searchMatchSelected },
+    ".cm-matchingBracket, .cm-nonmatchingBracket": { backgroundColor: theme.bgAlt, outline: `1px solid ${theme.blue}` },
     ...Object.fromEntries(highlightStyles.map(s => [
       `.cm-annotation-${s.name}`,
-      { color: `${contrastColor(s.color)} !important`, backgroundColor: `${s.color} !important`, border: "none" }
+      { color: `${contrastColor(s.color, theme.bg, theme.fg)} !important`, backgroundColor: `${s.color} !important`, border: "none" }
     ])),
-    ".cm-formatting-code": { color: gruvbox.orange },
-    ".cm-formatting-code-block": { color: gruvbox.orange },
-    ".cm-formatting": { color: gruvbox.fgMuted },
+    ".cm-formatting-code": { color: theme.orange },
+    ".cm-formatting-code-block": { color: theme.orange },
+    ".cm-formatting": { color: theme.fgMuted },
     ".cm-blockquote-line": {
-      borderLeft: `3px solid ${gruvbox.orange}`,
+      borderLeft: `3px solid ${theme.orange}`,
       paddingLeft: "0.75em",
       paddingRight: "0.35em",
-      backgroundColor: "#4a3520",
+      backgroundColor: theme.blockquoteBg,
       marginBottom: "2px",
-      color: gruvbox.yellow
+      color: theme.blockquoteFg
     }
-  }, { dark: true });
+  }, { dark: theme.dark });
+}
+
+export function buildGruvboxTheme(): Extension {
+  return buildEditorTheme(themes.gruvbox);
 }
