@@ -115,10 +115,25 @@
   $: audioRateText = audioRateIndex === 0 ? "x1" : audioRateIndex === 1 ? "x1½" : "x2";
 
   let currentStyle = 0;
+  type AnnotationStyle = { name: string; color: string; colorName?: string; custom?: boolean };
   type AnnotationVariant = "fill" | "box" | "underline" | "rail" | "bars";
   const annotationVariants: AnnotationVariant[] = ["fill", "box", "underline", "rail", "bars"];
+  const namedStyleColors = [
+    { name: "blue", color: "#83a598" },
+    { name: "orange", color: "#fe8019" },
+    { name: "yellow", color: "#fabd2f" },
+    { name: "purple", color: "#d3869b" },
+    { name: "aqua", color: "#8ec07c" },
+    { name: "copper", color: "#d08770" },
+    { name: "frost", color: "#81a1c1" },
+    { name: "rose", color: "#bf616a" },
+    { name: "sage", color: "#a3be8c" },
+    { name: "sand", color: "#ebcb8b" }
+  ];
   let currentAnnotationVariant: AnnotationVariant = "fill";
   let variantPickerOpen = false;
+  let newStyleColorName = "blue";
+  let newStyleName = newStyleColorName;
   let annotationMode: "clean" | "raw" | "all" = "clean";
   let blockquoteAlign: "left" | "center" | "right" = "left";
   let blockquoteBgWidth = 100;
@@ -166,10 +181,12 @@
   let finishRightPaddingDrag: (() => void) | null = null;
   const summarySidebarMinWidth = 240;
   const summarySidebarMaxWidth = 720;
+  const customStylesStorageKey = "cm6-custom-styles";
   const styleTitlesStorageKey = "cm6-style-titles";
   const styleKeysStorageKey = "cm6-style-keys";
   const defaultStyleKeyOrder = ["1", "2", "3"];
   const reservedStyleKeys = new Set(["h", "j", "k", "l", "w", "a", "s", "d", "q", "e", "n", "u", "x", "4", "?", " "]);
+  let customStyles = loadCustomStyles();
   let styleTitles = loadStyleTitles();
   let styleKeys = loadStyleKeys();
   const themeCompartment = new Compartment();
@@ -1091,8 +1108,11 @@
     return style === 0 ? "" : highlightStyles[style - 1]?.name ?? "";
   }
 
-  function currentHighlightStyles(theme = activeTheme) {
-    return baseHighlightStyles.map(style => style.name === "callout" ? { ...style, color: theme.fg } : style);
+  function currentHighlightStyles(theme = activeTheme): AnnotationStyle[] {
+    return [
+      ...baseHighlightStyles.map(style => style.name === "callout" ? { ...style, color: theme.fg, colorName: style.name } : { ...style, colorName: style.name }),
+      ...customStyles
+    ];
   }
 
   function styleColor(style: number) {
@@ -1239,6 +1259,108 @@
 
   function normalizeStyleTitle(title: string) {
     return title.trim().replace(/\s+/g, " ").replace(/"/g, "'").replace(/[<>]/g, "").replace(/--+/g, "-");
+  }
+
+  function normalizeCustomStyleName(value: string) {
+    return value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 24);
+  }
+
+  function namedStyleColor(name: string) {
+    return namedStyleColors.find(color => color.name === name)?.color ?? namedStyleColors[0].color;
+  }
+
+  function normalizeNamedStyleColor(value: string) {
+    const normalized = normalizeCustomStyleName(value);
+    return namedStyleColors.some(color => color.name === normalized) ? normalized : namedStyleColors[0].name;
+  }
+
+  function isBuiltInStyleName(name: string) {
+    return baseHighlightStyles.some(style => style.name === name);
+  }
+
+  function uniqueCustomStyleName(name: string) {
+    const fallback = normalizeNamedStyleColor(newStyleColorName);
+    const base = normalizeCustomStyleName(name) || fallback;
+    const used = new Set([
+      ...baseHighlightStyles.map(style => style.name),
+      ...customStyles.map(style => style.name)
+    ]);
+    if (!used.has(base)) return base;
+    for (let index = 2; index < 100; index += 1) {
+      const candidate = `${base}-${index}`;
+      if (!used.has(candidate)) return candidate;
+    }
+    return `${base}-${Date.now().toString(36)}`;
+  }
+
+  function loadCustomStyles(): AnnotationStyle[] {
+    const stored = typeof localStorage === "undefined" ? null : localStorage.getItem(customStylesStorageKey);
+    if (!stored) return [];
+
+    try {
+      const parsed = JSON.parse(stored);
+      if (!Array.isArray(parsed)) return [];
+      const used = new Set(baseHighlightStyles.map(style => style.name));
+      return parsed
+        .map((entry): AnnotationStyle | null => {
+          if (!entry || typeof entry !== "object") return null;
+          const rawName = (entry as { name?: unknown }).name;
+          const name = normalizeCustomStyleName(typeof rawName === "string" ? rawName : "");
+          const rawColorName = (entry as { colorName?: unknown }).colorName;
+          const colorName = normalizeNamedStyleColor(typeof rawColorName === "string" ? rawColorName : "");
+          if (!name || used.has(name)) return null;
+          used.add(name);
+          return { name, colorName, color: namedStyleColor(colorName), custom: true };
+        })
+        .filter((entry): entry is AnnotationStyle => entry !== null);
+    } catch {
+      return [];
+    }
+  }
+
+  function persistCustomStyles(styles: AnnotationStyle[]) {
+    customStyles = styles;
+    if (typeof localStorage === "undefined") return;
+    if (styles.length) {
+      localStorage.setItem(customStylesStorageKey, JSON.stringify(styles.map(({ name, colorName }) => ({ name, colorName }))));
+    } else {
+      localStorage.removeItem(customStylesStorageKey);
+    }
+  }
+
+  function handleNewStyleColorName(event: Event) {
+    const colorName = normalizeNamedStyleColor((event.target as HTMLSelectElement).value);
+    newStyleColorName = colorName;
+    newStyleName = colorName;
+  }
+
+  function addCustomStyle() {
+    const name = uniqueCustomStyleName(newStyleName);
+    const colorName = normalizeNamedStyleColor(newStyleColorName);
+    const nextStyle = { name, colorName, color: namedStyleColor(colorName), custom: true };
+    persistCustomStyles([...customStyles, nextStyle]);
+    currentStyle = baseHighlightStyles.length + customStyles.length;
+    newStyleColorName = "blue";
+    newStyleName = newStyleColorName;
+    view?.focus();
+  }
+
+  function removeCustomStyle(name: string) {
+    if (isBuiltInStyleName(name)) return;
+    const index = highlightStyles.findIndex(style => style.name === name);
+    persistCustomStyles(customStyles.filter(style => style.name !== name));
+    const nextTitles = { ...styleTitles };
+    delete nextTitles[name];
+    persistStyleTitles(nextTitles);
+    const nextKeys = { ...styleKeys };
+    delete nextKeys[name];
+    persistStyleKeys(nextKeys);
+    if (currentStyle === index + 1) currentStyle = 0;
   }
 
   function loadStyleTitles() {
@@ -2913,9 +3035,9 @@ ${body}
   }
 
   // Status bar reactive values
-  $: styleLabel = currentStyle === 0
-    ? "Style: plain"
-    : `Style: ${currentStyle}/${highlightStyles.length} (${styleName(currentStyle)})`;
+  $: annotationStatusLabel = currentStyle === 0
+    ? "plain"
+    : `${styleName(currentStyle)} ${currentAnnotationVariant}`;
   $: currentStyleColor = styleColor(currentStyle);
 
   const statusPlugin = ViewPlugin.fromClass(class {
@@ -3734,8 +3856,43 @@ ${body}
                   {styleDisplayTitle(style.name)}
                 </button>
               {/if}
+              {#if style.custom}
+                <button
+                  class="style-remove-button"
+                  type="button"
+                  title={`Remove ${styleDisplayTitle(style.name)}`}
+                  aria-label={`Remove ${styleDisplayTitle(style.name)}`}
+                  on:click={() => removeCustomStyle(style.name)}
+                >×</button>
+              {/if}
             </div>
           {/each}
+        </div>
+        <div class="add-style-row">
+          <span class="add-style-preview" style={`--swatch-color: ${namedStyleColor(newStyleColorName)}`} aria-hidden="true"></span>
+          <select
+            class="add-style-color-name"
+            bind:value={newStyleColorName}
+            aria-label="New annotation style color"
+            on:change={handleNewStyleColorName}
+          >
+            {#each namedStyleColors as color}
+              <option value={color.name}>{color.name}</option>
+            {/each}
+          </select>
+          <input
+            class="add-style-name"
+            bind:value={newStyleName}
+            aria-label="New annotation style name"
+            on:keydown={event => {
+              event.stopPropagation();
+              if (event.key === "Enter") {
+                event.preventDefault();
+                addCustomStyle();
+              }
+            }}
+          />
+          <button class="add-style-button" type="button" on:click={addCustomStyle} aria-label="Add annotation style">+</button>
         </div>
         {#if variantPickerOpen}
           <div class="variant-picker" role="listbox" aria-label="Annotation variants">
@@ -4036,31 +4193,39 @@ ${body}
 
   {#if !summaryFullscreen}
     <div class="statusbar">
-      <div class="status-left">
-        <span class="segment mode" style="color: {editorMode === 'insert' ? activeTheme.green : activeTheme.orange}">{editorModeLabel}</span>
-        <span class="segment">{selectionInfo}</span>
-        <span class="segment">{wordCountInfo}</span>
-        <span class="segment style" style="color: {currentStyleColor}">{styleLabel}</span>
+      <div class="status-cluster status-primary">
+        <span class="status-mode" style="--mode-color: {editorMode === 'insert' ? activeTheme.green : activeTheme.orange}">{editorModeLabel}</span>
+        <span class="status-annotation" style={`--swatch-color: ${currentStyleColor}; --swatch-text: ${annotationTextColorForStyle(styleName(currentStyle), currentStyleColor)}`}>
+          <span
+            class="status-swatch"
+            class:variant-fill={currentAnnotationVariant === "fill"}
+            class:variant-box={currentAnnotationVariant === "box"}
+            class:variant-underline={currentAnnotationVariant === "underline"}
+            class:variant-rail={currentAnnotationVariant === "rail"}
+            class:variant-bars={currentAnnotationVariant === "bars"}
+            aria-hidden="true"
+          ></span>
+          <span>{annotationStatusLabel}</span>
+        </span>
       </div>
-      <div class="status-center">
+      <div class="status-center" class:empty={!audioUrl}>
         {#if audioUrl}
           <div class="audio-widget">
             <span class="audio-name">{audioFileName}</span>
-            <span class="audio-sep">|</span>
             <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(-10)} title="Back 10 seconds" aria-label="Back 10 seconds">&lt;&lt;</button>
             <button class="audio-glyph play" type="button" on:click={toggleMediaPlayback} title="Play / pause" aria-label="Play / pause">{audioPlaying ? "⏸" : "▶"}</button>
             <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(10)} title="Forward 10 seconds" aria-label="Forward 10 seconds">&gt;&gt;</button>
-            <span class="audio-sep">|</span>
             <button class="audio-rate-text" type="button" on:click={cycleAudioRate} aria-label="Playback speed" title="Playback speed">{audioRateText}</button>
-            <span class="audio-sep">|</span>
             <span class="audio-time">{formatAudioTime(audioCurrentTime)} / {formatAudioTime(audioDuration)}</span>
           </div>
         {/if}
       </div>
-      <div class="status-right">
-        <span class="segment">Ln {line}</span>
-        <span class="segment">Col {column}</span>
-        <span class="segment syntax">{loadedFileType}</span>
+      <div class="status-cluster status-meta">
+        <span class="status-item">{selectionInfo}</span>
+        <span class="status-item">{wordCountInfo}</span>
+        <span class="status-item">Ln {line}</span>
+        <span class="status-item">Col {column}</span>
+        <span class="status-file">{loadedFileType}</span>
       </div>
     </div>
   {/if}
