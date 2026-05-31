@@ -32,7 +32,7 @@ export const helpSections = [
     items: [
       ["Space", "wrap word / selection"],
       ["q e", "variant prev / next"],
-      ["4", "variant picker"],
+      ["4", "variant next"],
       ["n N", "style next / prev"],
       ["Enter", "edit note / cue playback"],
       ["x", "remove annotation"]

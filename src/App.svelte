@@ -70,8 +70,11 @@
   let paragraphSpacing = 0;
   let currentLineHighlightStyle: "fill" | "underline" | "borders" = "fill";
   let currentLineHighlightOpacity = 0.34;
+  let columnGuideThickness = 1;
   let showHelp = false;
   let settingsOpen = false;
+  let settingsButtonEl: HTMLButtonElement | null = null;
+  let settingsPopoverEl: HTMLDivElement | null = null;
   let settingsTab: "markup" | "layout" | "transcribe" = "markup";
   let divideImportSentences = true;
   let pdfModalOpen = false;
@@ -119,20 +122,24 @@
   type AnnotationVariant = "fill" | "box" | "underline" | "rail" | "bars";
   const annotationVariants: AnnotationVariant[] = ["fill", "box", "underline", "rail", "bars"];
   const namedStyleColors = [
-    { name: "blue", color: "#83a598" },
+    { name: "steel", color: "#83a598" },
     { name: "orange", color: "#fe8019" },
+    { name: "periwinkle", color: "#8370d0" },
+    { name: "sand", color: "#d8bd7f" },
+    { name: "mint", color: "#6fc6a4" },
+    { name: "denim", color: "#3f5f9f" },
     { name: "yellow", color: "#fabd2f" },
-    { name: "purple", color: "#d3869b" },
-    { name: "aqua", color: "#8ec07c" },
-    { name: "copper", color: "#d08770" },
-    { name: "frost", color: "#81a1c1" },
-    { name: "rose", color: "#bf616a" },
-    { name: "sage", color: "#a3be8c" },
-    { name: "sand", color: "#ebcb8b" }
+    { name: "indigo", color: "#4f46e5" },
+    { name: "brown", color: "#8f6f3f" },
+    { name: "slate", color: "#586e75" },
+    { name: "sky", color: "#57a0d5" },
+    { name: "rosewood", color: "#8f3f4d" },
+    { name: "purple", color: "#d3869b" }
   ];
   let currentAnnotationVariant: AnnotationVariant = "fill";
   let variantPickerOpen = false;
-  let newStyleColorName = "blue";
+  let addStyleModalOpen = false;
+  let newStyleColorName = "steel";
   let newStyleName = newStyleColorName;
   let annotationMode: "clean" | "raw" | "all" = "clean";
   let blockquoteAlign: "left" | "center" | "right" = "left";
@@ -378,7 +385,7 @@
     if (isModeShortcut(event) || isAudioShortcut(event) || isAudioRateShortcut(event)) return true;
     if (event.ctrlKey && !event.altKey && (event.key === "z" || event.key === "y" || event.key === "Z")) return true;
     if (editorMode !== "normal" || event.altKey) return false;
-    if (!event.ctrlKey && (styleNumberForKey(event.key) !== null || event.key === "4")) return true;
+    if (!event.ctrlKey && (styleNumberForKey(event.key) !== null || event.key === "4" || event.key === "Tab")) return true;
 
     if (event.ctrlKey) {
       if (event.key === "ArrowLeft" || event.key === "ArrowRight" || event.key === "ArrowUp" || event.key === "ArrowDown") return true;
@@ -386,6 +393,7 @@
     }
 
     return event.key === " " ||
+      event.key === "Tab" ||
       event.key === "Enter" ||
       event.key === "?" ||
       event.key === "ArrowLeft" ||
@@ -420,6 +428,13 @@
   }
 
   function handleWindowKeydown(event: KeyboardEvent) {
+    if (event.key === "Escape" && settingsOpen) {
+      settingsOpen = false;
+      event.preventDefault();
+      event.stopPropagation();
+      view?.focus();
+      return;
+    }
     if (event.defaultPrevented || isEditorEventTarget(event.target) || shouldDeferWindowShortcut(event)) return;
     handleAudioKeydown(event);
     if (event.defaultPrevented || !view || !isAppShortcutCandidate(event)) return;
@@ -1057,16 +1072,19 @@
     editorMode = mode;
     if (view) {
       view.dispatch(selection ? { selection } : {});  // trigger keymap/decoration rebuild
-      // In normal mode, show a block cursor via a theme class on the editor dom
-      view.dom.classList.toggle("mode-insert", mode === "insert");
-      view.dom.classList.toggle("mode-normal", mode === "normal");
+      applyEditorModeClasses(view);
       requestAnimationFrame(() => view?.focus());
     }
   }
 
+  function applyEditorModeClasses(v = view) {
+    if (!v) return;
+    v.dom.classList.toggle("mode-insert", editorMode === "insert");
+    v.dom.classList.toggle("mode-normal", editorMode === "normal");
+  }
+
   $: if (view) {
-    view.dom.classList.toggle("mode-insert", editorMode === "insert");
-    view.dom.classList.toggle("mode-normal", editorMode === "normal");
+    applyEditorModeClasses(view);
     view.dom.style.setProperty("--paragraph-spacing", `${paragraphSpacing}em`);
     const content = view.dom.querySelector<HTMLElement>(".cm-content");
     if (content) {
@@ -1345,8 +1363,9 @@
     const nextStyle = { name, colorName, color: namedStyleColor(colorName), custom: true };
     persistCustomStyles([...customStyles, nextStyle]);
     currentStyle = baseHighlightStyles.length + customStyles.length;
-    newStyleColorName = "blue";
+    newStyleColorName = "steel";
     newStyleName = newStyleColorName;
+    addStyleModalOpen = false;
     view?.focus();
   }
 
@@ -3041,8 +3060,9 @@ ${body}
   $: currentStyleColor = styleColor(currentStyle);
 
   const statusPlugin = ViewPlugin.fromClass(class {
-    constructor(v: EditorView) { updateStatusFromView(v); }
+    constructor(v: EditorView) { applyEditorModeClasses(v); updateStatusFromView(v); }
     update(u: ViewUpdate) {
+      applyEditorModeClasses(u.view);
       if (u.docChanged || u.selectionSet || u.focusChanged || u.viewportChanged)
         updateStatusFromView(u.view);
       if (u.docChanged) {
@@ -3374,7 +3394,8 @@ ${body}
       { key: "Space",  run: normal(v => wrapSelectionOrWord(v, currentStyle)) },
       { key: "Enter",  run: normal(v => handleEnterInAnnotationMode(v)) },
       { key: "x",      run: normal(v => removeAnnotation(v)) },
-      { key: "4",      run: normal(() => { variantPickerOpen = !variantPickerOpen; return true; }) },
+      { key: "4",      run: normal(v => cycleAnnotationVariant(v, +1)) },
+      { key: "Tab",    run: normal(v => cycleAnnotationVariant(v, +1)) },
       { key: "q",      run: normal(v => cycleAnnotationVariant(v, -1)) },
       { key: "e",      run: normal(v => cycleAnnotationVariant(v, +1)) },
       { key: "f",      run: normal(() => { toggleMediaPlayback(); return true; }) },
@@ -3445,7 +3466,15 @@ ${body}
 
   onMount(() => {
     const onWindowKeydown = (event: KeyboardEvent) => handleWindowKeydown(event);
+    const onWindowPointerDown = (event: PointerEvent) => {
+      if (!settingsOpen) return;
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (settingsPopoverEl?.contains(target) || settingsButtonEl?.contains(target)) return;
+      settingsOpen = false;
+    };
     window.addEventListener("keydown", onWindowKeydown);
+    window.addEventListener("pointerdown", onWindowPointerDown);
     const editorResizeObserver = new ResizeObserver(() => updateEditorViewportHeight());
 
     view = new EditorView({
@@ -3467,6 +3496,7 @@ ${body}
 
     return () => {
       window.removeEventListener("keydown", onWindowKeydown);
+      window.removeEventListener("pointerdown", onWindowPointerDown);
       finishSummaryResize?.();
       finishRightPaddingDrag?.();
       editorResizeObserver.disconnect();
@@ -3493,6 +3523,7 @@ ${body}
     --active-line-edit: color-mix(in srgb, var(--green) var(--active-line-opacity-percent), transparent);
     --active-gutter-annotate: color-mix(in srgb, var(--active-style-color) 58%, var(--bg-hard));
     --active-gutter-edit: #2f4a3a;
+    --column-guide-width: ${columnGuideThickness}px;
   `}
 >
   <div class="toolbar">
@@ -3500,17 +3531,31 @@ ${body}
     <span class="subtitle">paste or load .srt, .txt, .md, .docx, .pdf</span>
     <button
       class="toolbar-btn settings-btn"
+      bind:this={settingsButtonEl}
       class:active={settingsOpen}
       on:click={() => settingsOpen = !settingsOpen}
       title="Settings"
       aria-label="Settings"
       aria-expanded={settingsOpen}
-    >⚙</button>
+    >Aa</button>
     <button class="toolbar-btn help-btn" on:click={() => showHelp = !showHelp} title="Keyboard shortcuts (?)">?</button>
   </div>
 
   {#if settingsOpen}
-    <div class="settings-popover" role="dialog" aria-label="Settings">
+    <div
+      class="settings-popover"
+      bind:this={settingsPopoverEl}
+      role="dialog"
+      tabindex="-1"
+      aria-label="Settings"
+      on:keydown={event => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          settingsOpen = false;
+          view?.focus();
+        }
+      }}
+    >
       <div class="settings-tabs" role="tablist" aria-label="Settings sections">
         <button type="button" class:active={settingsTab === "markup"} on:click={() => settingsTab = "markup"}>Markup</button>
         <button type="button" class:active={settingsTab === "layout"} on:click={() => settingsTab = "layout"}>Layout</button>
@@ -3552,14 +3597,6 @@ ${body}
                   on:change={() => { annotationMode = "all"; view?.dispatch({}); view?.focus(); }} />
               </label>
             </div>
-          </section>
-          <section class="settings-section">
-            <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">◐</span><span>Theme</span></div>
-            <label class="settings-toggle-row">
-              <span class="settings-control-icon" aria-hidden="true">◐</span>
-              <span>Theme: {activeThemeName}</span>
-              <button class="settings-mini-button" type="button" on:click={toggleThemeMode}>Toggle</button>
-            </label>
           </section>
         </div>
       {:else if settingsTab === "layout"}
@@ -3619,6 +3656,20 @@ ${body}
                 aria-label="Current line highlight opacity"
               />
               <span class="settings-range-value">{Math.round(currentLineHighlightOpacity * 100)}%</span>
+            </label>
+            <label class="settings-range-row">
+              <span class="settings-control-icon" aria-hidden="true">│</span>
+              <span class="settings-range-label">Column guide</span>
+              <input
+                type="range"
+                min="1"
+                max="6"
+                step="1"
+                bind:value={columnGuideThickness}
+                class="slider"
+                aria-label="Column guide thickness"
+              />
+              <span class="settings-range-value">{columnGuideThickness}px</span>
             </label>
             <label class="settings-range-row">
               <span class="settings-control-icon" aria-hidden="true">L</span>
@@ -3788,6 +3839,10 @@ ${body}
           </span>
           <span class:active={editorMode === "insert"}>Edit</span>
         </label>
+        <button class="sidebar-theme-toggle" type="button" on:click={toggleThemeMode} aria-label="Toggle theme">
+          <span aria-hidden="true">◐</span>
+          <span>{activeThemeName}</span>
+        </button>
       </div>
 
       <div class="sidebar-section">
@@ -3868,40 +3923,18 @@ ${body}
             </div>
           {/each}
         </div>
-        <div class="add-style-row">
-          <span class="add-style-preview" style={`--swatch-color: ${namedStyleColor(newStyleColorName)}`} aria-hidden="true"></span>
-          <select
-            class="add-style-color-name"
-            bind:value={newStyleColorName}
-            aria-label="New annotation style color"
-            on:change={handleNewStyleColorName}
-          >
-            {#each namedStyleColors as color}
-              <option value={color.name}>{color.name}</option>
-            {/each}
-          </select>
-          <input
-            class="add-style-name"
-            bind:value={newStyleName}
-            aria-label="New annotation style name"
-            on:keydown={event => {
-              event.stopPropagation();
-              if (event.key === "Enter") {
-                event.preventDefault();
-                addCustomStyle();
-              }
-            }}
-          />
-          <button class="add-style-button" type="button" on:click={addCustomStyle} aria-label="Add annotation style">+</button>
-        </div>
-        {#if variantPickerOpen}
-          <div class="variant-picker" role="listbox" aria-label="Annotation variants">
+        <button class="add-style-inline" type="button" on:click={() => addStyleModalOpen = true} aria-label="Add annotation style">+</button>
+        <div class="variant-row">
+          <span class="style-key-badge">4</span>
+          <span class="style-separator" aria-hidden="true">:</span>
+          <div class="variant-list" role="listbox" aria-label="Annotation variants">
             {#each annotationVariants as variant}
               <button
-                class="variant-option"
+                class="variant-chip"
                 class:active={currentAnnotationVariant === variant}
                 type="button"
                 on:click={() => chooseAnnotationVariant(variant)}
+                aria-label={`Use ${variant} annotation variant`}
               >
                 <span
                   class="variant-preview"
@@ -3912,11 +3945,10 @@ ${body}
                   class:variant-bars={variant === "bars"}
                   style={`--swatch-color: ${currentStyleColor}; --swatch-text: ${annotationTextColorForStyle(styleName(currentStyle), currentStyleColor)}`}
                 ></span>
-                <span>{variant}</span>
               </button>
             {/each}
           </div>
-        {/if}
+        </div>
       </div>
 
     </div>
@@ -4226,6 +4258,77 @@ ${body}
         <span class="status-item">Ln {line}</span>
         <span class="status-item">Col {column}</span>
         <span class="status-file">{loadedFileType}</span>
+      </div>
+    </div>
+  {/if}
+
+  {#if addStyleModalOpen}
+    <div class="style-modal-overlay" role="presentation">
+      <div
+        class="style-modal"
+        role="dialog"
+        tabindex="-1"
+        aria-label="Add annotation style"
+        on:keydown={event => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            addStyleModalOpen = false;
+          }
+        }}
+      >
+        <div class="style-modal-header">
+          <div>Add style</div>
+          <button type="button" on:click={() => addStyleModalOpen = false} aria-label="Close add style dialog">×</button>
+        </div>
+        <label class="style-modal-field">
+          <span>Color</span>
+          <select
+            class="style-modal-select"
+            bind:value={newStyleColorName}
+            aria-label="New annotation style color"
+            on:change={handleNewStyleColorName}
+          >
+            {#each namedStyleColors as color}
+              <option value={color.name}>{color.name}</option>
+            {/each}
+          </select>
+        </label>
+        <div class="style-modal-colors" role="listbox" aria-label="Named colors">
+          {#each namedStyleColors as color}
+            <button
+              class="style-modal-color"
+              class:active={newStyleColorName === color.name}
+              type="button"
+              style={`--swatch-color: ${color.color}`}
+              on:click={() => { newStyleColorName = color.name; newStyleName = color.name; }}
+            >
+              <span aria-hidden="true"></span>
+              <span>{color.name}</span>
+            </button>
+          {/each}
+        </div>
+        <label class="style-modal-field">
+          <span>Name</span>
+          <input
+            class="style-modal-input"
+            bind:value={newStyleName}
+            aria-label="New annotation style name"
+            on:keydown={event => {
+              event.stopPropagation();
+              if (event.key === "Enter") {
+                event.preventDefault();
+                addCustomStyle();
+              } else if (event.key === "Escape") {
+                event.preventDefault();
+                addStyleModalOpen = false;
+              }
+            }}
+          />
+        </label>
+        <div class="style-modal-actions">
+          <button type="button" on:click={() => addStyleModalOpen = false}>Cancel</button>
+          <button type="button" class="primary" on:click={addCustomStyle}>Add</button>
+        </div>
       </div>
     </div>
   {/if}
