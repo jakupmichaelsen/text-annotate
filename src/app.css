@@ -1347,10 +1347,39 @@
     position: absolute;
     z-index: 0;
     pointer-events: none;
+    box-sizing: border-box;
+    background: transparent;
+    border-top: 0 solid transparent;
+    border-bottom: 0 solid transparent;
+  }
+
+  .active-line-fill .cm-visual-line-marker {
     background: var(--active-line-annotate);
   }
-  .cm-visual-line-marker.is-edit {
+
+  .active-line-fill .cm-visual-line-marker.is-edit {
     background: var(--active-line-edit);
+  }
+
+  .active-line-underline .cm-visual-line-marker {
+    border-bottom-width: 2px;
+    border-bottom-color: var(--active-line-annotate);
+  }
+
+  .active-line-underline .cm-visual-line-marker.is-edit {
+    border-bottom-color: var(--active-line-edit);
+  }
+
+  .active-line-borders .cm-visual-line-marker {
+    border-top-width: 1px;
+    border-bottom-width: 1px;
+    border-top-color: var(--active-line-annotate);
+    border-bottom-color: var(--active-line-annotate);
+  }
+
+  .active-line-borders .cm-visual-line-marker.is-edit {
+    border-top-color: var(--active-line-edit);
+    border-bottom-color: var(--active-line-edit);
   }
   .cm-column-guide {
     position: absolute;

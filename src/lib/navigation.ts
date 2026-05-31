@@ -13,12 +13,14 @@ type NavigationOptions = {
   cursorScrollEffect: CursorScrollEffect;
   isSrtTimestampLine: (text: string) => boolean;
   wordBoundary: (text: string, pos: number, forward: boolean) => number;
+  wordSelectionBoundary?: (text: string, pos: number, forward: boolean) => number;
 };
 
 export function createNavigationCommands({
   cursorScrollEffect,
   isSrtTimestampLine,
-  wordBoundary
+  wordBoundary,
+  wordSelectionBoundary = wordBoundary
 }: NavigationOptions) {
   function scrollCursorIntoView(v: EditorView) {
     v.dispatch({ effects: cursorScrollEffect(v) });
@@ -36,7 +38,7 @@ export function createNavigationCommands({
     let head = selection.head;
 
     for (let i = 0; i < count; i += 1) {
-      const next = wordBoundary(docText, head, forward);
+      const next = extend ? wordSelectionBoundary(docText, head, forward) : wordBoundary(docText, head, forward);
       if (next === head) break;
       head = next;
     }

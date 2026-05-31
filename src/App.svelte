@@ -68,6 +68,8 @@
   let lineHeight = 1.6;
   let fontSize = 14;
   let paragraphSpacing = 0;
+  let currentLineHighlightStyle: "fill" | "underline" | "borders" = "fill";
+  let currentLineHighlightOpacity = 0.34;
   let showHelp = false;
   let settingsOpen = false;
   let settingsTab: "markup" | "layout" | "transcribe" = "markup";
@@ -1482,6 +1484,22 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     while (next > 0 && !isSelectableWordChar(text, next - 1)) next -= 1;
     while (next > 0 && isSelectableWordChar(text, next - 1)) next -= 1;
     return next;
+  }
+
+  function wordSelectionBoundary(text: string, pos: number, forward: boolean): number {
+    let next = Math.max(0, Math.min(pos, text.length));
+
+    if (forward) {
+      const current = wordRangeAt(text, next);
+      if (current && next < current.to) return current.to;
+      while (next < text.length && !isSelectableWordChar(text, next)) next += 1;
+      return wordRangeAt(text, next)?.to ?? next;
+    }
+
+    const current = wordRangeAt(text, next);
+    if (current && next > current.from) return current.from;
+    while (next > 0 && !isSelectableWordChar(text, next - 1)) next -= 1;
+    return next > 0 ? wordRangeAt(text, next - 1)?.from ?? next : 0;
   }
 
   function cleanHtmlDocument(markdownText: string) {
@@ -3031,7 +3049,8 @@ ${body}
   const navigation = createNavigationCommands({
     cursorScrollEffect,
     isSrtTimestampLine,
-    wordBoundary
+    wordBoundary,
+    wordSelectionBoundary
   });
 
   const dblClickBehavior = EditorView.domEventHandlers({
@@ -3242,6 +3261,9 @@ ${body}
 
 <div
   class="app"
+  class:active-line-fill={currentLineHighlightStyle === "fill"}
+  class:active-line-underline={currentLineHighlightStyle === "underline"}
+  class:active-line-borders={currentLineHighlightStyle === "borders"}
   style={`
     --bg: ${activeTheme.bg}; --bg-soft: ${activeTheme.bgSoft}; --bg-hard: ${activeTheme.bgHard};
     --bg-alt: ${activeTheme.bgAlt}; --border: ${activeTheme.border}; --fg: ${activeTheme.fg};
@@ -3249,8 +3271,9 @@ ${body}
     --fg-muted: ${activeTheme.fgMuted}; --yellow: ${activeTheme.yellow}; --green: ${activeTheme.green};
     --blue: ${activeTheme.blue}; --orange: ${activeTheme.orange}; --selection: ${activeTheme.selection};
     --active-style-color: ${currentStyleColor};
-    --active-line-annotate: color-mix(in srgb, var(--active-style-color) 34%, transparent);
-    --active-line-edit: #2f4a3aaa;
+    --active-line-opacity-percent: ${Math.round(currentLineHighlightOpacity * 100)}%;
+    --active-line-annotate: color-mix(in srgb, var(--active-style-color) var(--active-line-opacity-percent), transparent);
+    --active-line-edit: color-mix(in srgb, var(--green) var(--active-line-opacity-percent), transparent);
     --active-gutter-annotate: color-mix(in srgb, var(--active-style-color) 58%, var(--bg-hard));
     --active-gutter-edit: #2f4a3a;
   `}
@@ -3375,6 +3398,28 @@ ${body}
           </section>
           <section class="settings-section">
             <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">▣</span><span>Editor Frame</span></div>
+            <label class="settings-field">
+              <span class="settings-field-label">Current line highlight</span>
+              <select class="settings-input" bind:value={currentLineHighlightStyle}>
+                <option value="fill">Fill</option>
+                <option value="underline">Underline</option>
+                <option value="borders">Top and bottom</option>
+              </select>
+            </label>
+            <label class="settings-range-row">
+              <span class="settings-control-icon" aria-hidden="true">%</span>
+              <span class="settings-range-label">Highlight opacity</span>
+              <input
+                type="range"
+                min="0.08"
+                max="0.7"
+                step="0.02"
+                bind:value={currentLineHighlightOpacity}
+                class="slider"
+                aria-label="Current line highlight opacity"
+              />
+              <span class="settings-range-value">{Math.round(currentLineHighlightOpacity * 100)}%</span>
+            </label>
             <label class="settings-range-row">
               <span class="settings-control-icon" aria-hidden="true">L</span>
               <span class="settings-range-label">Left padding</span>
