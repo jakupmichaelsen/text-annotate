@@ -31,7 +31,8 @@ export const helpSections = [
     title: "Annotations",
     items: [
       ["Space", "wrap word / selection"],
-      ["q e", "style prev / next"],
+      ["q e", "variant prev / next"],
+      ["4", "variant picker"],
       ["n N", "style next / prev"],
       ["Enter", "edit note / cue playback"],
       ["x", "remove annotation"]

@@ -1169,19 +1169,61 @@
     return `${base}color:${theme.fg};border-left:2px solid ${color};border-right:2px solid ${color};`;
   }
 
-  function cycleAnnotationVariant(delta: number) {
-    const index = annotationVariants.indexOf(currentAnnotationVariant);
-    currentAnnotationVariant = annotationVariants[(index + delta + annotationVariants.length) % annotationVariants.length];
+  function setAnnotationVariant(v: EditorView, variant: AnnotationVariant) {
+    currentAnnotationVariant = variant;
+    const cursor = v.state.selection.main.head;
+    const docText = v.state.doc.toString();
+    annotationPattern.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = annotationPattern.exec(docText)) !== null) {
+      const spanStart = m.index, spanEnd = spanStart + m[0].length;
+      if (cursor >= spanStart && cursor <= spanEnd) {
+        const { style } = annotationStyleParts(m[2]);
+        const updated = m[0].replace(/^`([^`]+)`<!--\s*\w+(?:\s+\w+)?,/, `\`$1\`<!-- ${annotationStyleToken(style, variant)},`);
+        v.dispatch({ changes: { from: spanStart, to: spanEnd, insert: updated } });
+        return true;
+      }
+    }
+    return false;
   }
 
-  function handleVariantPickerKey(event: KeyboardEvent) {
+  function cycleAnnotationVariant(v: EditorView | null, delta: number) {
+    if (v) {
+      const cursor = v.state.selection.main.head;
+      const docText = v.state.doc.toString();
+      annotationPattern.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = annotationPattern.exec(docText)) !== null) {
+        const spanStart = m.index, spanEnd = spanStart + m[0].length;
+        if (cursor >= spanStart && cursor <= spanEnd) {
+          const { variant } = annotationStyleParts(m[2]);
+          const index = annotationVariants.indexOf(variant);
+          const next = annotationVariants[(index + delta + annotationVariants.length) % annotationVariants.length];
+          return setAnnotationVariant(v, next);
+        }
+      }
+    }
+
+    const index = annotationVariants.indexOf(currentAnnotationVariant);
+    currentAnnotationVariant = annotationVariants[(index + delta + annotationVariants.length) % annotationVariants.length];
+    return true;
+  }
+
+  function chooseAnnotationVariant(variant: AnnotationVariant) {
+    if (view) setAnnotationVariant(view, variant);
+    else currentAnnotationVariant = variant;
+    variantPickerOpen = false;
+    view?.focus();
+  }
+
+  function handleVariantPickerKey(v: EditorView, event: KeyboardEvent) {
     if (!variantPickerOpen) return false;
     if (event.key === "ArrowDown" || event.key === "j" || event.key === "s") {
-      cycleAnnotationVariant(1);
+      cycleAnnotationVariant(v, 1);
       return true;
     }
     if (event.key === "ArrowUp" || event.key === "k" || event.key === "w") {
-      cycleAnnotationVariant(-1);
+      cycleAnnotationVariant(v, -1);
       return true;
     }
     if (event.key === "Escape" || event.key === "Enter" || event.key === " " || event.key === "4") {
@@ -3002,6 +3044,27 @@ ${body}
     }
   });
 
+  function visualLineMeasureTarget(state: EditorState) {
+    const head = state.selection.main.head;
+    if (annotationMode !== "clean") return { pos: head, side: 1 };
+
+    const docText = state.doc.toString();
+    annotationPattern.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = annotationPattern.exec(docText)) !== null) {
+      const spanStart = match.index;
+      const spanEnd = spanStart + match[0].length;
+      if (head < spanStart || head > spanEnd) continue;
+
+      const wordStart = spanStart + 1;
+      const wordEnd = wordStart + match[1].length;
+      const pos = Math.max(wordStart, Math.min(head, wordEnd));
+      return { pos, side: head >= wordEnd ? -1 : 1 };
+    }
+
+    return { pos: head, side: 1 };
+  }
+
   const visualLinePlugin = ViewPlugin.fromClass(class {
     marker: HTMLDivElement;
     view: EditorView;
@@ -3027,7 +3090,8 @@ ${body}
       this.scheduled = true;
       this.view.requestMeasure({
         read: view => {
-          const coords = view.coordsAtPos(view.state.selection.main.head);
+          const target = visualLineMeasureTarget(view.state);
+          const coords = view.coordsAtPos(target.pos, target.side);
           if (!coords) return null;
           const scroller = view.scrollDOM;
           const scrollerRect = scroller.getBoundingClientRect();
@@ -3114,7 +3178,7 @@ ${body}
       (v: EditorView) => editorMode === "normal" ? fn(v) : false;
 
     return Prec.high(keymap.of([
-      { any: (_v, event) => editorMode === "normal" && handleVariantPickerKey(event) },
+      { any: (v, event) => editorMode === "normal" && handleVariantPickerKey(v, event) },
       // Always: Escape returns to normal
       { key: "Escape", run: v => { setMode("normal"); return true; } },
       // Always: F2 enters edit
@@ -3189,8 +3253,8 @@ ${body}
       { key: "Enter",  run: normal(v => handleEnterInAnnotationMode(v)) },
       { key: "x",      run: normal(v => removeAnnotation(v)) },
       { key: "4",      run: normal(() => { variantPickerOpen = !variantPickerOpen; return true; }) },
-      { key: "q",      run: normal(v => { if (!cycleAnnotationColor(v, -1)) cycleStyle(-1); return true; }) },
-      { key: "e",      run: normal(v => { if (!cycleAnnotationColor(v, +1)) cycleStyle(+1); return true; }) },
+      { key: "q",      run: normal(v => cycleAnnotationVariant(v, -1)) },
+      { key: "e",      run: normal(v => cycleAnnotationVariant(v, +1)) },
       { key: "f",      run: normal(() => { toggleMediaPlayback(); return true; }) },
       { key: "n",      run: normal(v => { if (!cycleAnnotationColor(v, +1)) cycleStyle(+1); return true; }) },
       { key: "N",      run: normal(v => { if (!cycleAnnotationColor(v, -1)) cycleStyle(-1); return true; }) },
@@ -3680,7 +3744,7 @@ ${body}
                 class="variant-option"
                 class:active={currentAnnotationVariant === variant}
                 type="button"
-                on:click={() => { currentAnnotationVariant = variant; variantPickerOpen = false; view?.focus(); }}
+                on:click={() => chooseAnnotationVariant(variant)}
               >
                 <span
                   class="variant-preview"
