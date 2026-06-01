@@ -57,26 +57,38 @@
 
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
+  const layoutStorageKey = "cm6-layout-settings";
+  const fontFamilyOptions = [
+    { name: "Noto Sans Mono", css: '"Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' },
+    { name: "JetBrains Mono", css: '"JetBrains Mono", "Noto Sans Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' },
+    { name: "IBM Plex Mono", css: '"IBM Plex Mono", "Noto Sans Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' },
+    { name: "Fira Code", css: '"Fira Code", "Noto Sans Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' },
+    { name: "Source Code Pro", css: '"Source Code Pro", "Noto Sans Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' },
+    { name: "DejaVu Sans Mono", css: '"DejaVu Sans Mono", "Noto Sans Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' }
+  ] as const;
+
   let editorEl: HTMLDivElement;
   let view: EditorView;
   let fileInput: HTMLInputElement;
-  let padLeft = 40;
-  let padRight = 40;
-  let padTop = 16;
-  let padBottom = 64;
+  const initialLayoutSettings = loadLayoutSettings();
+  let padLeft = initialLayoutSettings.padLeft ?? 40;
+  let padRight = initialLayoutSettings.padRight ?? 40;
+  let padTop = initialLayoutSettings.padTop ?? 16;
+  let padBottom = initialLayoutSettings.padBottom ?? 64;
   let editorViewportHeight = 0;
-  let lineHeight = 1.6;
-  let fontSize = 14;
-  let paragraphSpacing = 0;
-  let currentLineHighlightStyle: "fill" | "underline" | "borders" = "fill";
-  let currentLineHighlightOpacity = 0.34;
-  let columnGuideThickness = 1;
+  let lineHeight = initialLayoutSettings.lineHeight ?? 1.6;
+  let fontSize = initialLayoutSettings.fontSize ?? 14;
+  let paragraphSpacing = initialLayoutSettings.paragraphSpacing ?? 0;
+  let currentLineHighlightStyle: "fill" | "underline" | "borders" = initialLayoutSettings.currentLineHighlightStyle ?? "fill";
+  let currentLineHighlightOpacity = initialLayoutSettings.currentLineHighlightOpacity ?? 0.34;
+  let columnGuideThickness = initialLayoutSettings.columnGuideThickness ?? 1;
+  let layoutFontFamilyName = initialLayoutSettings.fontFamilyName ?? "Noto Sans Mono";
   let showHelp = false;
   let settingsOpen = false;
   let settingsButtonEl: HTMLButtonElement | null = null;
   let settingsPopoverEl: HTMLDivElement | null = null;
   let settingsTab: "markup" | "layout" | "transcribe" = "markup";
-  let divideImportSentences = true;
+  let divideImportSentences = initialLayoutSettings.divideImportSentences ?? true;
   let pdfModalOpen = false;
   let pdfDraftText = "";
   let pdfPreviewUrl = "";
@@ -200,6 +212,8 @@
   $: activeTheme = getTheme(themeMode);
   $: activeThemeName = themeMode === "nord" ? "Nord" : "Gruvbox";
   $: highlightStyles = currentHighlightStyles(activeTheme);
+  $: layoutFontFamilyCss = fontFamilyCssForName(layoutFontFamilyName);
+  $: persistLayoutSettings();
   $: editorModeLabel = editorMode === "insert" ? "EDIT" : "ANNOTATE";
   $: summaryFontSize = Math.round((11 + ((summarySidebarWidth - summarySidebarMinWidth) / 110)) * 10) / 10;
   $: clampedSummaryFontSize = Math.max(11, Math.min(15, summaryFontSize));
@@ -555,6 +569,89 @@
   function loadThemeMode(): ThemeMode {
     const stored = typeof localStorage === "undefined" ? null : localStorage.getItem(themeStorageKey);
     return stored === "gruvbox" ? "gruvbox" : "nord";
+  }
+
+  type LayoutSettings = {
+    padLeft: number;
+    padRight: number;
+    padTop: number;
+    padBottom: number;
+    lineHeight: number;
+    fontSize: number;
+    paragraphSpacing: number;
+    fontFamilyName: string;
+    currentLineHighlightStyle: "fill" | "underline" | "borders";
+    currentLineHighlightOpacity: number;
+    columnGuideThickness: number;
+    divideImportSentences: boolean;
+  };
+
+  function normalizeLayoutFontFamilyName(value: string) {
+    const normalized = value.trim();
+    return fontFamilyOptions.some(option => option.name === normalized) ? normalized : fontFamilyOptions[0].name;
+  }
+
+  function fontFamilyCssForName(name: string) {
+    return fontFamilyOptions.find(option => option.name === name)?.css ?? fontFamilyOptions[0].css;
+  }
+
+  function loadLayoutSettings(): Partial<LayoutSettings> {
+    const stored = typeof localStorage === "undefined" ? null : localStorage.getItem(layoutStorageKey);
+    if (!stored) return {};
+
+    try {
+      const parsed = JSON.parse(stored);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+
+      const settings = parsed as Record<string, unknown>;
+      const numberOr = (key: string, fallback: number, min: number, max: number) => {
+        const value = typeof settings[key] === "number" ? settings[key] : Number(settings[key]);
+        return Number.isFinite(value) ? clampNumber(value, min, max) : fallback;
+      };
+
+      const style = settings.currentLineHighlightStyle;
+      const currentLineHighlightStyle =
+        style === "fill" || style === "underline" || style === "borders" ? style : undefined;
+      const fontFamilyName = typeof settings.fontFamilyName === "string"
+        ? normalizeLayoutFontFamilyName(settings.fontFamilyName)
+        : undefined;
+
+      return {
+        padLeft: numberOr("padLeft", 40, 0, 400),
+        padRight: numberOr("padRight", 40, 0, 400),
+        padTop: numberOr("padTop", 16, 0, 400),
+        padBottom: numberOr("padBottom", 64, 0, 9999),
+        lineHeight: Math.round(numberOr("lineHeight", 1.6, 1, 3) * 100) / 100,
+        fontSize: Math.round(numberOr("fontSize", 14, 10, 28)),
+        paragraphSpacing: Math.round(numberOr("paragraphSpacing", 0, 0, 2) * 100) / 100,
+        fontFamilyName,
+        currentLineHighlightStyle,
+        currentLineHighlightOpacity: Math.round(numberOr("currentLineHighlightOpacity", 0.34, 0.08, 0.7) * 100) / 100,
+        columnGuideThickness: Math.round(numberOr("columnGuideThickness", 1, 1, 6)),
+        divideImportSentences: typeof settings.divideImportSentences === "boolean" ? settings.divideImportSentences : undefined
+      };
+    } catch {
+      return {};
+    }
+  }
+
+  function persistLayoutSettings() {
+    if (typeof localStorage === "undefined") return;
+    const payload: LayoutSettings = {
+      padLeft,
+      padRight,
+      padTop,
+      padBottom,
+      lineHeight,
+      fontSize,
+      paragraphSpacing,
+      fontFamilyName: layoutFontFamilyName,
+      currentLineHighlightStyle,
+      currentLineHighlightOpacity,
+      columnGuideThickness,
+      divideImportSentences
+    };
+    localStorage.setItem(layoutStorageKey, JSON.stringify(payload));
   }
 
   function buildThemeExtensions(theme: ThemePalette): Extension[] {
@@ -1727,7 +1824,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
       margin: 0;
       background: ${gruvbox.bg};
       color: ${gruvbox.fg};
-      font-family: "Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-family: ${layoutFontFamilyCss};
       line-height: ${lineHeight};
       font-size: ${fontSize}px;
     }
@@ -1795,7 +1892,7 @@ ${body}
       margin: 0;
       background: ${gruvbox.bg};
       color: ${gruvbox.fg};
-      font-family: "Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-family: ${layoutFontFamilyCss};
       line-height: 1.5;
       font-size: 14px;
     }
@@ -3531,6 +3628,7 @@ ${body}
     --active-gutter-annotate: color-mix(in srgb, var(--active-style-color) 58%, var(--bg-hard));
     --active-gutter-edit: #2f4a3a;
     --column-guide-width: ${columnGuideThickness}px;
+    --app-font-family: ${layoutFontFamilyCss};
   `}
 >
   <div class="toolbar">
@@ -3629,6 +3727,14 @@ ${body}
                   <button type="button" on:click={() => adjustLayoutValue("fontSize", 1)} aria-label="Increase font size">+</button>
                 </span>
               </div>
+              <label class="settings-field layout-font-field">
+                <span class="settings-field-label">Font face</span>
+                <select class="settings-input" bind:value={layoutFontFamilyName}>
+                  {#each fontFamilyOptions as font}
+                    <option value={font.name}>{font.name}</option>
+                  {/each}
+                </select>
+              </label>
               <div class="layout-stepper">
                 <span class="layout-control-icon" aria-hidden="true">¶</span>
                 <span class="layout-stepper-label">Paragraph spacing</span>
@@ -3846,10 +3952,7 @@ ${body}
           </span>
           <span class:active={editorMode === "insert"}>Edit</span>
         </label>
-        <button class="sidebar-theme-toggle" type="button" on:click={toggleThemeMode} aria-label="Toggle theme">
-          <span aria-hidden="true">◐</span>
-          <span>THEME: {activeThemeName}</span>
-        </button>
+        <button class="sidebar-theme-toggle load-btn sidebar-label" type="button" on:click={toggleThemeMode} aria-label="Toggle theme">THEME: {activeThemeName}</button>
       </div>
 
       <div class="sidebar-section">

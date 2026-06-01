@@ -1,5 +1,5 @@
   html, body, #app { margin: 0; height: 100%; }
-  body { background: var(--bg); font-family: "Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, monospace; }
+  body { background: var(--bg); font-family: var(--app-font-family); }
 
   .app {
     height: 100vh;
@@ -544,10 +544,6 @@
   }
 
   .sidebar-theme-toggle {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
     width: 100%;
     margin-top: 8px;
     padding: 0;
@@ -555,8 +551,12 @@
     background: transparent;
     color: var(--fg-muted);
     font: inherit;
-    font-size: 11px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
     cursor: pointer;
+    text-align: left;
   }
 
   .sidebar-theme-toggle:hover,
@@ -718,7 +718,7 @@
     align-items: center;
     justify-content: center;
     flex: 0 0 auto;
-    font-family: "Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+    font-family: var(--app-font-family);
     font-weight: 700;
     line-height: 1;
   }
@@ -1032,7 +1032,7 @@
 
   .style-swatch.variant-box,
   .variant-preview.variant-box {
-    background: color-mix(in srgb, var(--swatch-color) 16%, transparent);
+    background: transparent;
     border-color: var(--swatch-color);
   }
 
@@ -1040,6 +1040,7 @@
   .variant-preview.variant-underline {
     background: transparent;
     border-color: transparent;
+    border-radius: 0;
     border-bottom: 3px solid var(--swatch-color);
   }
 
@@ -1047,16 +1048,16 @@
   .variant-preview.variant-rail {
     background: transparent;
     border-color: transparent;
-    border-top: 2px solid var(--swatch-color);
-    border-bottom: 2px solid var(--swatch-color);
+    border-top: 3px solid var(--swatch-color);
+    border-bottom: 3px solid var(--swatch-color);
   }
 
   .style-swatch.variant-bars,
   .variant-preview.variant-bars {
     background: transparent;
     border-color: transparent;
-    border-left: 3px solid var(--swatch-color);
-    border-right: 3px solid var(--swatch-color);
+    border-left: 4px solid var(--swatch-color);
+    border-right: 4px solid var(--swatch-color);
   }
 
   .style-name {
@@ -1690,28 +1691,29 @@
   }
 
   .status-swatch.variant-box {
-    background: color-mix(in srgb, var(--swatch-color) 16%, transparent);
+    background: transparent;
     border-color: var(--swatch-color);
   }
 
   .status-swatch.variant-underline {
     background: transparent;
     border-color: transparent;
+    border-radius: 0;
     border-bottom: 3px solid var(--swatch-color);
   }
 
   .status-swatch.variant-rail {
     background: transparent;
     border-color: transparent;
-    border-top: 2px solid var(--swatch-color);
-    border-bottom: 2px solid var(--swatch-color);
+    border-top: 3px solid var(--swatch-color);
+    border-bottom: 3px solid var(--swatch-color);
   }
 
   .status-swatch.variant-bars {
     background: transparent;
     border-color: transparent;
-    border-left: 3px solid var(--swatch-color);
-    border-right: 3px solid var(--swatch-color);
+    border-left: 4px solid var(--swatch-color);
+    border-right: 4px solid var(--swatch-color);
   }
 
   .status-item {
@@ -1734,7 +1736,7 @@
   .audio-widget {
     gap: 7px;
     max-width: 100%;
-    font-family: "Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+    font-family: var(--app-font-family);
   }
 
   .audio-name {
