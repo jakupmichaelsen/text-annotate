@@ -1611,12 +1611,13 @@
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1fr);
     gap: 10px;
     align-items: center;
-    min-height: 34px;
-    padding: 4px 10px;
+    min-height: 48px;
+    padding: 0 10px;
     background: var(--bg-hard);
     border-top: 1px solid var(--internal-border);
     color: var(--fg-muted);
-    font-size: 11px;
+    font-family: "Noto Sans Mono", monospace;
+    font-size: 12px;
     overflow: hidden;
   }
 
@@ -1630,13 +1631,33 @@
   }
 
   .status-cluster {
-    gap: 7px;
+    gap: 0;
     flex-wrap: nowrap;
     overflow: hidden;
   }
 
   .status-primary {
     justify-self: start;
+  }
+
+  .status-primary > *,
+  .status-meta > * {
+    min-height: 22px;
+    padding: 0 8px;
+    border-right: 1px solid var(--internal-border);
+  }
+
+  .status-primary > :first-child {
+    padding-left: 0;
+  }
+
+  .status-primary > :last-child,
+  .status-meta > :last-child {
+    border-right: none;
+  }
+
+  .status-meta > :first-child {
+    border-left: 1px solid var(--internal-border);
   }
 
   .status-meta {
@@ -1729,18 +1750,13 @@
     font-weight: 600;
   }
 
-  .status-item + .status-item::before,
-  .status-file::before {
-    content: "/";
-    margin: 0 7px 0 0;
-    color: var(--internal-border);
-    font-weight: 400;
-  }
 
   .audio-widget {
-    gap: 7px;
+    display: inline-flex;
+    gap: 6px;
     max-width: 100%;
-    font-family: var(--app-font-family);
+    padding: 0 8px;
+    font-family: "Noto Sans Mono", monospace;
   }
 
   .audio-name {
@@ -1748,8 +1764,8 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: var(--yellow);
-    font-weight: 500;
+    color: var(--orange);
+    font-weight: 600;
     font-size: 11px;
   }
 
@@ -1757,6 +1773,12 @@
     white-space: nowrap;
     color: var(--fg-muted);
     font-size: 11px;
+  }
+
+  .audio-sep {
+    color: var(--internal-border);
+    font-size: 11px;
+    user-select: none;
   }
 
   .audio-rate-text {
@@ -1772,7 +1794,7 @@
 
   .audio-rate-text:hover,
   .audio-rate-text:focus-visible {
-    color: var(--yellow);
+    color: var(--orange);
     outline: none;
   }
 
@@ -1785,7 +1807,7 @@
     background: transparent;
     color: var(--fg-muted);
     font-family: inherit;
-    font-size: 12px;
+    font-size: 14px;
     cursor: pointer;
   }
 

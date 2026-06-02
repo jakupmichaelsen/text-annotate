@@ -4721,19 +4721,25 @@ ${body}
         {#if audioUrl}
           <div class="audio-widget">
             <span class="audio-name">{audioFileName}</span>
+            <span class="audio-sep">|</span>
             <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(-mediaSeekSeconds)} title={`Back ${mediaSeekSeconds} seconds`} aria-label={`Back ${mediaSeekSeconds} seconds`}>&lt;&lt;</button>
             <button class="audio-glyph play" type="button" on:click={toggleMediaPlayback} title="Play / pause" aria-label="Play / pause">{audioPlaying ? "⏸" : "▶"}</button>
             <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(mediaSeekSeconds)} title={`Forward ${mediaSeekSeconds} seconds`} aria-label={`Forward ${mediaSeekSeconds} seconds`}>&gt;&gt;</button>
+            <span class="audio-sep">|</span>
             <button class="audio-rate-text" type="button" on:click={cycleAudioRate} aria-label="Playback speed" title="Playback speed">{audioRateText}</button>
+            <span class="audio-sep">|</span>
             <span class="audio-time">{formatAudioTime(audioCurrentTime)} / {formatAudioTime(audioDuration)}</span>
           </div>
         {:else if showTtsWidget}
           <div class="audio-widget">
             <span class="audio-name">TTS</span>
+            <span class="audio-sep">|</span>
             <button class="audio-glyph" type="button" on:click={() => stepTts(-1)} title="Previous spoken chunk" aria-label="Previous spoken chunk">&lt;&lt;</button>
             <button class="audio-glyph play" type="button" on:click={toggleTtsPlayback} title="Play / pause TTS" aria-label="Play / pause TTS">{ttsSpeaking && !ttsPaused ? "⏸" : "▶"}</button>
             <button class="audio-glyph" type="button" on:click={() => stepTts(1)} title="Next spoken chunk" aria-label="Next spoken chunk">&gt;&gt;</button>
+            <span class="audio-sep">|</span>
             <button class="audio-rate-text" type="button" on:click={cycleAudioRate} aria-label="TTS speed" title="TTS speed">{audioRateText}</button>
+            <span class="audio-sep">|</span>
             <span class="audio-time">{ttsProgressText}</span>
           </div>
         {/if}
