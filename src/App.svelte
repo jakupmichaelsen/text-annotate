@@ -57,10 +57,11 @@
 
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
-  const preferencesStorageKey = "textAnnotate-preferences";
-  const preferencesVersion = 1;
+  const unifiedPreferencesStorageKey = "textAnnotate-preferences";
   const layoutStorageKey = "cm6-layout-settings";
   const appSettingsStorageKey = "textAnnotate-settings";
+  const openAiApiKeyStorageKey = "textAnnotate-openai-api-key";
+  const themeStorageKey = "cm6-theme";
   const fontFamilyOptions = [
     { name: "Noto Sans Mono", css: '"Noto Sans Mono", monospace' },
     { name: "JetBrains Mono", css: '"JetBrains Mono", monospace' },
@@ -78,8 +79,7 @@
   let editorEl: HTMLDivElement;
   let view: EditorView;
   let fileInput: HTMLInputElement;
-  const initialPreferences = loadPersistedPreferences();
-  const initialLayoutSettings = initialPreferences.layout;
+  const initialLayoutSettings = loadLayoutSettings();
   let padLeft = initialLayoutSettings.padLeft ?? 40;
   let padRight = initialLayoutSettings.padRight ?? 40;
   let padTop = initialLayoutSettings.padTop ?? 16;
@@ -106,7 +106,7 @@
     transcriptionModel: string;
     transcriptionPrompt: string;
   };
-  const initialAppSettings = initialPreferences.app;
+  const initialAppSettings = loadAppSettings();
   let settingsTab: SettingsTab = initialAppSettings.settingsTab;
   let divideImportSentences = initialLayoutSettings.divideImportSentences ?? true;
   let pdfModalOpen = false;
@@ -145,8 +145,6 @@
   const audioDbName = "textAnnotate-state";
   const audioStoreName = "audio";
   const mediaExtensions = [".mp3", ".wav", ".m4a", ".ogg", ".oga", ".webm", ".aac", ".flac", ".mp4", ".mov", ".mkv"];
-  const openAiApiKeyStorageKey = "textAnnotate-openai-api-key";
-  const themeStorageKey = "cm6-theme";
   let openAiApiKey = "";
   let rememberOpenAiApiKey = initialAppSettings.rememberOpenAiApiKey;
   let transcriptionModel = initialAppSettings.transcriptionModel;
@@ -154,7 +152,7 @@
   let transcriptionBusy = false;
   let transcriptionStatus = "";
   let transcriptionError = "";
-  let themeMode = initialPreferences.themeMode;
+  let themeMode = loadThemeMode();
   let loadedFileType = "Markdown";
   $: pdfFrameSrc = pdfPreviewUrl ? `${pdfPreviewUrl}#zoom=75` : "";
   $: if (audioElement) audioElement.playbackRate = audioRates[audioRateIndex];
@@ -246,7 +244,8 @@
   $: activeThemeName = themeMode === "nord" ? "Nord" : "Gruvbox";
   $: highlightStyles = currentHighlightStyles(activeTheme);
   $: layoutFontFamilyCss = fontFamilyCssForName(layoutFontFamilyName);
-  $: if (settingsPersistenceReady) persistPreferences();
+  $: if (settingsPersistenceReady) persistLayoutSettings();
+  $: if (settingsPersistenceReady) persistAppSettings();
   $: editorModeLabel = editorMode === "insert" ? "EDIT" : "ANNOTATE";
   $: summaryFontSize = Math.round((11 + ((summarySidebarWidth - summarySidebarMinWidth) / 110)) * 10) / 10;
   $: clampedSummaryFontSize = Math.max(11, Math.min(15, summaryFontSize));
@@ -821,6 +820,55 @@
     return localStorage.getItem(openAiApiKeyStorageKey) ?? "";
   }
 
+  function objectFromStorage(key: string): Record<string, unknown> | null {
+    if (typeof localStorage === "undefined") return null;
+    const stored = localStorage.getItem(key);
+    if (!stored) return null;
+
+    try {
+      const parsed = JSON.parse(stored);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function unifiedPreferenceSection(name: "layout" | "app"): Record<string, unknown> | null {
+    const preferences = objectFromStorage(unifiedPreferencesStorageKey);
+    const section = preferences?.[name];
+    return section && typeof section === "object" && !Array.isArray(section) ? section as Record<string, unknown> : null;
+  }
+
+  function loadThemeMode(): ThemeMode {
+    const stored = typeof localStorage === "undefined" ? null : localStorage.getItem(themeStorageKey);
+    if (stored === "gruvbox" || stored === "nord") return stored;
+    const preferences = objectFromStorage(unifiedPreferencesStorageKey);
+    const mode = preferences?.themeMode;
+    return mode === "gruvbox" || mode === "nord" ? mode : "nord";
+  }
+
+  function loadAppSettings(): AppSettings {
+    const defaults: AppSettings = {
+      annotationMode: "clean",
+      settingsTab: "markup",
+      rememberOpenAiApiKey: false,
+      transcriptionModel: "whisper-1",
+      transcriptionPrompt: ""
+    };
+    const settings = objectFromStorage(appSettingsStorageKey) ?? unifiedPreferenceSection("app");
+    if (!settings) return defaults;
+
+    return {
+      annotationMode: settings.annotationMode === "raw" || settings.annotationMode === "all" ? settings.annotationMode : "clean",
+      settingsTab: settings.settingsTab === "layout" || settings.settingsTab === "transcribe" ? settings.settingsTab : "markup",
+      rememberOpenAiApiKey: typeof settings.rememberOpenAiApiKey === "boolean" ? settings.rememberOpenAiApiKey : false,
+      transcriptionModel: typeof settings.transcriptionModel === "string" && settings.transcriptionModel.trim()
+        ? settings.transcriptionModel
+        : "whisper-1",
+      transcriptionPrompt: typeof settings.transcriptionPrompt === "string" ? settings.transcriptionPrompt : ""
+    };
+  }
+
   type LayoutSettings = {
     padLeft: number;
     padRight: number;
@@ -836,83 +884,6 @@
     divideImportSentences: boolean;
   };
 
-  type PersistedPreferences = {
-    version: number;
-    themeMode: ThemeMode;
-    layout: LayoutSettings;
-    app: AppSettings;
-  };
-
-  function defaultLayoutSettings(): LayoutSettings {
-    return {
-      padLeft: 40,
-      padRight: 40,
-      padTop: 16,
-      padBottom: 64,
-      lineHeight: 1.6,
-      fontSize: 14,
-      paragraphSpacing: 0,
-      fontFamilyName: "Noto Sans Mono",
-      currentLineHighlightStyle: "fill",
-      currentLineHighlightOpacity: 0.34,
-      columnGuideThickness: 1,
-      divideImportSentences: true
-    };
-  }
-
-  function defaultAppSettings(): AppSettings {
-    return {
-      annotationMode: "clean",
-      settingsTab: "markup",
-      rememberOpenAiApiKey: false,
-      transcriptionModel: "whisper-1",
-      transcriptionPrompt: ""
-    };
-  }
-
-  function defaultPreferences(): PersistedPreferences {
-    return {
-      version: preferencesVersion,
-      themeMode: "nord",
-      layout: defaultLayoutSettings(),
-      app: defaultAppSettings()
-    };
-  }
-
-  function objectFromStorage(key: string): Record<string, unknown> | null {
-    if (typeof localStorage === "undefined") return null;
-    const stored = localStorage.getItem(key);
-    if (!stored) return null;
-
-    try {
-      const parsed = JSON.parse(stored);
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
-    } catch {
-      return null;
-    }
-  }
-
-  function objectValue(value: unknown): Record<string, unknown> | null {
-    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
-  }
-
-  function normalizeThemeMode(value: unknown, fallback: ThemeMode = "nord"): ThemeMode {
-    return value === "gruvbox" || value === "nord" ? value : fallback;
-  }
-
-  function normalizeAppSettings(settings: Record<string, unknown> | null, fallback = defaultAppSettings()): AppSettings {
-    if (!settings) return fallback;
-    return {
-      annotationMode: settings.annotationMode === "raw" || settings.annotationMode === "all" ? settings.annotationMode : fallback.annotationMode,
-      settingsTab: settings.settingsTab === "layout" || settings.settingsTab === "transcribe" || settings.settingsTab === "markup" ? settings.settingsTab : fallback.settingsTab,
-      rememberOpenAiApiKey: typeof settings.rememberOpenAiApiKey === "boolean" ? settings.rememberOpenAiApiKey : fallback.rememberOpenAiApiKey,
-      transcriptionModel: typeof settings.transcriptionModel === "string" && settings.transcriptionModel.trim()
-        ? settings.transcriptionModel
-        : fallback.transcriptionModel,
-      transcriptionPrompt: typeof settings.transcriptionPrompt === "string" ? settings.transcriptionPrompt : fallback.transcriptionPrompt
-    };
-  }
-
   function normalizeLayoutFontFamilyName(value: string) {
     const normalized = value.trim();
     return fontFamilyOptions.some(option => option.name === normalized) ? normalized : fontFamilyOptions[0].name;
@@ -922,103 +893,82 @@
     return fontFamilyOptions.find(option => option.name === name)?.css ?? fontFamilyOptions[0].css;
   }
 
-  function normalizeLayoutSettings(settings: Record<string, unknown> | null, fallback = defaultLayoutSettings()): LayoutSettings {
-    if (!settings) return fallback;
-    const numberOr = (key: keyof LayoutSettings, min: number, max: number) => {
+  function loadLayoutSettings(): Partial<LayoutSettings> {
+    const settings = objectFromStorage(layoutStorageKey) ?? unifiedPreferenceSection("layout");
+    if (!settings) return {};
+
+    const numberOr = (key: string, fallback: number, min: number, max: number) => {
       const value = typeof settings[key] === "number" ? settings[key] : Number(settings[key]);
-      return Number.isFinite(value) ? clampNumber(value, min, max) : (fallback[key] as number);
+      return Number.isFinite(value) ? clampNumber(value, min, max) : fallback;
     };
+
     const style = settings.currentLineHighlightStyle;
+    const currentLineHighlightStyle =
+      style === "fill" || style === "underline" || style === "borders" ? style : undefined;
     const fontFamilyName = typeof settings.fontFamilyName === "string"
       ? normalizeLayoutFontFamilyName(settings.fontFamilyName)
-      : fallback.fontFamilyName;
+      : undefined;
 
     return {
-      padLeft: numberOr("padLeft", 0, 400),
-      padRight: numberOr("padRight", 0, 400),
-      padTop: numberOr("padTop", 0, 400),
-      padBottom: numberOr("padBottom", 0, 9999),
-      lineHeight: Math.round(numberOr("lineHeight", 1, 3) * 100) / 100,
-      fontSize: Math.round(numberOr("fontSize", 10, 28)),
-      paragraphSpacing: Math.round(numberOr("paragraphSpacing", 0, 2) * 100) / 100,
+      padLeft: numberOr("padLeft", 40, 0, 400),
+      padRight: numberOr("padRight", 40, 0, 400),
+      padTop: numberOr("padTop", 16, 0, 400),
+      padBottom: numberOr("padBottom", 64, 0, 9999),
+      lineHeight: Math.round(numberOr("lineHeight", 1.6, 1, 3) * 100) / 100,
+      fontSize: Math.round(numberOr("fontSize", 14, 10, 28)),
+      paragraphSpacing: Math.round(numberOr("paragraphSpacing", 0, 0, 2) * 100) / 100,
       fontFamilyName,
-      currentLineHighlightStyle: style === "fill" || style === "underline" || style === "borders" ? style : fallback.currentLineHighlightStyle,
-      currentLineHighlightOpacity: Math.round(numberOr("currentLineHighlightOpacity", 0.08, 0.7) * 100) / 100,
-      columnGuideThickness: Math.round(numberOr("columnGuideThickness", 1, 6)),
-      divideImportSentences: typeof settings.divideImportSentences === "boolean" ? settings.divideImportSentences : fallback.divideImportSentences
+      currentLineHighlightStyle,
+      currentLineHighlightOpacity: Math.round(numberOr("currentLineHighlightOpacity", 0.34, 0.08, 0.7) * 100) / 100,
+      columnGuideThickness: Math.round(numberOr("columnGuideThickness", 1, 1, 6)),
+      divideImportSentences: typeof settings.divideImportSentences === "boolean" ? settings.divideImportSentences : undefined
     };
   }
 
-  function loadLegacyPreferences(): PersistedPreferences {
-    const defaults = defaultPreferences();
-    const legacyTheme = typeof localStorage === "undefined" ? null : localStorage.getItem(themeStorageKey);
-    return {
-      version: preferencesVersion,
-      themeMode: normalizeThemeMode(legacyTheme, defaults.themeMode),
-      layout: normalizeLayoutSettings(objectFromStorage(layoutStorageKey), defaults.layout),
-      app: normalizeAppSettings(objectFromStorage(appSettingsStorageKey), defaults.app)
-    };
-  }
-
-  function loadPersistedPreferences(): PersistedPreferences {
-    const legacy = loadLegacyPreferences();
-    const stored = objectFromStorage(preferencesStorageKey);
-    if (!stored) return legacy;
-
-    return {
-      version: preferencesVersion,
-      themeMode: normalizeThemeMode(stored.themeMode, legacy.themeMode),
-      layout: normalizeLayoutSettings(objectValue(stored.layout), legacy.layout),
-      app: normalizeAppSettings(objectValue(stored.app), legacy.app)
-    };
-  }
-
-  function currentPreferences(): PersistedPreferences {
-    return {
-      version: preferencesVersion,
-      themeMode,
-      layout: {
-        padLeft,
-        padRight,
-        padTop,
-        padBottom,
-        lineHeight,
-        fontSize,
-        paragraphSpacing,
-        fontFamilyName: layoutFontFamilyName,
-        currentLineHighlightStyle,
-        currentLineHighlightOpacity,
-        columnGuideThickness,
-        divideImportSentences
-      },
-      app: {
-        annotationMode,
-        settingsTab,
-        rememberOpenAiApiKey,
-        transcriptionModel,
-        transcriptionPrompt
-      }
-    };
-  }
-
-  function persistPreferences() {
+  function persistLayoutSettings() {
     if (typeof localStorage === "undefined") return;
-    localStorage.setItem(preferencesStorageKey, JSON.stringify(currentPreferences()));
+    const payload: LayoutSettings = {
+      padLeft,
+      padRight,
+      padTop,
+      padBottom,
+      lineHeight,
+      fontSize,
+      paragraphSpacing,
+      fontFamilyName: layoutFontFamilyName,
+      currentLineHighlightStyle,
+      currentLineHighlightOpacity,
+      columnGuideThickness,
+      divideImportSentences
+    };
+    localStorage.setItem(layoutStorageKey, JSON.stringify(payload));
   }
 
-  function applyLayoutSettings(settings: LayoutSettings) {
-    padLeft = settings.padLeft;
-    padRight = settings.padRight;
-    padTop = settings.padTop;
-    padBottom = settings.padBottom;
-    lineHeight = settings.lineHeight;
-    fontSize = settings.fontSize;
-    paragraphSpacing = settings.paragraphSpacing;
-    layoutFontFamilyName = settings.fontFamilyName;
-    currentLineHighlightStyle = settings.currentLineHighlightStyle;
-    currentLineHighlightOpacity = settings.currentLineHighlightOpacity;
-    columnGuideThickness = settings.columnGuideThickness;
-    divideImportSentences = settings.divideImportSentences;
+  function persistAppSettings() {
+    if (typeof localStorage === "undefined") return;
+    const payload: AppSettings = {
+      annotationMode,
+      settingsTab,
+      rememberOpenAiApiKey,
+      transcriptionModel,
+      transcriptionPrompt
+    };
+    localStorage.setItem(appSettingsStorageKey, JSON.stringify(payload));
+  }
+
+  function applyLayoutSettings(settings: Partial<LayoutSettings>) {
+    padLeft = settings.padLeft ?? padLeft;
+    padRight = settings.padRight ?? padRight;
+    padTop = settings.padTop ?? padTop;
+    padBottom = settings.padBottom ?? padBottom;
+    lineHeight = settings.lineHeight ?? lineHeight;
+    fontSize = settings.fontSize ?? fontSize;
+    paragraphSpacing = settings.paragraphSpacing ?? paragraphSpacing;
+    layoutFontFamilyName = settings.fontFamilyName ?? layoutFontFamilyName;
+    currentLineHighlightStyle = settings.currentLineHighlightStyle ?? currentLineHighlightStyle;
+    currentLineHighlightOpacity = settings.currentLineHighlightOpacity ?? currentLineHighlightOpacity;
+    columnGuideThickness = settings.columnGuideThickness ?? columnGuideThickness;
+    divideImportSentences = settings.divideImportSentences ?? divideImportSentences;
   }
 
   function applyAppSettings(settings: AppSettings) {
@@ -1030,10 +980,9 @@
   }
 
   function restorePersistedSettings() {
-    const settings = loadPersistedPreferences();
-    applyLayoutSettings(settings.layout);
-    applyAppSettings(settings.app);
-    themeMode = settings.themeMode;
+    applyLayoutSettings(loadLayoutSettings());
+    applyAppSettings(loadAppSettings());
+    themeMode = loadThemeMode();
   }
 
   function buildThemeExtensions(theme: ThemePalette): Extension[] {
@@ -1046,6 +995,7 @@
 
   function reconfigureTheme(nextMode: ThemeMode) {
     themeMode = nextMode;
+    if (typeof localStorage !== "undefined") localStorage.setItem(themeStorageKey, nextMode);
     view?.dispatch({ effects: themeCompartment.reconfigure(buildThemeExtensions(getTheme(nextMode))) });
   }
 
@@ -4017,7 +3967,8 @@ ${body}
     openAiApiKey = loadOpenAiApiKey();
     if (openAiApiKey) rememberOpenAiApiKey = true;
     settingsPersistenceReady = true;
-    persistPreferences();
+    persistLayoutSettings();
+    persistAppSettings();
     void restoreAudioFile();
 
     return () => {
@@ -4042,7 +3993,7 @@ ${body}
   style={`
     --bg: ${activeTheme.bg}; --bg-soft: ${activeTheme.bgSoft}; --bg-hard: ${activeTheme.bgHard};
     --bg-alt: ${activeTheme.bgAlt}; --border: ${activeTheme.border}; --fg: ${activeTheme.fg};
-    --internal-border: ${activeTheme.border};
+    --internal-border: transparent;
     --fg-muted: ${activeTheme.fgMuted}; --yellow: ${activeTheme.yellow}; --green: ${activeTheme.green};
     --blue: ${activeTheme.blue}; --orange: ${activeTheme.orange}; --selection: ${activeTheme.selection};
     --active-style-color: ${currentStyleColor};

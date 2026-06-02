@@ -1608,17 +1608,15 @@
   }
   .statusbar {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1fr);
+    grid-template-columns: minmax(220px, 1fr) minmax(0, auto) minmax(260px, 1fr);
     gap: 10px;
     align-items: center;
-    min-height: 48px;
-    padding: 0 10px;
+    min-height: 44px;
+    padding: 6px 10px;
     background: var(--bg-hard);
     border-top: 1px solid var(--internal-border);
     color: var(--fg-muted);
-    font-family: "Noto Sans Mono", monospace;
-    font-size: 12px;
-    overflow: hidden;
+    font-size: 11px;
   }
 
   .status-cluster,
@@ -1631,48 +1629,24 @@
   }
 
   .status-cluster {
-    gap: 0;
-    flex-wrap: nowrap;
-    overflow: hidden;
+    gap: 7px;
   }
 
   .status-primary {
     justify-self: start;
   }
 
-  .status-primary > *,
-  .status-meta > * {
-    min-height: 22px;
-    padding: 0 8px;
-    border-right: 1px solid var(--internal-border);
-  }
-
-  .status-primary > :first-child {
-    padding-left: 0;
-  }
-
-  .status-primary > :last-child,
-  .status-meta > :last-child {
-    border-right: none;
-  }
-
-  .status-meta > :first-child {
-    border-left: 1px solid var(--internal-border);
-  }
-
   .status-meta {
     justify-self: end;
     justify-content: flex-end;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     row-gap: 3px;
-    overflow: hidden;
   }
 
   .status-center {
-    justify-self: stretch;
+    justify-self: center;
     justify-content: center;
     max-width: 100%;
-    overflow: hidden;
   }
 
   .status-center.empty {
@@ -1716,29 +1690,28 @@
   }
 
   .status-swatch.variant-box {
-    background: transparent;
+    background: color-mix(in srgb, var(--swatch-color) 16%, transparent);
     border-color: var(--swatch-color);
   }
 
   .status-swatch.variant-underline {
     background: transparent;
     border-color: transparent;
-    border-radius: 0;
     border-bottom: 3px solid var(--swatch-color);
   }
 
   .status-swatch.variant-rail {
     background: transparent;
     border-color: transparent;
-    border-top: 3px solid var(--swatch-color);
-    border-bottom: 3px solid var(--swatch-color);
+    border-top: 2px solid var(--swatch-color);
+    border-bottom: 2px solid var(--swatch-color);
   }
 
   .status-swatch.variant-bars {
     background: transparent;
     border-color: transparent;
-    border-left: 4px solid var(--swatch-color);
-    border-right: 4px solid var(--swatch-color);
+    border-left: 3px solid var(--swatch-color);
+    border-right: 3px solid var(--swatch-color);
   }
 
   .status-item {
@@ -1750,13 +1723,18 @@
     font-weight: 600;
   }
 
+  .status-item + .status-item::before,
+  .status-file::before {
+    content: "/";
+    margin: 0 7px 0 0;
+    color: var(--internal-border);
+    font-weight: 400;
+  }
 
   .audio-widget {
-    display: inline-flex;
-    gap: 6px;
+    gap: 7px;
     max-width: 100%;
-    padding: 0 8px;
-    font-family: "Noto Sans Mono", monospace;
+    font-family: "Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, monospace;
   }
 
   .audio-name {
@@ -1764,8 +1742,8 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: var(--orange);
-    font-weight: 600;
+    color: var(--yellow);
+    font-weight: 500;
     font-size: 11px;
   }
 
@@ -1794,7 +1772,7 @@
 
   .audio-rate-text:hover,
   .audio-rate-text:focus-visible {
-    color: var(--orange);
+    color: var(--yellow);
     outline: none;
   }
 
@@ -1807,7 +1785,7 @@
     background: transparent;
     color: var(--fg-muted);
     font-family: inherit;
-    font-size: 14px;
+    font-size: 12px;
     cursor: pointer;
   }
 
