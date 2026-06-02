@@ -127,7 +127,18 @@
   let audioSourceFile: File | null = null;
   let audioRateIndex = 0;
   const audioRates = [1, 1.5, 2];
+  const mediaSeekSeconds = 10;
   const manualPauseRewindSeconds = 3;
+  type TtsSegment = { text: string; from: number; to: number };
+  let ttsAvailable = false;
+  let ttsSpeaking = false;
+  let ttsPaused = false;
+  let ttsSegments: TtsSegment[] = [];
+  let ttsIndex = 0;
+  let ttsRunId = 0;
+  let ttsStatus = "";
+  let ttsSpeakTimer: ReturnType<typeof setTimeout> | null = null;
+  let ttsUtterance: SpeechSynthesisUtterance | null = null;
   const audioDbName = "textAnnotate-state";
   const audioStoreName = "audio";
   const mediaExtensions = [".mp3", ".wav", ".m4a", ".ogg", ".oga", ".webm", ".aac", ".flac", ".mp4", ".mov", ".mkv"];
@@ -144,7 +155,9 @@
   let loadedFileType = "Markdown";
   $: pdfFrameSrc = pdfPreviewUrl ? `${pdfPreviewUrl}#zoom=75` : "";
   $: if (audioElement) audioElement.playbackRate = audioRates[audioRateIndex];
-  $: audioRateText = audioRateIndex === 0 ? "x1" : audioRateIndex === 1 ? "x1½" : "x2";
+  $: audioRateText = audioRateLabel();
+  $: showTtsWidget = ttsAvailable && !audioUrl && loadedFileType !== "SRT";
+  $: ttsProgressText = ttsStatus || (ttsSegments.length ? `${Math.min(ttsIndex + 1, ttsSegments.length)}/${ttsSegments.length}` : "ready");
 
   let currentStyle = 0;
   type AnnotationStyle = { name: string; color: string; colorName?: string; custom?: boolean };
@@ -245,6 +258,7 @@
     audioUrl = "";
     audioFileName = "";
     audioSourceFile = null;
+    resetTtsState();
     audioCurrentTime = 0;
     audioDuration = 0;
     audioPlaying = false;
@@ -337,7 +351,8 @@
   }
 
   function toggleMediaPlayback() {
-    toggleAudioPlayback();
+    if (audioUrl) toggleAudioPlayback();
+    else toggleTtsPlayback();
   }
 
   function cycleAudioRate() {
@@ -381,6 +396,223 @@
   function jumpAudioToAndPlay(seconds: number) {
     jumpAudioTo(seconds);
     playAudioIfNeeded();
+  }
+
+  function speechSynth() {
+    return typeof window === "undefined" ? null : window.speechSynthesis;
+  }
+
+  function refreshTtsVoices() {
+    const voices = speechSynth()?.getVoices() ?? [];
+    if (voices.length && ttsStatus === "no voice") ttsStatus = "";
+    return voices;
+  }
+
+  function preferredTtsVoice(voices: SpeechSynthesisVoice[]) {
+    const isEnglish = (voice: SpeechSynthesisVoice) => voice.lang.toLowerCase().startsWith("en");
+    return voices.find(voice => voice.localService && isEnglish(voice)) ??
+      voices.find(isEnglish) ??
+      voices.find(voice => voice.default) ??
+      voices.find(voice => voice.localService) ??
+      null;
+  }
+
+  function resetTtsState() {
+    ttsRunId += 1;
+    if (ttsSpeakTimer) {
+      clearTimeout(ttsSpeakTimer);
+      ttsSpeakTimer = null;
+    }
+    speechSynth()?.cancel();
+    ttsUtterance = null;
+    ttsSpeaking = false;
+    ttsPaused = false;
+    ttsSegments = [];
+    ttsIndex = 0;
+    ttsStatus = "";
+  }
+
+  function cleanTtsLine(text: string) {
+    return summaryVisibleText(text
+      .replace(/^\s*#{1,6}\s+/, "")
+      .replace(/^\s*[-*+]\s+/, "")
+      .replace(/^\s*\d+[.)]\s+/, ""))
+      .trim();
+  }
+
+  function splitTtsText(text: string) {
+    const pieces = text.match(/[^.!?]+[.!?]*/g) ?? [text];
+    const chunks: string[] = [];
+    let current = "";
+    for (const piece of pieces.map(part => part.trim()).filter(Boolean)) {
+      if (current && `${current} ${piece}`.length > 240) {
+        chunks.push(current);
+        current = piece;
+      } else {
+        current = current ? `${current} ${piece}` : piece;
+      }
+    }
+    if (current) chunks.push(current);
+    return chunks.length ? chunks : [text];
+  }
+
+  function buildTtsSegments() {
+    if (!view) return { segments: [] as TtsSegment[], startIndex: 0 };
+    const state = view.state;
+    const selection = state.selection.main;
+    const doc = state.doc;
+    const segments: TtsSegment[] = [];
+
+    const addLineSegments = (from: number, to: number, lineText: string) => {
+      const cleaned = cleanTtsLine(lineText);
+      if (!cleaned) return;
+      for (const chunk of splitTtsText(cleaned)) segments.push({ text: chunk, from, to });
+    };
+
+    if (!selection.empty) {
+      addLineSegments(selection.from, selection.to, state.sliceDoc(selection.from, selection.to));
+      return { segments, startIndex: 0 };
+    }
+
+    for (let lineNumber = 1; lineNumber <= doc.lines; lineNumber += 1) {
+      const lineInfo = doc.line(lineNumber);
+      if (isSrtTimestampLine(lineInfo.text)) continue;
+      addLineSegments(lineInfo.from, lineInfo.to, lineInfo.text);
+    }
+
+    const head = selection.head;
+    const foundIndex = segments.findIndex(segment => segment.to >= head);
+    const startIndex = foundIndex < 0 ? Math.max(0, segments.length - 1) : foundIndex;
+    return { segments, startIndex };
+  }
+
+  function prepareTtsSegments() {
+    const result = buildTtsSegments();
+    ttsSegments = result.segments;
+    ttsIndex = result.startIndex;
+    ttsStatus = ttsSegments.length ? "" : "no text";
+    return ttsSegments.length > 0;
+  }
+
+  function speakTtsSegment(index: number, useBrowserDefaultVoice = false) {
+    const synth = speechSynth();
+    const segment = ttsSegments[index];
+    const Utterance = typeof window === "undefined" ? null : window.SpeechSynthesisUtterance;
+    if (!synth || !Utterance) {
+      ttsStatus = "unavailable";
+      return;
+    }
+    if (!segment) return;
+
+    ttsRunId += 1;
+    const runId = ttsRunId;
+    if (ttsSpeakTimer) {
+      clearTimeout(ttsSpeakTimer);
+      ttsSpeakTimer = null;
+    }
+    const replacingSpeech = synth.speaking || synth.pending || !!ttsUtterance;
+    if (replacingSpeech) synth.cancel();
+
+    const voices = refreshTtsVoices();
+    if (!voices.length) {
+      ttsUtterance = null;
+      ttsSpeaking = false;
+      ttsPaused = false;
+      ttsStatus = "no voice";
+      return;
+    }
+
+    const utterance = new Utterance(segment.text);
+    const voice = useBrowserDefaultVoice ? null : preferredTtsVoice(voices);
+    if (voice) utterance.voice = voice;
+    utterance.lang = voice?.lang ?? "en-US";
+    utterance.rate = audioRates[audioRateIndex];
+    utterance.onstart = () => {
+      if (runId !== ttsRunId) return;
+      ttsStatus = "";
+      ttsSpeaking = true;
+      ttsPaused = false;
+    };
+    utterance.onend = () => {
+      if (runId !== ttsRunId) return;
+      if (ttsIndex < ttsSegments.length - 1) {
+        ttsIndex += 1;
+        speakTtsSegment(ttsIndex);
+        return;
+      }
+      ttsUtterance = null;
+      ttsSpeaking = false;
+      ttsPaused = false;
+      ttsStatus = "";
+    };
+    utterance.onerror = event => {
+      if (runId !== ttsRunId) return;
+      ttsUtterance = null;
+      ttsSpeaking = false;
+      ttsPaused = false;
+      if (!useBrowserDefaultVoice && utterance.voice) {
+        ttsStatus = "retrying";
+        speakTtsSegment(index, true);
+        return;
+      }
+      ttsStatus = event.error === "interrupted" || event.error === "canceled" ? "" : event.error;
+      if (ttsStatus) console.warn("TTS failed", event.error);
+    };
+
+    ttsUtterance = utterance;
+    ttsIndex = index;
+    ttsSpeaking = true;
+    ttsPaused = false;
+    ttsStatus = "queued";
+    const startSpeaking = () => {
+      if (runId !== ttsRunId) return;
+      ttsSpeakTimer = null;
+      const currentSynth = speechSynth();
+      if (!currentSynth) {
+        ttsStatus = "unavailable";
+        ttsSpeaking = false;
+        return;
+      }
+      currentSynth.resume();
+      currentSynth.speak(utterance);
+      setTimeout(() => {
+        if (runId !== ttsRunId || ttsUtterance !== utterance || currentSynth.speaking || currentSynth.pending) return;
+        ttsSpeaking = false;
+        ttsPaused = false;
+        ttsStatus = "no voice";
+      }, 1200);
+    };
+
+    if (replacingSpeech) ttsSpeakTimer = setTimeout(startSpeaking, 80);
+    else startSpeaking();
+  }
+
+  function toggleTtsPlayback() {
+    if (!showTtsWidget) return;
+    const synth = speechSynth();
+    if (!synth) return;
+
+    if (ttsSpeaking && !ttsPaused) {
+      synth.pause();
+      ttsPaused = true;
+      return;
+    }
+    if (ttsSpeaking && ttsPaused) {
+      synth.resume();
+      ttsPaused = false;
+      return;
+    }
+    if (!prepareTtsSegments()) return;
+    speakTtsSegment(ttsIndex);
+  }
+
+  function stepTts(delta: number) {
+    if (!showTtsWidget) return;
+    if ((!ttsSpeaking && !ttsPaused) || !ttsSegments.length) {
+      if (!prepareTtsSegments()) return;
+    }
+    const nextIndex = Math.min(Math.max(ttsIndex + delta, 0), ttsSegments.length - 1);
+    speakTtsSegment(nextIndex);
   }
 
   function isTextEntryTarget(target: EventTarget | null) {
@@ -451,12 +683,15 @@
     event.preventDefault();
     event.stopPropagation();
 
-    if (!audioElement || !audioLoaded) return;
     if (event.key === " ") {
       toggleMediaPlayback();
       return;
     }
-    seekAudio(event.key === "ArrowLeft" || event.key === "Left" ? -10 : 10);
+    if (!audioElement || !audioLoaded) {
+      stepTts(event.key === "ArrowLeft" || event.key === "Left" ? -1 : 1);
+      return;
+    }
+    seekAudio(event.key === "ArrowLeft" || event.key === "Left" ? -mediaSeekSeconds : mediaSeekSeconds);
   }
 
   function handleWindowKeydown(event: KeyboardEvent) {
@@ -3699,6 +3934,13 @@ ${body}
     };
     window.addEventListener("keydown", onWindowKeydown);
     window.addEventListener("pointerdown", onWindowPointerDown);
+    ttsAvailable = "speechSynthesis" in window && "SpeechSynthesisUtterance" in window;
+    const synth = speechSynth();
+    const onVoicesChanged = () => refreshTtsVoices();
+    if (synth) {
+      refreshTtsVoices();
+      synth.addEventListener("voiceschanged", onVoicesChanged);
+    }
     const editorResizeObserver = new ResizeObserver(() => updateEditorViewportHeight());
 
     view = new EditorView({
@@ -3723,6 +3965,8 @@ ${body}
 
     return () => {
       window.removeEventListener("keydown", onWindowKeydown);
+      synth?.removeEventListener("voiceschanged", onVoicesChanged);
+      resetTtsState();
       window.removeEventListener("pointerdown", onWindowPointerDown);
       finishSummaryResize?.();
       finishRightPaddingDrag?.();
@@ -4473,15 +4717,24 @@ ${body}
           <span>{annotationStatusLabel}</span>
         </span>
       </div>
-      <div class="status-center" class:empty={!audioUrl}>
+      <div class="status-center" class:empty={!audioUrl && !showTtsWidget}>
         {#if audioUrl}
           <div class="audio-widget">
             <span class="audio-name">{audioFileName}</span>
-            <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(-10)} title="Back 10 seconds" aria-label="Back 10 seconds">&lt;&lt;</button>
+            <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(-mediaSeekSeconds)} title={`Back ${mediaSeekSeconds} seconds`} aria-label={`Back ${mediaSeekSeconds} seconds`}>&lt;&lt;</button>
             <button class="audio-glyph play" type="button" on:click={toggleMediaPlayback} title="Play / pause" aria-label="Play / pause">{audioPlaying ? "⏸" : "▶"}</button>
-            <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(10)} title="Forward 10 seconds" aria-label="Forward 10 seconds">&gt;&gt;</button>
+            <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(mediaSeekSeconds)} title={`Forward ${mediaSeekSeconds} seconds`} aria-label={`Forward ${mediaSeekSeconds} seconds`}>&gt;&gt;</button>
             <button class="audio-rate-text" type="button" on:click={cycleAudioRate} aria-label="Playback speed" title="Playback speed">{audioRateText}</button>
             <span class="audio-time">{formatAudioTime(audioCurrentTime)} / {formatAudioTime(audioDuration)}</span>
+          </div>
+        {:else if showTtsWidget}
+          <div class="audio-widget">
+            <span class="audio-name">TTS</span>
+            <button class="audio-glyph" type="button" on:click={() => stepTts(-1)} title="Previous spoken chunk" aria-label="Previous spoken chunk">&lt;&lt;</button>
+            <button class="audio-glyph play" type="button" on:click={toggleTtsPlayback} title="Play / pause TTS" aria-label="Play / pause TTS">{ttsSpeaking && !ttsPaused ? "⏸" : "▶"}</button>
+            <button class="audio-glyph" type="button" on:click={() => stepTts(1)} title="Next spoken chunk" aria-label="Next spoken chunk">&gt;&gt;</button>
+            <button class="audio-rate-text" type="button" on:click={cycleAudioRate} aria-label="TTS speed" title="TTS speed">{audioRateText}</button>
+            <span class="audio-time">{ttsProgressText}</span>
           </div>
         {/if}
       </div>

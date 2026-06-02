@@ -152,11 +152,7 @@ Annotate mode uses Vim-style movement plus arrow-key equivalents.
 | `Esc` | Return to Annotate mode |
 | `Alt+Space` | Play / pause loaded media or TTS |
 | `Alt+Left` / `Alt+Right` | Seek loaded media or step TTS backward / forward |
-| `r` / `Alt+r` | Cycle playback / TTS speed |
-| `Alt+n` / `Alt+p` | Next / previous annotation |
-| `Alt+A/H, D/L` | Back / forward |
-| `Alt+W/K` | Play current SRT cue line |
-| `Alt+S/J` | Play / pause loaded media or TTS |
+| `Alt+r` | Cycle playback / TTS speed |
 | `F1` / `?` | Toggle keyboard help |
 
 The in-app help modal also lists the full movement and selection variants,

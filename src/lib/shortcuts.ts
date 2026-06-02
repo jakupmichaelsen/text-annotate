@@ -51,8 +51,9 @@ export const helpSections = [
     items: [
       ["F2", "enter Edit mode"],
       ["Esc", "return to Annotate mode"],
-      ["Alt+Space", "play / pause audio"],
-      ["Alt+←/→", "seek audio back / forward"],
+      ["Alt+Space", "play / pause media / TTS"],
+      ["Alt+←/→", "seek media / step TTS"],
+      ["Alt+r", "cycle playback / TTS speed"],
       ["F1 / ?", "toggle this help"]
     ]
   }
