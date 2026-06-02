@@ -244,8 +244,29 @@
   $: activeThemeName = themeMode === "nord" ? "Nord" : "Gruvbox";
   $: highlightStyles = currentHighlightStyles(activeTheme);
   $: layoutFontFamilyCss = fontFamilyCssForName(layoutFontFamilyName);
-  $: if (settingsPersistenceReady) persistLayoutSettings();
-  $: if (settingsPersistenceReady) persistAppSettings();
+  $: if (settingsPersistenceReady) {
+    padLeft;
+    padRight;
+    padTop;
+    padBottom;
+    lineHeight;
+    fontSize;
+    paragraphSpacing;
+    layoutFontFamilyName;
+    currentLineHighlightStyle;
+    currentLineHighlightOpacity;
+    columnGuideThickness;
+    divideImportSentences;
+    persistLayoutSettings();
+  }
+  $: if (settingsPersistenceReady) {
+    annotationMode;
+    settingsTab;
+    rememberOpenAiApiKey;
+    transcriptionModel;
+    transcriptionPrompt;
+    persistAppSettings();
+  }
   $: editorModeLabel = editorMode === "insert" ? "EDIT" : "ANNOTATE";
   $: summaryFontSize = Math.round((11 + ((summarySidebarWidth - summarySidebarMinWidth) / 110)) * 10) / 10;
   $: clampedSummaryFontSize = Math.max(11, Math.min(15, summaryFontSize));
