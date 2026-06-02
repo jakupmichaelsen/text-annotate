@@ -58,6 +58,7 @@
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
   const layoutStorageKey = "cm6-layout-settings";
+  const appSettingsStorageKey = "textAnnotate-settings";
   const fontFamilyOptions = [
     { name: "Noto Sans Mono", css: '"Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' },
     { name: "JetBrains Mono", css: '"JetBrains Mono", "Noto Sans Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' },
@@ -87,7 +88,17 @@
   let settingsOpen = false;
   let settingsButtonEl: HTMLButtonElement | null = null;
   let settingsPopoverEl: HTMLDivElement | null = null;
-  let settingsTab: "markup" | "layout" | "transcribe" = "markup";
+  type SettingsTab = "markup" | "layout" | "transcribe";
+  type AnnotationMode = "clean" | "raw" | "all";
+  type AppSettings = {
+    annotationMode: AnnotationMode;
+    settingsTab: SettingsTab;
+    rememberOpenAiApiKey: boolean;
+    transcriptionModel: string;
+    transcriptionPrompt: string;
+  };
+  const initialAppSettings = loadAppSettings();
+  let settingsTab: SettingsTab = initialAppSettings.settingsTab;
   let divideImportSentences = initialLayoutSettings.divideImportSentences ?? true;
   let pdfModalOpen = false;
   let pdfDraftText = "";
@@ -117,9 +128,9 @@
   const openAiApiKeyStorageKey = "textAnnotate-openai-api-key";
   const themeStorageKey = "cm6-theme";
   let openAiApiKey = "";
-  let rememberOpenAiApiKey = false;
-  let transcriptionModel = "whisper-1";
-  let transcriptionPrompt = "";
+  let rememberOpenAiApiKey = initialAppSettings.rememberOpenAiApiKey;
+  let transcriptionModel = initialAppSettings.transcriptionModel;
+  let transcriptionPrompt = initialAppSettings.transcriptionPrompt;
   let transcriptionBusy = false;
   let transcriptionStatus = "";
   let transcriptionError = "";
@@ -153,7 +164,7 @@
   let addStyleModalOpen = false;
   let newStyleColorName = "steel";
   let newStyleName = newStyleColorName;
-  let annotationMode: "clean" | "raw" | "all" = "clean";
+  let annotationMode: AnnotationMode = initialAppSettings.annotationMode;
   let blockquoteAlign: "left" | "center" | "right" = "left";
   let blockquoteBgWidth = 100;
   let blockquoteActive = false;
@@ -214,6 +225,7 @@
   $: highlightStyles = currentHighlightStyles(activeTheme);
   $: layoutFontFamilyCss = fontFamilyCssForName(layoutFontFamilyName);
   $: persistLayoutSettings();
+  $: persistAppSettings();
   $: editorModeLabel = editorMode === "insert" ? "EDIT" : "ANNOTATE";
   $: summaryFontSize = Math.round((11 + ((summarySidebarWidth - summarySidebarMinWidth) / 110)) * 10) / 10;
   $: clampedSummaryFontSize = Math.max(11, Math.min(15, summaryFontSize));
@@ -571,6 +583,35 @@
     return stored === "gruvbox" ? "gruvbox" : "nord";
   }
 
+  function loadAppSettings(): AppSettings {
+    const defaults: AppSettings = {
+      annotationMode: "clean",
+      settingsTab: "markup",
+      rememberOpenAiApiKey: false,
+      transcriptionModel: "whisper-1",
+      transcriptionPrompt: ""
+    };
+    const stored = typeof localStorage === "undefined" ? null : localStorage.getItem(appSettingsStorageKey);
+    if (!stored) return defaults;
+
+    try {
+      const parsed = JSON.parse(stored);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return defaults;
+      const settings = parsed as Record<string, unknown>;
+      return {
+        annotationMode: settings.annotationMode === "raw" || settings.annotationMode === "all" ? settings.annotationMode : "clean",
+        settingsTab: settings.settingsTab === "layout" || settings.settingsTab === "transcribe" ? settings.settingsTab : "markup",
+        rememberOpenAiApiKey: typeof settings.rememberOpenAiApiKey === "boolean" ? settings.rememberOpenAiApiKey : false,
+        transcriptionModel: typeof settings.transcriptionModel === "string" && settings.transcriptionModel.trim()
+          ? settings.transcriptionModel
+          : "whisper-1",
+        transcriptionPrompt: typeof settings.transcriptionPrompt === "string" ? settings.transcriptionPrompt : ""
+      };
+    } catch {
+      return defaults;
+    }
+  }
+
   type LayoutSettings = {
     padLeft: number;
     padRight: number;
@@ -652,6 +693,18 @@
       divideImportSentences
     };
     localStorage.setItem(layoutStorageKey, JSON.stringify(payload));
+  }
+
+  function persistAppSettings() {
+    if (typeof localStorage === "undefined") return;
+    const payload: AppSettings = {
+      annotationMode,
+      settingsTab,
+      rememberOpenAiApiKey,
+      transcriptionModel,
+      transcriptionPrompt
+    };
+    localStorage.setItem(appSettingsStorageKey, JSON.stringify(payload));
   }
 
   function buildThemeExtensions(theme: ThemePalette): Extension[] {
@@ -1189,11 +1242,13 @@
       content.style.paddingRight  = `${padRight}px`;
       content.style.paddingTop    = `${padTop}px`;
       content.style.paddingBottom = `${padBottom}px`;
+      content.style.fontFamily    = layoutFontFamilyCss;
     }
     const scroller = view.dom.querySelector<HTMLElement>(".cm-scroller");
     if (scroller) {
       scroller.style.lineHeight = `${lineHeight}`;
       scroller.style.fontSize   = `${fontSize}px`;
+      scroller.style.fontFamily = layoutFontFamilyCss;
     }
     requestAnimationFrame(() => {
       view?.requestMeasure();
@@ -2582,6 +2637,34 @@ ${body}
     return true;
   }
 
+  function enterBlockquoteEditMode(v: EditorView) {
+    const head = v.state.selection.main.head;
+    const line = v.state.doc.lineAt(head);
+    let cursor = head;
+
+    if (line.text.startsWith(">")) {
+      const contentStart = line.from + (line.text.startsWith("> ") ? 2 : 1);
+      cursor = Math.max(head, contentStart);
+      v.dispatch({ selection: { anchor: cursor } });
+    } else if (line.text.trim().length === 0) {
+      cursor = line.from + 2;
+      v.dispatch({
+        changes: { from: line.from, to: line.to, insert: "> " },
+        selection: { anchor: cursor }
+      });
+    } else {
+      cursor = line.to + 3;
+      v.dispatch({
+        changes: { from: line.to, insert: "\n> " },
+        selection: { anchor: cursor }
+      });
+    }
+
+    blockquoteActive = true;
+    setMode("insert");
+    return true;
+  }
+
   // Annotation tooltip StateField
   const annotationTooltipField = StateField.define<readonly Tooltip[]>({
     create: () => [],
@@ -3503,7 +3586,7 @@ ${body}
       { key: "q",      run: normal(v => cycleAnnotationVariant(v, -1)) },
       { key: "e",      run: normal(v => cycleAnnotationVariant(v, +1)) },
       { key: "f",      run: normal(() => { toggleMediaPlayback(); return true; }) },
-      { key: "n",      run: normal(v => { if (!cycleAnnotationColor(v, +1)) cycleStyle(+1); return true; }) },
+      { key: "n",      run: normal(v => enterBlockquoteEditMode(v)) },
       { key: "N",      run: normal(v => { if (!cycleAnnotationColor(v, -1)) cycleStyle(-1); return true; }) },
       // Undo/redo (both modes)
       { key: "u",      run: normal(v => undo(v)) },
@@ -3595,7 +3678,7 @@ ${body}
     if (editorEl) editorResizeObserver.observe(editorEl);
     updateStatusFromView(view);
     openAiApiKey = loadOpenAiApiKey();
-    rememberOpenAiApiKey = Boolean(openAiApiKey);
+    if (openAiApiKey) rememberOpenAiApiKey = true;
     void restoreAudioFile();
 
     return () => {

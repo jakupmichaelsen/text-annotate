@@ -142,6 +142,7 @@ Annotate mode uses Vim-style movement plus arrow-key equivalents.
 | `Shift` movement variants | Extend the current selection |
 | Style keys | Annotate or recolor using the current Styles order. Keys run `1`-`0`, then `z`, `x`, `c`, `v`, `b`. |
 | `q` / `i`, `e` / `o` | Previous / next annotation style |
+| `n` | Start a blockquote note and enter Edit mode |
 | `Space` | Wrap selection or current word as an annotation |
 | `Enter` | Edit annotation note, or play the current SRT cue when no annotation is active |
 | `Delete` / `Backspace` | Remove annotation |

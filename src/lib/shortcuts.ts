@@ -33,7 +33,8 @@ export const helpSections = [
       ["Space", "wrap word / selection"],
       ["q e", "variant prev / next"],
       ["4", "variant next"],
-      ["n N", "style next / prev"],
+      ["n", "new blockquote note"],
+      ["N", "style prev"],
       ["Enter", "edit note / cue playback"],
       ["x", "remove annotation"]
     ]
