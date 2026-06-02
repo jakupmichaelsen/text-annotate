@@ -105,7 +105,7 @@ export const gruvboxHighlight = buildHighlightStyle(themes.gruvbox);
 export function buildEditorTheme(theme: ThemePalette): Extension {
   return EditorView.theme({
     "&": { height: "100%", color: theme.fg, backgroundColor: theme.bg },
-    ".cm-scroller": { overflow: "auto", fontFamily: '"Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, monospace', lineHeight: "1.75" },
+    ".cm-scroller": { overflow: "auto", fontFamily: "var(--app-font-family)", lineHeight: "1.75" },
     ".cm-content": { textAlign: "left", padding: "1rem 1.25rem 4rem", minHeight: "100%", caretColor: theme.cursor, whiteSpace: "pre-wrap", wordBreak: "break-word" },
     ".cm-line": { textAlign: "left" },
     "&.cm-focused .cm-cursor": { borderLeftColor: theme.cursor },

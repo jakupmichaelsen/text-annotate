@@ -60,12 +60,11 @@
   const layoutStorageKey = "cm6-layout-settings";
   const appSettingsStorageKey = "textAnnotate-settings";
   const fontFamilyOptions = [
-    { name: "Noto Sans Mono", css: '"Noto Sans Mono", "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' },
-    { name: "JetBrains Mono", css: '"JetBrains Mono", "Noto Sans Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' },
-    { name: "IBM Plex Mono", css: '"IBM Plex Mono", "Noto Sans Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' },
-    { name: "Fira Code", css: '"Fira Code", "Noto Sans Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' },
-    { name: "Source Code Pro", css: '"Source Code Pro", "Noto Sans Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' },
-    { name: "DejaVu Sans Mono", css: '"DejaVu Sans Mono", "Noto Sans Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' }
+    { name: "Noto Sans Mono", css: '"Noto Sans Mono", monospace' },
+    { name: "JetBrains Mono", css: '"JetBrains Mono", monospace' },
+    { name: "IBM Plex Mono", css: '"IBM Plex Mono", monospace' },
+    { name: "Fira Code", css: '"Fira Code", monospace' },
+    { name: "Source Code Pro", css: '"Source Code Pro", monospace' }
   ] as const;
 
   let editorEl: HTMLDivElement;

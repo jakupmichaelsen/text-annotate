@@ -69,8 +69,8 @@ markdown instead of a proprietary document format.
   editing.
 - **Layout and theme controls** - tune editor padding, line height, font size,
   blockquote note presentation, and the Nord/Gruvbox theme from the sidebar.
-- **Readable monospace typography** - uses `Noto Sans Mono` first, with the
-  previous editor fonts kept as fallbacks.
+- **Bundled monospace typography** - ships the selectable editor fonts with the
+  app, so typography does not depend on user-installed fonts.
 
 ## Annotation Format
 
