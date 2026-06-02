@@ -91,6 +91,7 @@
   let layoutFontFamilyName = initialLayoutSettings.fontFamilyName ?? "Noto Sans Mono";
   let showHelp = false;
   let settingsOpen = false;
+  let settingsPersistenceReady = false;
   let settingsButtonEl: HTMLButtonElement | null = null;
   let settingsPopoverEl: HTMLDivElement | null = null;
   type SettingsTab = "markup" | "layout" | "transcribe";
@@ -229,8 +230,8 @@
   $: activeThemeName = themeMode === "nord" ? "Nord" : "Gruvbox";
   $: highlightStyles = currentHighlightStyles(activeTheme);
   $: layoutFontFamilyCss = fontFamilyCssForName(layoutFontFamilyName);
-  $: persistLayoutSettings();
-  $: persistAppSettings();
+  $: if (settingsPersistenceReady) persistLayoutSettings();
+  $: if (settingsPersistenceReady) persistAppSettings();
   $: editorModeLabel = editorMode === "insert" ? "EDIT" : "ANNOTATE";
   $: summaryFontSize = Math.round((11 + ((summarySidebarWidth - summarySidebarMinWidth) / 110)) * 10) / 10;
   $: clampedSummaryFontSize = Math.max(11, Math.min(15, summaryFontSize));
@@ -710,6 +711,35 @@
       transcriptionPrompt
     };
     localStorage.setItem(appSettingsStorageKey, JSON.stringify(payload));
+  }
+
+  function applyLayoutSettings(settings: Partial<LayoutSettings>) {
+    padLeft = settings.padLeft ?? padLeft;
+    padRight = settings.padRight ?? padRight;
+    padTop = settings.padTop ?? padTop;
+    padBottom = settings.padBottom ?? padBottom;
+    lineHeight = settings.lineHeight ?? lineHeight;
+    fontSize = settings.fontSize ?? fontSize;
+    paragraphSpacing = settings.paragraphSpacing ?? paragraphSpacing;
+    layoutFontFamilyName = settings.fontFamilyName ?? layoutFontFamilyName;
+    currentLineHighlightStyle = settings.currentLineHighlightStyle ?? currentLineHighlightStyle;
+    currentLineHighlightOpacity = settings.currentLineHighlightOpacity ?? currentLineHighlightOpacity;
+    columnGuideThickness = settings.columnGuideThickness ?? columnGuideThickness;
+    divideImportSentences = settings.divideImportSentences ?? divideImportSentences;
+  }
+
+  function applyAppSettings(settings: AppSettings) {
+    annotationMode = settings.annotationMode;
+    settingsTab = settings.settingsTab;
+    rememberOpenAiApiKey = settings.rememberOpenAiApiKey;
+    transcriptionModel = settings.transcriptionModel;
+    transcriptionPrompt = settings.transcriptionPrompt;
+  }
+
+  function restorePersistedSettings() {
+    applyLayoutSettings(loadLayoutSettings());
+    applyAppSettings(loadAppSettings());
+    themeMode = loadThemeMode();
   }
 
   function buildThemeExtensions(theme: ThemePalette): Extension[] {
@@ -3657,6 +3687,8 @@ ${body}
   }
 
   onMount(() => {
+    settingsPersistenceReady = false;
+    restorePersistedSettings();
     const onWindowKeydown = (event: KeyboardEvent) => handleWindowKeydown(event);
     const onWindowPointerDown = (event: PointerEvent) => {
       if (!settingsOpen) return;
@@ -3684,6 +3716,9 @@ ${body}
     updateStatusFromView(view);
     openAiApiKey = loadOpenAiApiKey();
     if (openAiApiKey) rememberOpenAiApiKey = true;
+    settingsPersistenceReady = true;
+    persistLayoutSettings();
+    persistAppSettings();
     void restoreAudioFile();
 
     return () => {
