@@ -64,7 +64,13 @@
     { name: "JetBrains Mono", css: '"JetBrains Mono", monospace' },
     { name: "IBM Plex Mono", css: '"IBM Plex Mono", monospace' },
     { name: "Fira Code", css: '"Fira Code", monospace' },
-    { name: "Source Code Pro", css: '"Source Code Pro", monospace' }
+    { name: "Source Code Pro", css: '"Source Code Pro", monospace' },
+    { name: "Inter", css: '"Inter", sans-serif' },
+    { name: "Atkinson Hyperlegible", css: '"Atkinson Hyperlegible", sans-serif' },
+    { name: "IBM Plex Sans", css: '"IBM Plex Sans", sans-serif' },
+    { name: "Lora", css: '"Lora", serif' },
+    { name: "Merriweather", css: '"Merriweather", serif' },
+    { name: "Source Serif 4", css: '"Source Serif 4", serif' }
   ] as const;
 
   let editorEl: HTMLDivElement;
