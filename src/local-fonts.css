@@ -1,0 +1,271 @@
+@font-face {
+  font-family: "ADega Serif";
+  src: url("/fonts/dafont/adega_serif/ADega Serif Regular.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Alte Haas Grotesk";
+  src: url("/fonts/dafont/alte_haas_grotesk/AlteHaasGroteskRegular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Amelia Serif";
+  src: url("/fonts/dafont/amelia_serif/AmeliaSerif-DEMO.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Borgen";
+  src: url("/fonts/dafont/borgen/Borgen.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Bowman";
+  src: url("/fonts/dafont/bowman/Bowman.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Calling Code";
+  src: url("/fonts/dafont/calling_code/CallingCode-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Caviar Dreams";
+  src: url("/fonts/dafont/caviar_dreams/CaviarDreams.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Cherry Monospace";
+  src: url("/fonts/dafont/cherry/Cherry Monospace-Light.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Coolvetica";
+  src: url("/fonts/dafont/coolvetica/Coolvetica Rg.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "DEC Terminal Modern";
+  src: url("/fonts/dafont/dec_terminal_modern/_decterm.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Erika Type";
+  src: url("/fonts/dafont/erika_type/Erika Type.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "F25 Bank Printer";
+  src: url("/fonts/dafont/f25_bank_printer/F25_Bank_Printer.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Flexi IBM VGA False";
+  src: url("/fonts/dafont/flexi_ibm_vga_false/Flexi_IBM_VGA_False.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geo Sans Light";
+  src: url("/fonts/dafont/geo_sans_light/GeosansLight.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "KG Holocene";
+  src: url("/fonts/dafont/kg_holocene/KGHolocene.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Louis George Cafe";
+  src: url("/fonts/dafont/louis_george_cafe/Louis George Cafe.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Monomod";
+  src: url("/fonts/dafont/monomod/Monomod.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Monterchi Serif";
+  src: url("/fonts/dafont/monterchi_serif/Monterchi-Serif-Book-trial.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Neuton";
+  src: url("/fonts/dafont/neuton/Neuton-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Nouveau IBM";
+  src: url("/fonts/dafont/nouveau_ibm/Nouveau_IBM.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Old Newspaper Types";
+  src: url("/fonts/dafont/oldnewspapertypes/OldNewspaperTypes.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Paradroid Mono";
+  src: url("/fonts/dafont/paradroid/ParadroidMono-Light.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Quicksand";
+  src: url("/fonts/dafont/quicksand/Quicksand_Book.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Remingtoned Type";
+  src: url("/fonts/dafont/remingtoned_type/Remingtoned Type.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Semi Coder";
+  src: url("/fonts/dafont/semi_coder/SemiCoder.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Simply Mono";
+  src: url("/fonts/dafont/simply_mono_2/SimplyMono-Book.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "String Literal";
+  src: url("/fonts/dafont/string_variable_literal/StrLit.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "String Variable";
+  src: url("/fonts/dafont/string_variable_literal/StrVar.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Times Sans Serif";
+  src: url("/fonts/dafont/times_sans_serif/TIMESS__.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Tox Typewriter";
+  src: url("/fonts/dafont/tox_typewriter/Tox Typewriter.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Traveling Typewriter";
+  src: url("/fonts/dafont/traveling_typewriter/TravelingTypewriter.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "TT Interphases Pro";
+  src: url("/fonts/dafont/tt_interphases_pro/TT Interphases Pro Trial Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "TT Interphases Pro Mono";
+  src: url("/fonts/dafont/tt_interphases_pro/TT Interphases Pro Mono Trial Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Typori";
+  src: url("/fonts/dafont/typori/Typori-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}

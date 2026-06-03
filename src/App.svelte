@@ -63,18 +63,42 @@
   const openAiApiKeyStorageKey = "textAnnotate-openai-api-key";
   const themeStorageKey = "cm6-theme";
   const fontFamilyOptions = [
-    { name: "Noto Sans Mono", css: '"Noto Sans Mono", monospace' },
-    { name: "JetBrains Mono", css: '"JetBrains Mono", monospace' },
-    { name: "IBM Plex Mono", css: '"IBM Plex Mono", monospace' },
-    { name: "Fira Code", css: '"Fira Code", monospace' },
-    { name: "Source Code Pro", css: '"Source Code Pro", monospace' },
-    { name: "Inter", css: '"Inter", sans-serif' },
-    { name: "Atkinson Hyperlegible", css: '"Atkinson Hyperlegible", sans-serif' },
-    { name: "IBM Plex Sans", css: '"IBM Plex Sans", sans-serif' },
-    { name: "Lora", css: '"Lora", serif' },
-    { name: "Merriweather", css: '"Merriweather", serif' },
-    { name: "Source Serif 4", css: '"Source Serif 4", serif' }
+    { name: "ADega Serif", css: '"ADega Serif", serif' },
+    { name: "Alte Haas Grotesk", css: '"Alte Haas Grotesk", sans-serif' },
+    { name: "Amelia Serif", css: '"Amelia Serif", serif' },
+    { name: "Borgen", css: '"Borgen", sans-serif' },
+    { name: "Bowman", css: '"Bowman", fantasy' },
+    { name: "Calling Code", css: '"Calling Code", monospace' },
+    { name: "Caviar Dreams", css: '"Caviar Dreams", sans-serif' },
+    { name: "Cherry Monospace", css: '"Cherry Monospace", monospace' },
+    { name: "Coolvetica", css: '"Coolvetica", sans-serif' },
+    { name: "DEC Terminal Modern", css: '"DEC Terminal Modern", monospace' },
+    { name: "Erika Type", css: '"Erika Type", serif' },
+    { name: "F25 Bank Printer", css: '"F25 Bank Printer", monospace' },
+    { name: "Flexi IBM VGA False", css: '"Flexi IBM VGA False", monospace' },
+    { name: "Geo Sans Light", css: '"Geo Sans Light", sans-serif' },
+    { name: "KG Holocene", css: '"KG Holocene", fantasy' },
+    { name: "Louis George Cafe", css: '"Louis George Cafe", sans-serif' },
+    { name: "Monomod", css: '"Monomod", monospace' },
+    { name: "Monterchi Serif", css: '"Monterchi Serif", serif' },
+    { name: "Neuton", css: '"Neuton", serif' },
+    { name: "Nouveau IBM", css: '"Nouveau IBM", monospace' },
+    { name: "Old Newspaper Types", css: '"Old Newspaper Types", serif' },
+    { name: "Paradroid Mono", css: '"Paradroid Mono", monospace' },
+    { name: "Quicksand", css: '"Quicksand", sans-serif' },
+    { name: "Remingtoned Type", css: '"Remingtoned Type", monospace' },
+    { name: "Semi Coder", css: '"Semi Coder", monospace' },
+    { name: "Simply Mono", css: '"Simply Mono", monospace' },
+    { name: "String Literal", css: '"String Literal", monospace' },
+    { name: "String Variable", css: '"String Variable", monospace' },
+    { name: "Times Sans Serif", css: '"Times Sans Serif", sans-serif' },
+    { name: "Tox Typewriter", css: '"Tox Typewriter", monospace' },
+    { name: "Traveling Typewriter", css: '"Traveling Typewriter", monospace' },
+    { name: "TT Interphases Pro", css: '"TT Interphases Pro", sans-serif' },
+    { name: "TT Interphases Pro Mono", css: '"TT Interphases Pro Mono", monospace' },
+    { name: "Typori", css: '"Typori", sans-serif' }
   ] as const;
+  const defaultFontFamilyName = "Calling Code";
 
   let editorEl: HTMLDivElement;
   let view: EditorView;
@@ -92,7 +116,8 @@
   let currentLineHighlightOpacity = initialLayoutSettings.currentLineHighlightOpacity ?? 0.34;
   let columnGuideThickness = initialLayoutSettings.columnGuideThickness ?? 1;
   let columnStride = initialLayoutSettings.columnStride ?? 40;
-  let layoutFontFamilyName = initialLayoutSettings.fontFamilyName ?? "Noto Sans Mono";
+  let layoutFontFamilyName = initialLayoutSettings.fontFamilyName ?? defaultFontFamilyName;
+  let randomizeFontOnLoad = initialLayoutSettings.randomizeFontOnLoad ?? false;
   let showHelp = false;
   let settingsOpen = false;
   let settingsPersistenceReady = false;
@@ -255,6 +280,7 @@
     fontSize;
     paragraphSpacing;
     layoutFontFamilyName;
+    randomizeFontOnLoad;
     currentLineHighlightStyle;
     currentLineHighlightOpacity;
     columnGuideThickness;
@@ -719,6 +745,25 @@
     seekAudio(event.key === "ArrowLeft" || event.key === "Left" ? -mediaSeekSeconds : mediaSeekSeconds);
   }
 
+  function handleWindowKeydownCapture(event: KeyboardEvent) {
+    if (
+      event.defaultPrevented ||
+      !view ||
+      editorMode !== "normal" ||
+      !isEditorEventTarget(event.target) ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.altKey ||
+      (event.key !== "c" && event.key !== "C")
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    moveCursorByColumnStride(view, event.key === "C" ? -1 : 1);
+  }
+
   function handleWindowKeydown(event: KeyboardEvent) {
     if (event.key === "Escape" && settingsOpen) {
       settingsOpen = false;
@@ -750,6 +795,7 @@
 
   function replaceDocument(text: string, preserveLineBreaks = false) {
     if (!view) return;
+    applyDocumentLoadFontPreference();
     const normalized = text.replace(/\r\n?/g, "\n").trim();
     const insert = preserveLineBreaks || !divideImportSentences ? normalized : sentenceLineBreaks(normalized);
     const initialCursor = firstVisibleDocumentPosition(insert);
@@ -902,6 +948,7 @@
     fontSize: number;
     paragraphSpacing: number;
     fontFamilyName: string;
+    randomizeFontOnLoad: boolean;
     currentLineHighlightStyle: "fill" | "underline" | "borders";
     currentLineHighlightOpacity: number;
     columnGuideThickness: number;
@@ -911,11 +958,35 @@
 
   function normalizeLayoutFontFamilyName(value: string) {
     const normalized = value.trim();
-    return fontFamilyOptions.some(option => option.name === normalized) ? normalized : fontFamilyOptions[0].name;
+    return fontFamilyOptions.some(option => option.name === normalized) ? normalized : defaultFontFamilyName;
   }
 
   function fontFamilyCssForName(name: string) {
-    return fontFamilyOptions.find(option => option.name === name)?.css ?? fontFamilyOptions[0].css;
+    return fontFamilyOptions.find(option => option.name === name)?.css
+      ?? fontFamilyOptions.find(option => option.name === defaultFontFamilyName)?.css
+      ?? "monospace";
+  }
+
+  function fontFamilyIndex(name: string) {
+    const index = fontFamilyOptions.findIndex(option => option.name === name);
+    return index >= 0 ? index : fontFamilyOptions.findIndex(option => option.name === defaultFontFamilyName);
+  }
+
+  function rotateLayoutFontFamily() {
+    const nextIndex = (fontFamilyIndex(layoutFontFamilyName) + 1) % fontFamilyOptions.length;
+    layoutFontFamilyName = fontFamilyOptions[nextIndex].name;
+  }
+
+  function randomizeLayoutFontFamily() {
+    if (fontFamilyOptions.length <= 1) return;
+    const currentIndex = fontFamilyIndex(layoutFontFamilyName);
+    let nextIndex = Math.floor(Math.random() * fontFamilyOptions.length);
+    if (nextIndex === currentIndex) nextIndex = (nextIndex + 1) % fontFamilyOptions.length;
+    layoutFontFamilyName = fontFamilyOptions[nextIndex].name;
+  }
+
+  function applyDocumentLoadFontPreference() {
+    if (randomizeFontOnLoad) randomizeLayoutFontFamily();
   }
 
   function loadLayoutSettings(): Partial<LayoutSettings> {
@@ -943,6 +1014,7 @@
       fontSize: Math.round(numberOr("fontSize", 14, 10, 28)),
       paragraphSpacing: Math.round(numberOr("paragraphSpacing", 0, 0, 2) * 100) / 100,
       fontFamilyName,
+      randomizeFontOnLoad: typeof settings.randomizeFontOnLoad === "boolean" ? settings.randomizeFontOnLoad : undefined,
       currentLineHighlightStyle,
       currentLineHighlightOpacity: Math.round(numberOr("currentLineHighlightOpacity", 0.34, 0.08, 0.7) * 100) / 100,
       columnGuideThickness: Math.round(numberOr("columnGuideThickness", 1, 1, 6)),
@@ -962,6 +1034,7 @@
       fontSize,
       paragraphSpacing,
       fontFamilyName: layoutFontFamilyName,
+      randomizeFontOnLoad,
       currentLineHighlightStyle,
       currentLineHighlightOpacity,
       columnGuideThickness,
@@ -992,6 +1065,7 @@
     fontSize = settings.fontSize ?? fontSize;
     paragraphSpacing = settings.paragraphSpacing ?? paragraphSpacing;
     layoutFontFamilyName = settings.fontFamilyName ?? layoutFontFamilyName;
+    randomizeFontOnLoad = settings.randomizeFontOnLoad ?? randomizeFontOnLoad;
     currentLineHighlightStyle = settings.currentLineHighlightStyle ?? currentLineHighlightStyle;
     currentLineHighlightOpacity = settings.currentLineHighlightOpacity ?? currentLineHighlightOpacity;
     columnGuideThickness = settings.columnGuideThickness ?? columnGuideThickness;
@@ -1721,6 +1795,11 @@
     else currentAnnotationVariant = variant;
     variantPickerOpen = false;
     view?.focus();
+  }
+
+  function annotationVariantLabel(variant: AnnotationVariant) {
+    if (variant === "underline") return "under";
+    return variant;
   }
 
   function handleVariantPickerKey(v: EditorView, event: KeyboardEvent) {
@@ -3293,18 +3372,7 @@ ${body}
   }
 
   function moveCursorByColumnStride(v: EditorView, direction: 1 | -1) {
-    const stride = Math.max(1, Math.round(columnStride));
-    const selection = v.state.selection.main;
-    const head = selection.head;
-    const line = v.state.doc.lineAt(head);
-    const columnOffset = head - line.from;
-    const nextColumn = Math.max(0, Math.min(line.length, columnOffset + direction * stride));
-    v.dispatch({
-      selection: EditorSelection.cursor(line.from + nextColumn),
-      effects: cursorScrollEffect.of(null),
-      scrollIntoView: true
-    });
-    return true;
+    return navigation.lineHorizontalToggle(v, direction);
   }
 
   function buildHighlightDecorator(theme = activeTheme): Extension {
@@ -3868,7 +3936,8 @@ ${body}
     cursorScrollEffect,
     isSrtTimestampLine,
     wordBoundary,
-    wordSelectionBoundary
+    wordSelectionBoundary,
+    getLineStride: () => columnStride
   });
 
   const dblClickBehavior = EditorView.domEventHandlers({
@@ -4074,6 +4143,7 @@ ${body}
       if (settingsPopoverEl?.contains(target) || settingsButtonEl?.contains(target)) return;
       settingsOpen = false;
     };
+    window.addEventListener("keydown", handleWindowKeydownCapture, true);
     window.addEventListener("keydown", onWindowKeydown);
     window.addEventListener("pointerdown", onWindowPointerDown);
     ttsAvailable = "speechSynthesis" in window && "SpeechSynthesisUtterance" in window;
@@ -4106,6 +4176,7 @@ ${body}
     void restoreAudioFile();
 
     return () => {
+      window.removeEventListener("keydown", handleWindowKeydownCapture, true);
       window.removeEventListener("keydown", onWindowKeydown);
       synth?.removeEventListener("voiceschanged", onVoicesChanged);
       resetTtsState();
@@ -4238,11 +4309,28 @@ ${body}
               </div>
               <label class="settings-field layout-font-field">
                 <span class="settings-field-label">Font face</span>
-                <select class="settings-input" bind:value={layoutFontFamilyName}>
-                  {#each fontFamilyOptions as font}
-                    <option value={font.name}>{font.name}</option>
-                  {/each}
-                </select>
+                <span class="layout-font-controls">
+                  <select class="settings-input" bind:value={layoutFontFamilyName}>
+                    {#each fontFamilyOptions as font}
+                      <option value={font.name}>{font.name}</option>
+                    {/each}
+                  </select>
+                  <button
+                    class="settings-icon-button"
+                    type="button"
+                    aria-label={randomizeFontOnLoad ? "Disable random font on document load" : "Enable random font on document load"}
+                    title={randomizeFontOnLoad ? "Random font on load: on" : "Random font on load: off"}
+                    aria-pressed={randomizeFontOnLoad}
+                    on:click={() => randomizeFontOnLoad = !randomizeFontOnLoad}
+                  >⇄</button>
+                  <button
+                    class="settings-icon-button"
+                    type="button"
+                    aria-label="Use next font"
+                    title="Use next font"
+                    on:click={rotateLayoutFontFamily}
+                  >↻</button>
+                </span>
               </label>
               <div class="layout-stepper">
                 <span class="layout-control-icon" aria-hidden="true">¶</span>
@@ -4480,6 +4568,7 @@ ${body}
 
       <div class="sidebar-section">
         <div class="sidebar-label">Annotation styles</div>
+        <div class="sidebar-hint">Tab / Shift+Tab: variation</div>
         <div class="style-list sidebar-style-list">
           {#each highlightStyles as style, index}
             <div
@@ -4544,6 +4633,13 @@ ${body}
                   {styleDisplayTitle(style.name)}
                 </button>
               {/if}
+              <span
+                class="style-variant-badge"
+                class:visible={currentStyle === index + 1}
+                title={currentStyle === index + 1 ? `Current variation: ${currentAnnotationVariant}` : undefined}
+              >
+                {currentStyle === index + 1 ? annotationVariantLabel(currentAnnotationVariant) : ""}
+              </span>
               {#if style.custom}
                 <button
                   class="style-remove-button"
@@ -4557,31 +4653,6 @@ ${body}
           {/each}
         </div>
         <button class="add-style-inline" type="button" on:click={() => addStyleModalOpen = true} aria-label="Add annotation style">+</button>
-        <div class="variant-row">
-          <span class="style-key-badge">4</span>
-          <span class="style-separator" aria-hidden="true">:</span>
-          <div class="variant-list" role="listbox" aria-label="Annotation variants">
-            {#each annotationVariants as variant}
-              <button
-                class="variant-chip"
-                class:active={currentAnnotationVariant === variant}
-                type="button"
-                on:click={() => chooseAnnotationVariant(variant)}
-                aria-label={`Use ${variant} annotation variant`}
-              >
-                <span
-                  class="variant-preview"
-                  class:variant-fill={variant === "fill"}
-                  class:variant-box={variant === "box"}
-                  class:variant-underline={variant === "underline"}
-                  class:variant-rail={variant === "rail"}
-                  class:variant-bars={variant === "bars"}
-                  style={`--swatch-color: ${currentStyleColor}; --swatch-text: ${annotationTextColorForStyle(styleName(currentStyle), currentStyleColor)}`}
-                ></span>
-              </button>
-            {/each}
-          </div>
-        </div>
       </div>
 
     </div>
