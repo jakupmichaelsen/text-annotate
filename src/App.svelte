@@ -112,6 +112,7 @@
   let divideImportSentences = initialLayoutSettings.divideImportSentences ?? true;
   let pdfModalOpen = false;
   let pdfDraftText = "";
+  let pdfSourceLines: string[] = [];
   let pdfPreviewUrl = "";
   let pdfFileName = "";
   let pdfIsParsing = false;
@@ -1318,18 +1319,22 @@
     pdfPreviewUrl = URL.createObjectURL(file);
     pdfFileName = file.name;
     pdfDraftText = "";
+    pdfSourceLines = [];
     pdfParseError = "";
     pdfIsParsing = true;
     pdfModalOpen = true;
 
     try {
-      pdfDraftText = await extractPdfText(file);
+      const extractedPdf = await extractPdfText(file);
+      pdfDraftText = extractedPdf.text;
+      pdfSourceLines = extractedPdf.lines;
       if (!pdfDraftText.trim()) {
         pdfParseError = "No selectable text was found. This PDF may be scanned, so paste or type corrected text here before loading.";
       }
     } catch (error) {
       pdfParseError = error instanceof Error ? error.message : "Could not parse this PDF.";
       pdfDraftText = "";
+      pdfSourceLines = [];
     } finally {
       pdfIsParsing = false;
     }
@@ -1339,6 +1344,7 @@
     const data = new Uint8Array(await file.arrayBuffer());
     const pdf = await pdfjsLib.getDocument({ data }).promise;
     const pages: string[] = [];
+    const sourceLines: string[] = [];
 
     for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
       const page = await pdf.getPage(pageNumber);
@@ -1366,10 +1372,14 @@
         .map(row => buildPdfLine(row.items.sort((a, b) => a.x - b.x)))
         .filter(line => line && !/^Side\s+\d+\s+af\s+\d+$/i.test(line));
 
+      sourceLines.push(...lines);
       pages.push(fixParagraphs(lines.join("\n")));
     }
 
-    return pages.join("\n\n").replace(/[ \t]+\n/g, "\n").trim();
+    return {
+      text: pages.join("\n\n").replace(/[ \t]+\n/g, "\n").trim(),
+      lines: sourceLines
+    };
   }
 
   function buildPdfLine(items: { text: string; x: number; width: number }[]) {
@@ -1508,6 +1518,7 @@
   function closePdfModal() {
     pdfModalOpen = false;
     pdfDraftText = "";
+    pdfSourceLines = [];
     pdfFileName = "";
     pdfParseError = "";
     pdfIsParsing = false;
@@ -4908,6 +4919,7 @@ ${body}
       {pdfFileName}
       {pdfParseError}
       bind:pdfDraftText
+      {pdfSourceLines}
       {pdfIsParsing}
       {closePdfModal}
       {loadPdfDraft}

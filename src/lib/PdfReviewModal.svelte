@@ -5,6 +5,7 @@
   export let pdfFileName = "";
   export let pdfParseError = "";
   export let pdfDraftText = "";
+  export let pdfSourceLines: string[] = [];
   export let pdfIsParsing = false;
   export let closePdfModal: () => void;
   export let loadPdfDraft: (text: string) => void;
@@ -12,14 +13,12 @@
   let textareaEl: HTMLTextAreaElement;
   let manualBreakCount = 0;
   let pdfLineMarkMode = false;
-  let pdfBreakLines: number[] = [];
+  type PdfBreakLine = { id: number; y: number; lineIndex: number };
+  let pdfBreakLines: PdfBreakLine[] = [];
+  let nextPdfBreakLineId = 1;
   let selectionStart = 0;
   let selectionEnd = 0;
   let lastDraftText = pdfDraftText;
-  const textareaPaddingX = 12;
-  const textareaPaddingTop = 12;
-  const textareaLineHeight = 15.95;
-  const averageCharacterWidth = 6.8;
 
   $: if (pdfDraftText !== lastDraftText) {
     lastDraftText = pdfDraftText;
@@ -75,14 +74,14 @@
     if (!pdfLineMarkMode || pdfIsParsing) return;
     const rect = (event.currentTarget as HTMLDivElement).getBoundingClientRect();
     const y = Math.max(0, Math.min(100, ((event.clientY - rect.top) / rect.height) * 100));
-    pdfBreakLines = [...pdfBreakLines, y];
+    const lineIndex = pdfLineIndexForY(y);
+    pdfBreakLines = [...pdfBreakLines, { id: nextPdfBreakLineId, y, lineIndex }];
+    nextPdfBreakLineId += 1;
   }
 
   function applyPdfLineBreaks(text: string) {
-    if (!textareaEl || pdfBreakLines.length === 0) return text;
-
     const positions = pdfBreakLines
-      .map(line => offsetForPdfLine(text, line))
+      .map(line => offsetForSourceLine(text, line.lineIndex))
       .filter((position): position is number => position !== null);
     let result = text;
 
@@ -93,29 +92,37 @@
     return result;
   }
 
-  function offsetForPdfLine(text: string, linePercent: number) {
-    if (!textareaEl) return null;
-    const y = textareaEl.scrollTop + textareaEl.clientHeight * (linePercent / 100);
-    const visualRow = Math.max(0, Math.floor((y - textareaPaddingTop) / textareaLineHeight));
-    const wrapColumn = Math.max(12, Math.floor((textareaEl.clientWidth - textareaPaddingX * 2) / averageCharacterWidth));
-    return offsetForVisualRow(text, visualRow, wrapColumn);
+  function pdfLineIndexForY(y: number) {
+    if (pdfSourceLines.length <= 1) return 0;
+    return Math.max(0, Math.min(pdfSourceLines.length - 1, Math.round((y / 100) * (pdfSourceLines.length - 1))));
   }
 
-  function offsetForVisualRow(text: string, targetRow: number, wrapColumn: number) {
-    const lines = text.split("\n");
-    let offset = 0;
-    let row = 0;
+  function offsetForSourceLine(text: string, lineIndex: number) {
+    const line = (pdfSourceLines[lineIndex] ?? "").trim();
+    if (!line) return null;
 
-    for (const line of lines) {
-      const rowCount = Math.max(1, Math.ceil(Math.max(line.length, 1) / wrapColumn));
-      if (targetRow < row + rowCount) {
-        return offset + Math.min(line.length, (targetRow - row) * wrapColumn);
+    const expectedOffset = Math.round(text.length * (lineIndex / Math.max(pdfSourceLines.length - 1, 1)));
+    const candidates = [
+      line,
+      line.replace(/\s+/g, " "),
+      line.length > 80 ? line.slice(0, 80) : line,
+      line.length > 40 ? line.slice(0, 40) : line
+    ].filter((candidate, index, all) => candidate.length >= 8 && all.indexOf(candidate) === index);
+
+    let bestOffset: number | null = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+
+    for (const candidate of candidates) {
+      for (const offset of offsetsOf(text, candidate)) {
+        const distance = Math.abs(offset - expectedOffset);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestOffset = offset;
+        }
       }
-      row += rowCount;
-      offset += line.length + 1;
     }
 
-    return text.length;
+    return bestOffset;
   }
 
   function insertParagraphBreakAt(text: string, position: number) {
@@ -123,6 +130,18 @@
     const before = text.slice(0, from).replace(/[ \t]+$/, "");
     const after = text.slice(from).replace(/^[ \t]+/, "");
     return `${before}\n\n${after}`;
+  }
+
+  function offsetsOf(text: string, needle: string) {
+    const offsets: number[] = [];
+    let from = 0;
+    while (from < text.length) {
+      const index = text.indexOf(needle, from);
+      if (index === -1) break;
+      offsets.push(index);
+      from = index + Math.max(needle.length, 1);
+    }
+    return offsets;
   }
 </script>
 
@@ -162,7 +181,7 @@
         {/if}
         <div class="pdf-line-layer" aria-hidden="true">
           {#each pdfBreakLines as line}
-            <div class="pdf-line-marker" style={`top: ${line}%`}></div>
+            <div class="pdf-line-marker" style={`top: ${line.y}%`}></div>
           {/each}
         </div>
       </div>

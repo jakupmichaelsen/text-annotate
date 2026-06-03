@@ -1409,7 +1409,10 @@
   .pdf-line-overlay,
   .pdf-line-layer {
     position: absolute;
-    inset: 0;
+    top: 58px;
+    right: 0;
+    bottom: 0;
+    left: 0;
   }
 
   .pdf-line-overlay {
