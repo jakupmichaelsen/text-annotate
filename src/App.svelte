@@ -3897,6 +3897,17 @@ ${body}
     }
   });
 
+  const normalModeKeydownBehavior = EditorView.domEventHandlers({
+    keydown(event, v) {
+      if (editorMode !== "normal") return false;
+      if (event.ctrlKey || event.metaKey || event.altKey) return false;
+      if (event.key !== "c" && event.key !== "C") return false;
+
+      event.preventDefault();
+      return moveCursorByColumnStride(v, event.key === "C" ? -1 : 1);
+    }
+  });
+
   // Custom keymap — all app-specific bindings
   function buildKeymap() {
     const normal = (fn: (v: EditorView) => boolean) =>
@@ -4013,6 +4024,7 @@ ${body}
   function baseExtensions(): Extension[] {
     return [
       dblClickBehavior,
+      normalModeKeydownBehavior,
       EditorView.lineWrapping,
       lineNumbers({
         formatNumber: formatEditorLineNumber,
