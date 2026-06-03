@@ -6,6 +6,7 @@ export const helpSections = [
       ["← ↓ ↑ →", "left / down / up / right"],
       ["w s", "line up / down"],
       ["a d", "word left / right"],
+      ["c C", "column stride right / left"],
       ["Ctrl+h/l", "word left / right"],
       ["Ctrl+k/j", "paragraph start / end"],
       ["Ctrl+w/s", "paragraph start / end"],
@@ -31,8 +32,8 @@ export const helpSections = [
     title: "Annotations",
     items: [
       ["Space", "wrap word / selection"],
+      ["Tab / Shift+Tab", "variant next / prev"],
       ["q e", "variant prev / next"],
-      ["4", "variant next"],
       ["n", "new blockquote note"],
       ["N", "style prev"],
       ["Enter", "edit note / cue playback"],

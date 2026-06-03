@@ -92,6 +92,7 @@
   let currentLineHighlightStyle: "fill" | "underline" | "borders" = initialLayoutSettings.currentLineHighlightStyle ?? "fill";
   let currentLineHighlightOpacity = initialLayoutSettings.currentLineHighlightOpacity ?? 0.34;
   let columnGuideThickness = initialLayoutSettings.columnGuideThickness ?? 1;
+  let columnStride = initialLayoutSettings.columnStride ?? 40;
   let layoutFontFamilyName = initialLayoutSettings.fontFamilyName ?? "Noto Sans Mono";
   let showHelp = false;
   let settingsOpen = false;
@@ -189,6 +190,7 @@
   let blockquoteAlign: "left" | "center" | "right" = "left";
   let blockquoteBgWidth = 100;
   let blockquoteActive = false;
+  let blockquoteEditReturnAnchor: number | null = null;
   let editorMode: "normal" | "insert" = "normal";
   let line = 1;
   let column = 1;
@@ -236,7 +238,7 @@
   const styleTitlesStorageKey = "cm6-style-titles";
   const styleKeysStorageKey = "cm6-style-keys";
   const defaultStyleKeyOrder = ["1", "2", "3"];
-  const reservedStyleKeys = new Set(["h", "j", "k", "l", "w", "a", "s", "d", "q", "e", "n", "u", "x", "4", "?", " "]);
+  const reservedStyleKeys = new Set(["h", "j", "k", "l", "w", "a", "s", "d", "c", "q", "e", "n", "u", "x", "?", " "]);
   let customStyles = loadCustomStyles();
   let styleTitles = loadStyleTitles();
   let styleKeys = loadStyleKeys();
@@ -257,6 +259,7 @@
     currentLineHighlightStyle;
     currentLineHighlightOpacity;
     columnGuideThickness;
+    columnStride;
     divideImportSentences;
     persistLayoutSettings();
   }
@@ -672,7 +675,7 @@
     if (isModeShortcut(event) || isAudioShortcut(event) || isAudioRateShortcut(event)) return true;
     if (event.ctrlKey && !event.altKey && (event.key === "z" || event.key === "y" || event.key === "Z")) return true;
     if (editorMode !== "normal" || event.altKey) return false;
-    if (!event.ctrlKey && (styleNumberForKey(event.key) !== null || event.key === "4" || event.key === "Tab")) return true;
+    if (!event.ctrlKey && (styleNumberForKey(event.key) !== null || event.key === "Tab")) return true;
 
     if (event.ctrlKey) {
       if (event.key === "ArrowLeft" || event.key === "ArrowRight" || event.key === "ArrowUp" || event.key === "ArrowDown") return true;
@@ -687,7 +690,7 @@
       event.key === "ArrowRight" ||
       event.key === "ArrowUp" ||
       event.key === "ArrowDown" ||
-      "hjklwasdHJKLWASDfxeqnNuU".includes(event.key);
+      "hjklwasdcHJKLWASDCfxeqnNuU".includes(event.key);
   }
 
   function shouldDeferWindowShortcut(event: KeyboardEvent) {
@@ -903,6 +906,7 @@
     currentLineHighlightStyle: "fill" | "underline" | "borders";
     currentLineHighlightOpacity: number;
     columnGuideThickness: number;
+    columnStride: number;
     divideImportSentences: boolean;
   };
 
@@ -943,6 +947,7 @@
       currentLineHighlightStyle,
       currentLineHighlightOpacity: Math.round(numberOr("currentLineHighlightOpacity", 0.34, 0.08, 0.7) * 100) / 100,
       columnGuideThickness: Math.round(numberOr("columnGuideThickness", 1, 1, 6)),
+      columnStride: Math.round(numberOr("columnStride", 40, 4, 120)),
       divideImportSentences: typeof settings.divideImportSentences === "boolean" ? settings.divideImportSentences : undefined
     };
   }
@@ -961,6 +966,7 @@
       currentLineHighlightStyle,
       currentLineHighlightOpacity,
       columnGuideThickness,
+      columnStride,
       divideImportSentences
     };
     localStorage.setItem(layoutStorageKey, JSON.stringify(payload));
@@ -990,6 +996,7 @@
     currentLineHighlightStyle = settings.currentLineHighlightStyle ?? currentLineHighlightStyle;
     currentLineHighlightOpacity = settings.currentLineHighlightOpacity ?? currentLineHighlightOpacity;
     columnGuideThickness = settings.columnGuideThickness ?? columnGuideThickness;
+    columnStride = settings.columnStride ?? columnStride;
     divideImportSentences = settings.divideImportSentences ?? divideImportSentences;
   }
 
@@ -1530,6 +1537,7 @@
   function setMode(mode: "normal" | "insert") {
     const selection = view?.state.selection;
     editorMode = mode;
+    if (mode === "normal") blockquoteEditReturnAnchor = null;
     if (view) {
       view.dispatch(selection ? { selection } : {});  // trigger keymap/decoration rebuild
       applyEditorModeClasses(view);
@@ -2948,9 +2956,38 @@ ${body}
   }
 
   function enterBlockquoteEditMode(v: EditorView) {
+    const selection = v.state.selection.main;
+    const returnAnchor = selection.head;
+
+    if (!selection.empty) {
+      const from = Math.min(selection.from, selection.to);
+      const to = Math.max(selection.from, selection.to);
+      const beforeNeedsBreak = from > 0 && v.state.doc.sliceString(from - 1, from) !== "\n";
+      const afterNeedsBreak = to < v.state.doc.length && v.state.doc.sliceString(to, to + 1) !== "\n";
+      const selectedText = v.state.doc.sliceString(from, to).replace(/\r\n?/g, "\n");
+      const quotedText = selectedText
+        .split("\n")
+        .map(line => line.startsWith(">") ? line : `> ${line}`)
+        .join("\n");
+      const prefix = beforeNeedsBreak ? "\n" : "";
+      const suffix = afterNeedsBreak ? "\n" : "";
+      const insert = `${prefix}${quotedText}${suffix}`;
+      const cursor = from + prefix.length + quotedText.length;
+      const tr = v.state.update({
+        changes: { from, to, insert },
+        selection: { anchor: cursor }
+      });
+      blockquoteEditReturnAnchor = tr.changes.mapPos(returnAnchor, 1);
+      v.dispatch(tr);
+      blockquoteActive = true;
+      setMode("insert");
+      return true;
+    }
+
     const head = v.state.selection.main.head;
     const line = v.state.doc.lineAt(head);
     let cursor = head;
+    blockquoteEditReturnAnchor = head;
 
     if (line.text.startsWith(">")) {
       const contentStart = line.from + (line.text.startsWith("> ") ? 2 : 1);
@@ -2972,6 +3009,30 @@ ${body}
 
     blockquoteActive = true;
     setMode("insert");
+    return true;
+  }
+
+  function finishBlockquoteEditMode(v: EditorView) {
+    if (editorMode !== "insert" || blockquoteEditReturnAnchor === null) return false;
+    const returnAnchor = Math.max(0, Math.min(blockquoteEditReturnAnchor, v.state.doc.length));
+    blockquoteEditReturnAnchor = null;
+    setMode("normal");
+    v.dispatch({ selection: EditorSelection.cursor(returnAnchor) });
+    return true;
+  }
+
+  function insertBlockquoteLineBreak(v: EditorView) {
+    if (editorMode !== "insert" || blockquoteEditReturnAnchor === null) return false;
+    const selection = v.state.selection.main;
+    const from = Math.min(selection.from, selection.to);
+    const to = Math.max(selection.from, selection.to);
+    const line = v.state.doc.lineAt(from);
+    const insert = line.text.startsWith(">") ? "\n> " : "\n";
+    const cursor = from + insert.length;
+    v.dispatch({
+      changes: { from, to, insert },
+      selection: { anchor: cursor }
+    });
     return true;
   }
 
@@ -3232,6 +3293,21 @@ ${body}
     return true;
   }
 
+  function moveCursorByColumnStride(v: EditorView, direction: 1 | -1) {
+    const stride = Math.max(1, Math.round(columnStride));
+    const selection = v.state.selection.main;
+    const head = selection.head;
+    const line = v.state.doc.lineAt(head);
+    const columnOffset = head - line.from;
+    const nextColumn = Math.max(0, Math.min(line.length, columnOffset + direction * stride));
+    v.dispatch({
+      selection: EditorSelection.cursor(line.from + nextColumn),
+      effects: cursorScrollEffect.of(null),
+      scrollIntoView: true
+    });
+    return true;
+  }
+
   function buildHighlightDecorator(theme = activeTheme): Extension {
     const plugin = ViewPlugin.fromClass(class {
       decorations: DecorationSet;
@@ -3447,16 +3523,24 @@ ${body}
       return `\`${text}\`<!-- ${annotationStyleToken(name)}, ${ts}: ""${titlePart} -->`;
     };
     if (!range.empty) {
-      const insert = makeInsert(state.doc.sliceString(range.from, range.to));
-      v.dispatch({ changes: { from: range.from, to: range.to, insert }, selection: { anchor: Math.min(range.from + insert.length + (style > 0 ? 1 : 0), v.state.doc.length) } });
+      const selectedText = state.doc.sliceString(range.from, range.to);
+      const insert = makeInsert(selectedText);
+      v.dispatch({
+        changes: { from: range.from, to: range.to, insert },
+        selection: { anchor: range.from + 1 + selectedText.length }
+      });
       return true;
     }
     const docText = state.doc.toString();
     const wordRange = wordRangeAt(docText, range.from);
     if (!wordRange) return true;
     const { from, to } = wordRange;
-    const insert = makeInsert(state.doc.sliceString(from, to));
-    v.dispatch({ changes: { from, to, insert }, selection: { anchor: Math.min(from + insert.length + (style > 0 ? 1 : 0), v.state.doc.length) } });
+    const wordText = state.doc.sliceString(from, to);
+    const insert = makeInsert(wordText);
+    v.dispatch({
+      changes: { from, to, insert },
+      selection: { anchor: from + 1 + wordText.length }
+    });
     return true;
   }
 
@@ -3501,7 +3585,10 @@ ${body}
         const { variant } = annotationStyleParts(m[2]);
         const updated = m[0].replace(/^`([^`]+)`<!--\s*\w+(?:\s+\w+)?,/, `\`$1\`<!-- ${annotationStyleToken(newName, variant)},`);
         currentStyle = style;
-        v.dispatch({ changes: { from: spanStart, to: spanEnd, insert: updated } });
+        v.dispatch({
+          changes: { from: spanStart, to: spanEnd, insert: updated },
+          selection: { anchor: spanStart + 1 + m[1].length }
+        });
         return true;
       }
     }
@@ -3823,6 +3910,9 @@ ${body}
       // Always: F2 enters edit
       { key: "F2", run: v => { setMode("insert"); return true; } },
       { key: "F1", run: () => { showHelp = !showHelp; return true; } },
+      { key: "Enter", run: v => finishBlockquoteEditMode(v) },
+      { key: "Shift-Enter", run: v => insertBlockquoteLineBreak(v) },
+      { key: "Alt-Enter", run: v => insertBlockquoteLineBreak(v) },
 
       // Normal-mode only: Navigation
       { key: "ArrowLeft",        run: normal(v => { cursorCharLeft(v);  return true; }) },
@@ -3853,6 +3943,8 @@ ${body}
       { key: "s", run: normal(v => navigation.moveLineSkippingSrt(v, "down")) },
       { key: "a", run: normal(v => navigation.moveByWordCount(v, false, 1)) },
       { key: "d", run: normal(v => navigation.moveByWordCount(v, true, 1)) },
+      { key: "c", run: normal(v => moveCursorByColumnStride(v, 1)) },
+      { key: "C", run: normal(v => moveCursorByColumnStride(v, -1)) },
       { key: "Ctrl-w", run: normal(v => navigation.paragraphBoundary(v, "start")) },
       { key: "Ctrl-s", run: normal(v => navigation.paragraphBoundary(v, "end")) },
       { key: "Ctrl-a", run: normal(v => navigation.moveByWordCount(v, false, 5)) },
@@ -3891,8 +3983,8 @@ ${body}
       { key: "Space",  run: normal(v => wrapSelectionOrWord(v, currentStyle)) },
       { key: "Enter",  run: normal(v => handleEnterInAnnotationMode(v)) },
       { key: "x",      run: normal(v => removeAnnotation(v)) },
-      { key: "4",      run: normal(v => cycleAnnotationVariant(v, +1)) },
       { key: "Tab",    run: normal(v => cycleAnnotationVariant(v, +1)) },
+      { key: "Shift-Tab", run: normal(v => cycleAnnotationVariant(v, -1)) },
       { key: "q",      run: normal(v => cycleAnnotationVariant(v, -1)) },
       { key: "e",      run: normal(v => cycleAnnotationVariant(v, +1)) },
       { key: "f",      run: normal(() => { toggleMediaPlayback(); return true; }) },
@@ -4192,6 +4284,20 @@ ${body}
               <span class="settings-range-value">{columnGuideThickness}px</span>
             </label>
             <label class="settings-range-row">
+              <span class="settings-control-icon" aria-hidden="true">↔</span>
+              <span class="settings-range-label">Column stride</span>
+              <input
+                type="range"
+                min="4"
+                max="120"
+                step="2"
+                bind:value={columnStride}
+                class="slider"
+                aria-label="Column movement stride"
+              />
+              <span class="settings-range-value">{columnStride}</span>
+            </label>
+            <label class="settings-range-row">
               <span class="settings-control-icon" aria-hidden="true">L</span>
               <span class="settings-range-label">Left padding</span>
               <input type="range" min="0" max="400" step="4" bind:value={padLeft} class="slider" aria-label="Left padding" />
@@ -4380,8 +4486,8 @@ ${body}
                 class:variant-bars={currentStyle === index + 1 && currentAnnotationVariant === "bars"}
                 style={`--swatch-color: ${style.color}; --swatch-text: ${annotationTextColorForStyle(style.name, style.color)}`}
                 type="button"
-                title={`Use ${styleDisplayTitle(style.name)}`}
-                aria-label={`Use ${styleDisplayTitle(style.name)}`}
+                title={`Use ${styleDisplayTitle(style.name)}${currentStyle === index + 1 ? ` (${currentAnnotationVariant})` : ""}`}
+                aria-label={`Use ${styleDisplayTitle(style.name)}${currentStyle === index + 1 ? `, ${currentAnnotationVariant} variant` : ""}`}
                 on:click={() => { currentStyle = index + 1; view?.focus(); }}
               ></button>
               {#if editingStyleKeyName === style.name}

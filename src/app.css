@@ -1016,6 +1016,8 @@
   }
 
   .style-swatch {
+    position: relative;
+    box-sizing: border-box;
     width: 14px;
     height: 14px;
     padding: 0;
@@ -1030,16 +1032,34 @@
     height: 18px;
   }
 
+  .style-row.active-style .style-swatch::after {
+    content: "";
+    position: absolute;
+    pointer-events: none;
+  }
+
   .style-swatch.variant-fill,
   .variant-preview.variant-fill {
     background: var(--swatch-color);
     border-color: var(--swatch-color);
   }
 
+  .style-row.active-style .style-swatch.variant-fill::after {
+    inset: 5px;
+    border-radius: 50%;
+    background: var(--swatch-text);
+  }
+
   .style-swatch.variant-box,
   .variant-preview.variant-box {
     background: transparent;
     border-color: var(--swatch-color);
+  }
+
+  .style-row.active-style .style-swatch.variant-box::after {
+    inset: 3px;
+    border: 2px solid var(--swatch-color);
+    border-radius: 2px;
   }
 
   .style-swatch.variant-underline,
@@ -1050,6 +1070,14 @@
     border-bottom: 3px solid var(--swatch-color);
   }
 
+  .style-row.active-style .style-swatch.variant-underline::after {
+    right: 3px;
+    bottom: 3px;
+    left: 3px;
+    height: 3px;
+    background: var(--swatch-color);
+  }
+
   .style-swatch.variant-rail,
   .variant-preview.variant-rail {
     background: transparent;
@@ -1058,12 +1086,26 @@
     border-bottom: 3px solid var(--swatch-color);
   }
 
+  .style-row.active-style .style-swatch.variant-rail::after {
+    inset: 3px;
+    background:
+      linear-gradient(var(--swatch-color), var(--swatch-color)) top / 100% 3px no-repeat,
+      linear-gradient(var(--swatch-color), var(--swatch-color)) bottom / 100% 3px no-repeat;
+  }
+
   .style-swatch.variant-bars,
   .variant-preview.variant-bars {
     background: transparent;
     border-color: transparent;
     border-left: 4px solid var(--swatch-color);
     border-right: 4px solid var(--swatch-color);
+  }
+
+  .style-row.active-style .style-swatch.variant-bars::after {
+    inset: 3px;
+    background:
+      linear-gradient(var(--swatch-color), var(--swatch-color)) left / 3px 100% no-repeat,
+      linear-gradient(var(--swatch-color), var(--swatch-color)) right / 3px 100% no-repeat;
   }
 
   .style-name {
