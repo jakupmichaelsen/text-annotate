@@ -158,6 +158,7 @@
   let audioRateIndex = 0;
   const audioRates = [1, 1.5, 2];
   const mediaSeekSeconds = 10;
+  const mediaShortcutSeekSeconds = 5;
   const manualPauseRewindSeconds = 3;
   type TtsSegment = { text: string; from: number; to: number };
   let ttsAvailable = false;
@@ -262,7 +263,7 @@
   const styleTitlesStorageKey = "cm6-style-titles";
   const styleKeysStorageKey = "cm6-style-keys";
   const defaultStyleKeyOrder = ["1", "2", "3"];
-  const reservedStyleKeys = new Set(["h", "j", "k", "l", "w", "a", "s", "d", "c", "q", "e", "n", "u", "x", "?", " "]);
+  const reservedStyleKeys = new Set(["h", "j", "k", "l", "w", "a", "s", "d", "c", "q", "r", "e", "n", "u", "x", "?", " "]);
   let customStyles = loadCustomStyles();
   let styleTitles = loadStyleTitles();
   let styleKeys = loadStyleKeys();
@@ -687,12 +688,14 @@
   }
 
   function isAudioShortcut(event: KeyboardEvent) {
+    const key = event.key.toLowerCase();
     return event.altKey && !event.ctrlKey && !event.metaKey &&
-      (event.key === " " || event.key === "ArrowLeft" || event.key === "Left" || event.key === "ArrowRight" || event.key === "Right");
+      (event.key === " " || event.key === "ArrowLeft" || event.key === "Left" || event.key === "ArrowRight" || event.key === "Right" ||
+        key === "a" || key === "d" || key === "s" || key === "w");
   }
 
   function isAudioRateShortcut(event: KeyboardEvent) {
-    return event.altKey && !event.ctrlKey && !event.metaKey && event.key.toLowerCase() === "r";
+    return event.altKey && !event.ctrlKey && !event.metaKey && (event.key.toLowerCase() === "r" || event.key.toLowerCase() === "w");
   }
 
   function isAppShortcutCandidate(event: KeyboardEvent) {
@@ -715,7 +718,7 @@
       event.key === "ArrowRight" ||
       event.key === "ArrowUp" ||
       event.key === "ArrowDown" ||
-      "hjklwasdcHJKLWASDCfxeqnNuU".includes(event.key);
+      "hjklwasdcqrHJKLWASDCQRfxeqnNuU".includes(event.key);
   }
 
   function shouldDeferWindowShortcut(event: KeyboardEvent) {
@@ -734,15 +737,26 @@
     event.preventDefault();
     event.stopPropagation();
 
-    if (event.key === " ") {
+    handleMediaShortcut(event.key);
+  }
+
+  function handleMediaShortcut(key: string) {
+    const normalized = key.toLowerCase();
+    if (key === " " || normalized === "s") {
       toggleMediaPlayback();
       return;
     }
-    if (!audioElement || !audioLoaded) {
-      stepTts(event.key === "ArrowLeft" || event.key === "Left" ? -1 : 1);
+    if (normalized === "w" || normalized === "r") {
+      cycleAudioRate();
       return;
     }
-    seekAudio(event.key === "ArrowLeft" || event.key === "Left" ? -mediaSeekSeconds : mediaSeekSeconds);
+
+    const direction = key === "ArrowLeft" || key === "Left" || normalized === "a" ? -1 : 1;
+    if (!audioElement || !audioLoaded) {
+      stepTts(direction);
+      return;
+    }
+    seekAudio(direction * (normalized === "a" || normalized === "d" ? mediaShortcutSeekSeconds : mediaSeekSeconds));
   }
 
   function handleWindowKeydownCapture(event: KeyboardEvent) {
@@ -4014,6 +4028,8 @@ ${body}
       { key: "j", run: normal(v => navigation.moveLineSkippingSrt(v, "down")) },
       { key: "k", run: normal(v => navigation.moveLineSkippingSrt(v, "up")) },
       { key: "l", run: normal(v => { cursorCharRight(v); return true; }) },
+      { key: "q", run: normal(v => { cursorCharLeft(v);  return true; }) },
+      { key: "r", run: normal(v => { cursorCharRight(v); return true; }) },
       { key: "Ctrl-h", run: normal(v => navigation.moveByWordCount(v, false, 1)) },
       { key: "Ctrl-j", run: normal(v => navigation.paragraphBoundary(v, "end")) },
       { key: "Ctrl-k", run: normal(v => navigation.paragraphBoundary(v, "start")) },
@@ -4032,6 +4048,8 @@ ${body}
       { key: "J", run: normal(v => navigation.moveLineSkippingSrt(v, "down", true)) },
       { key: "K", run: normal(v => navigation.moveLineSkippingSrt(v, "up", true)) },
       { key: "L", run: normal(v => { selectCharRight(v); return true; }) },
+      { key: "Q", run: normal(v => { selectCharLeft(v);  return true; }) },
+      { key: "R", run: normal(v => { selectCharRight(v); return true; }) },
       { key: "Shift-Ctrl-h", run: normal(v => navigation.moveByWordCount(v, false, 1, true)) },
       { key: "Shift-Ctrl-j", run: normal(v => navigation.paragraphBoundary(v, "end", true)) },
       { key: "Shift-Ctrl-k", run: normal(v => navigation.paragraphBoundary(v, "start", true)) },
@@ -4063,7 +4081,6 @@ ${body}
       { key: "x",      run: normal(v => removeAnnotation(v)) },
       { key: "Tab",    run: normal(v => cycleAnnotationVariant(v, +1)) },
       { key: "Shift-Tab", run: normal(v => cycleAnnotationVariant(v, -1)) },
-      { key: "q",      run: normal(v => cycleAnnotationVariant(v, -1)) },
       { key: "e",      run: normal(v => cycleAnnotationVariant(v, +1)) },
       { key: "f",      run: normal(() => { toggleMediaPlayback(); return true; }) },
       { key: "n",      run: normal(v => enterBlockquoteEditMode(v)) },
@@ -4076,6 +4093,10 @@ ${body}
       { key: "Ctrl-Z", run: v => redo(v) },
       { key: "?",      run: normal(() => { showHelp = !showHelp; return true; }) },
       { key: "Alt-r", run: () => { cycleAudioRate(); return true; } },
+      { key: "Alt-w", run: () => { handleMediaShortcut("w"); return true; } },
+      { key: "Alt-a", run: () => { handleMediaShortcut("a"); return true; } },
+      { key: "Alt-s", run: () => { handleMediaShortcut("s"); return true; } },
+      { key: "Alt-d", run: () => { handleMediaShortcut("d"); return true; } },
       { key: "Alt-Space",  run: () => { toggleMediaPlayback(); return true; } },
       { key: "Alt-ArrowLeft",  run: () => { seekAudio(-10); return true; } },
       { key: "Alt-ArrowRight", run: () => { seekAudio(10); return true; } },
@@ -4570,6 +4591,25 @@ ${body}
         <div class="sidebar-label">Annotation styles</div>
         <div class="sidebar-hint">Tab / Shift+Tab: variation</div>
         <div class="style-list sidebar-style-list">
+          <div
+            class="style-row style-row-plain"
+            class:active-style={currentStyle === 0}
+            role="listitem"
+          >
+            <span class="style-swatch-placeholder" aria-hidden="true"></span>
+            <span class="style-key-badge">0</span>
+            <span class="style-separator" aria-hidden="true">:</span>
+            <button
+              class="style-name style-title-action"
+              type="button"
+              title="Use plain text"
+              aria-label="Use plain text"
+              on:click={() => { currentStyle = 0; view?.focus(); }}
+              on:keydown={event => event.stopPropagation()}
+            >
+              plain
+            </button>
+          </div>
           {#each highlightStyles as style, index}
             <div
               class="style-row"
@@ -4630,16 +4670,9 @@ ${body}
                   on:click={event => startStyleTitleEdit(event, style.name)}
                   on:keydown={event => event.stopPropagation()}
                 >
-                  {styleDisplayTitle(style.name)}
+                  {styleDisplayTitle(style.name)}{currentStyle === index + 1 ? ` (${annotationVariantLabel(currentAnnotationVariant)})` : ""}
                 </button>
               {/if}
-              <span
-                class="style-variant-badge"
-                class:visible={currentStyle === index + 1}
-                title={currentStyle === index + 1 ? `Current variation: ${currentAnnotationVariant}` : undefined}
-              >
-                {currentStyle === index + 1 ? annotationVariantLabel(currentAnnotationVariant) : ""}
-              </span>
               {#if style.custom}
                 <button
                   class="style-remove-button"

@@ -1052,10 +1052,15 @@
 
   .style-row {
     display: grid;
-    grid-template-columns: 16px 22px max-content minmax(0, 1fr) max-content 14px;
+    grid-template-columns: 16px 22px max-content minmax(0, 1fr) 14px;
     column-gap: 3px;
     align-items: center;
     padding: 0;
+  }
+
+  .style-swatch-placeholder {
+    width: 14px;
+    height: 14px;
   }
 
   .style-swatch {
@@ -1237,20 +1242,6 @@
 
   .style-key-input:focus {
     border-color: var(--yellow);
-  }
-
-  .style-variant-badge {
-    min-width: 0;
-    color: var(--fg-muted);
-    font-size: 10px;
-    line-height: 1;
-    opacity: 0;
-    text-align: right;
-    text-transform: lowercase;
-  }
-
-  .style-variant-badge.visible {
-    opacity: 1;
   }
 
   .style-remove-button {

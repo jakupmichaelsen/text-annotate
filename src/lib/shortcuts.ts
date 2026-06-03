@@ -4,6 +4,7 @@ export const helpSections = [
     items: [
       ["h j k l", "left / down / up / right"],
       ["← ↓ ↑ →", "left / down / up / right"],
+      ["q r", "left / right"],
       ["w s", "line up / down"],
       ["a d", "word left / right"],
       ["c C", "column stride right / left"],
@@ -18,6 +19,7 @@ export const helpSections = [
     title: "Selection",
     items: [
       ["⇧hjkl", "select by char / line"],
+      ["⇧q ⇧r", "select left / right"],
       ["⇧Arrows", "select by char / line"],
       ["⇧w ⇧s", "select by line"],
       ["⇧a ⇧d", "select by word"],
@@ -33,7 +35,7 @@ export const helpSections = [
     items: [
       ["Space", "wrap word / selection"],
       ["Tab / Shift+Tab", "variant next / prev"],
-      ["q e", "variant prev / next"],
+      ["e", "variant next"],
       ["n", "new blockquote note"],
       ["N", "style prev"],
       ["Enter", "edit note / cue playback"],
@@ -53,6 +55,9 @@ export const helpSections = [
       ["F2", "enter Edit mode"],
       ["Esc", "return to Annotate mode"],
       ["Alt+Space", "play / pause media / TTS"],
+      ["Alt+s", "play / pause media / TTS"],
+      ["Alt+a/d", "seek media 5s / step TTS"],
+      ["Alt+w", "cycle playback / TTS speed"],
       ["Alt+←/→", "seek media / step TTS"],
       ["Alt+r", "cycle playback / TTS speed"],
       ["F1 / ?", "toggle this help"]

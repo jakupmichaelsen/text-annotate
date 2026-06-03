@@ -2,6 +2,8 @@
   import { onMount, tick } from "svelte";
   import * as pdfjsLib from "pdfjs-dist";
   import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
+  import { createWorker, PSM } from "tesseract.js";
+  import tesseractWorkerUrl from "tesseract.js/dist/worker.min.js?url";
 
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -44,6 +46,11 @@
   let pdfPreviewPages: PdfPreviewPage[] = [];
   let pdfPreviewLoading = false;
   let pdfRenderError = "";
+  let pdfOcrRunning = false;
+  let pdfOcrStatus = "";
+  let pdfOcrProgress = 0;
+  let pdfOcrError = "";
+  let pdfOcrRunId = 0;
   let selectionStart = 0;
   let selectionEnd = 0;
   let lastDraftText = pdfDraftText;
@@ -110,6 +117,67 @@
 
   function togglePdfLineMarkMode() {
     pdfLineMarkMode = !pdfLineMarkMode;
+  }
+
+  async function runPdfOcr() {
+    if (!pdfPreviewUrl || pdfIsParsing || pdfOcrRunning) return;
+
+    const runId = pdfOcrRunId + 1;
+    pdfOcrRunId = runId;
+    pdfOcrRunning = true;
+    pdfOcrStatus = "Starting OCR...";
+    pdfOcrProgress = 0;
+    pdfOcrError = "";
+    let worker: Awaited<ReturnType<typeof createWorker>> | null = null;
+
+    try {
+      const data = await fetch(pdfPreviewUrl).then(response => response.arrayBuffer());
+      const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(data) }).promise;
+      worker = await createWorker(["eng", "dan"], 1, {
+        workerPath: tesseractWorkerUrl,
+        logger: message => {
+          if (runId !== pdfOcrRunId) return;
+          if (message.status) pdfOcrStatus = message.status;
+          if (Number.isFinite(message.progress)) {
+            pdfOcrProgress = Math.max(0, Math.min(1, message.progress));
+          }
+        }
+      });
+
+      await worker.setParameters({
+        tessedit_pageseg_mode: PSM.AUTO,
+        preserve_interword_spaces: "1"
+      });
+
+      const pageTexts: string[] = [];
+      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+        if (runId !== pdfOcrRunId) return;
+        pdfOcrStatus = `OCR page ${pageNumber} of ${pdf.numPages}`;
+        const canvas = await renderPdfPageForOcr(pdf, pageNumber);
+        const result = await worker.recognize(canvas);
+        pageTexts.push(cleanOcrPageText(result.data.text));
+        pdfOcrProgress = pageNumber / Math.max(pdf.numPages, 1);
+      }
+
+      if (runId !== pdfOcrRunId) return;
+      const nextText = pageTexts.filter(Boolean).join("\n\n").trim();
+      pdfDraftText = nextText;
+      lastDraftText = nextText;
+      pdfOcrStatus = nextText ? "OCR complete" : "OCR found no text";
+      if (!nextText) pdfOcrError = "OCR completed, but no text was detected.";
+      await tick();
+      rememberTextareaSelection();
+    } catch (error) {
+      if (runId !== pdfOcrRunId) return;
+      pdfOcrStatus = "";
+      pdfOcrError = error instanceof Error ? error.message : "OCR failed.";
+    } finally {
+      await worker?.terminate().catch(() => {});
+      if (runId === pdfOcrRunId) {
+        pdfOcrRunning = false;
+        pdfOcrProgress = 0;
+      }
+    }
   }
 
   async function loadPdfPreview(url: string) {
@@ -248,6 +316,21 @@
     }
   }
 
+  async function renderPdfPageForOcr(pdf: pdfjsLib.PDFDocumentProxy, pageNumber: number) {
+    const page = await pdf.getPage(pageNumber);
+    const viewport = page.getViewport({ scale: 2 });
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Could not create an OCR canvas.");
+
+    canvas.width = Math.floor(viewport.width);
+    canvas.height = Math.floor(viewport.height);
+    context.fillStyle = "#fff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: context, viewport }).promise;
+    return canvas;
+  }
+
   async function togglePdfBreakRow(row: PdfPreviewRow) {
     if (!pdfLineMarkMode || pdfIsParsing) return;
     const existingMark = pdfBreakLines.find(line => line.row.id === row.id);
@@ -355,6 +438,16 @@
       .replace(/\s+([)\]}”’])/g, "$1")
       .trim();
   }
+
+  function cleanOcrPageText(text: string) {
+    return text
+      .replace(/\r\n?/g, "\n")
+      .split("\n")
+      .map(line => line.replace(/[ \t]+/g, " ").trim())
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
 </script>
 
 <div class="pdf-modal-overlay">
@@ -373,9 +466,18 @@
           on:click={togglePdfLineMarkMode}
           title="Click a PDF text row to mark a paragraph break"
           aria-pressed={pdfLineMarkMode}
-          disabled={pdfIsParsing}
+          disabled={pdfIsParsing || pdfOcrRunning}
         >
           Mark break
+        </button>
+        <button
+          class="toolbar-btn"
+          type="button"
+          on:click={runPdfOcr}
+          title="Run OCR on the PDF preview"
+          disabled={pdfIsParsing || pdfOcrRunning || !pdfPreviewUrl}
+        >
+          {pdfOcrRunning ? "OCR..." : "OCR"}
         </button>
         <button class="toolbar-btn" type="button" on:click={closePdfModal}>Close</button>
       </div>
@@ -383,6 +485,9 @@
 
     {#if pdfParseError}
       <div class="pdf-error">{pdfParseError}</div>
+    {/if}
+    {#if pdfOcrError}
+      <div class="pdf-error">{pdfOcrError}</div>
     {/if}
 
     <div class="pdf-modal-body">
@@ -424,7 +529,7 @@
           class="pdf-textarea"
           bind:this={textareaEl}
           value={pdfDraftText}
-          disabled={pdfIsParsing}
+          disabled={pdfIsParsing || pdfOcrRunning}
           aria-label="Extracted PDF text"
           on:input={handlePdfTextareaInput}
           on:keydown={handlePdfTextareaKeydown}
@@ -444,8 +549,11 @@
         {#if manualBreakCount > 0}
           · {manualBreakCount} break{manualBreakCount === 1 ? "" : "s"} inserted
         {/if}
+        {#if pdfOcrRunning || pdfOcrStatus}
+          · {pdfOcrStatus}{pdfOcrRunning ? ` ${Math.round(pdfOcrProgress * 100)}%` : ""}
+        {/if}
       </span>
-      <button class="toolbar-btn load-confirm-btn" type="button" on:click={loadMarkedPdfDraft} disabled={pdfIsParsing}>Load text</button>
+      <button class="toolbar-btn load-confirm-btn" type="button" on:click={loadMarkedPdfDraft} disabled={pdfIsParsing || pdfOcrRunning}>Load text</button>
     </div>
   </div>
 </div>
