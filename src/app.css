@@ -471,12 +471,43 @@
     gap: 8px;
   }
 
+  .sidebar-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
   .sidebar-label {
     font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: var(--fg-muted);
     font-weight: 600;
+  }
+
+  .sidebar-copy-btn {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--fg-muted);
+    font: inherit;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+
+  .sidebar-copy-btn:hover,
+  .sidebar-copy-btn:focus-visible {
+    color: var(--yellow);
+    outline: none;
+  }
+
+  .sidebar-notes {
+    min-height: 128px;
+    resize: vertical;
   }
 
   .sidebar-toggle {

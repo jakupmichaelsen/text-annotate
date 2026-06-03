@@ -60,6 +60,7 @@
   const unifiedPreferencesStorageKey = "textAnnotate-preferences";
   const layoutStorageKey = "cm6-layout-settings";
   const appSettingsStorageKey = "textAnnotate-settings";
+  const notesStorageKey = "textAnnotate-notes";
   const openAiApiKeyStorageKey = "textAnnotate-openai-api-key";
   const themeStorageKey = "cm6-theme";
   const fontFamilyOptions = [
@@ -142,6 +143,7 @@
   let pdfFileName = "";
   let pdfIsParsing = false;
   let pdfParseError = "";
+  let sessionNotes = loadSessionNotes();
   let activeSaveHandle: any = null;
   let activeSaveName = "";
   let pendingAutosaveText: string | null = null;
@@ -904,6 +906,11 @@
     return localStorage.getItem(openAiApiKeyStorageKey) ?? "";
   }
 
+  function loadSessionNotes() {
+    if (typeof localStorage === "undefined") return "";
+    return localStorage.getItem(notesStorageKey) ?? "";
+  }
+
   function objectFromStorage(key: string): Record<string, unknown> | null {
     if (typeof localStorage === "undefined") return null;
     const stored = localStorage.getItem(key);
@@ -1126,6 +1133,18 @@
     } else {
       localStorage.removeItem(openAiApiKeyStorageKey);
     }
+  }
+
+  function persistSessionNotes() {
+    if (typeof localStorage === "undefined") return;
+    const text = sessionNotes.trim();
+    if (text) localStorage.setItem(notesStorageKey, sessionNotes);
+    else localStorage.removeItem(notesStorageKey);
+  }
+
+  function handleSessionNotesInput(event: Event) {
+    sessionNotes = (event.target as HTMLTextAreaElement).value;
+    persistSessionNotes();
   }
 
   function handleOpenAiKeyInput(event: Event) {
@@ -4569,6 +4588,31 @@ ${body}
             {transcriptionError || transcriptionStatus || "Transcribing..."}
           </div>
         {/if}
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-section-header">
+          <div class="sidebar-label">Notes</div>
+          <button
+            class="sidebar-copy-btn"
+            type="button"
+            on:click={() => navigator.clipboard?.writeText(sessionNotes)}
+            disabled={!sessionNotes.trim()}
+            title="Copy notes"
+            aria-label="Copy notes"
+          >
+            Copy
+          </button>
+        </div>
+        <div class="sidebar-hint">Persistent scratchpad for follow-up ideas, synced locally.</div>
+        <textarea
+          class="settings-input settings-textarea sidebar-notes"
+          rows="10"
+          bind:value={sessionNotes}
+          placeholder="Write ideas, change requests, or a handoff for the next pass..."
+          aria-label="Persistent notes"
+          on:input={handleSessionNotesInput}
+        ></textarea>
       </div>
 
       <div class="sidebar-section">
