@@ -30,11 +30,15 @@
   };
   type PdfPreviewPage = {
     pageNumber: number;
+    fullWidth: number;
+    fullHeight: number;
     width: number;
     height: number;
+    cropLeft: number;
+    cropTop: number;
     rows: PdfPreviewRow[];
   };
-  type PdfBreakLine = { id: number; row: PdfPreviewRow };
+  type PdfBreakLine = { id: number; row: PdfPreviewRow; insertedBreak: boolean };
   let pdfBreakLines: PdfBreakLine[] = [];
   let nextPdfBreakLineId = 1;
   let pdfPreviewPages: PdfPreviewPage[] = [];
@@ -101,7 +105,7 @@
   }
 
   function loadMarkedPdfDraft() {
-    loadPdfDraft(applyPdfLineBreaks(pdfDraftText));
+    loadPdfDraft(pdfDraftText);
   }
 
   function togglePdfLineMarkMode() {
@@ -128,12 +132,21 @@
         const viewport = page.getViewport({ scale: 1.25 });
         const content = await page.getTextContent();
         const rows = buildPreviewRows(content.items, viewport, pageNumber, visualIndex);
+        const crop = previewCropForRows(rows, viewport);
         visualIndex += rows.length;
         nextPages.push({
           pageNumber,
-          width: viewport.width,
-          height: viewport.height,
-          rows
+          fullWidth: viewport.width,
+          fullHeight: viewport.height,
+          width: crop.width,
+          height: crop.height,
+          cropLeft: crop.left,
+          cropTop: crop.top,
+          rows: rows.map(row => ({
+            ...row,
+            top: row.top - crop.top,
+            left: row.left - crop.left
+          }))
         });
       }
 
@@ -194,6 +207,25 @@
       .filter(row => row.text && !/^Side\s+\d+\s+af\s+\d+$/i.test(row.text));
   }
 
+  function previewCropForRows(rows: PdfPreviewRow[], viewport: pdfjsLib.PageViewport) {
+    if (!rows.length) {
+      return { left: 0, top: 0, width: viewport.width, height: viewport.height };
+    }
+
+    const padding = 14;
+    const left = Math.max(0, Math.min(...rows.map(row => row.left)) - padding);
+    const top = Math.max(0, Math.min(...rows.map(row => row.top)) - padding);
+    const right = Math.min(viewport.width, Math.max(...rows.map(row => row.left + row.width)) + padding);
+    const bottom = Math.min(viewport.height, Math.max(...rows.map(row => row.top + row.height)) + padding);
+
+    return {
+      left,
+      top,
+      width: Math.max(80, right - left),
+      height: Math.max(80, bottom - top)
+    };
+  }
+
   async function renderPdfCanvases(pdf: pdfjsLib.PDFDocumentProxy, pages: PdfPreviewPage[], runId: number) {
     const pixelRatio = window.devicePixelRatio || 1;
 
@@ -209,37 +241,50 @@
       canvas.height = Math.floor(viewport.height * pixelRatio);
       canvas.style.width = `${viewport.width}px`;
       canvas.style.height = `${viewport.height}px`;
+      canvas.style.left = `${-pagePreview.cropLeft}px`;
+      canvas.style.top = `${-pagePreview.cropTop}px`;
       context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
       await page.render({ canvasContext: context, viewport }).promise;
     }
   }
 
-  function togglePdfBreakRow(row: PdfPreviewRow) {
+  async function togglePdfBreakRow(row: PdfPreviewRow) {
     if (!pdfLineMarkMode || pdfIsParsing) return;
-    if (isPdfRowMarked(row)) {
+    const existingMark = pdfBreakLines.find(line => line.row.id === row.id);
+    if (existingMark) {
       pdfBreakLines = pdfBreakLines.filter(line => line.row.id !== row.id);
+      if (existingMark.insertedBreak) removePdfBreakFromDraft(row);
       return;
     }
 
-    pdfBreakLines = [...pdfBreakLines, { id: nextPdfBreakLineId, row }];
+    const insertedBreak = insertPdfBreakInDraft(row);
+    pdfBreakLines = [...pdfBreakLines, { id: nextPdfBreakLineId, row, insertedBreak }];
     nextPdfBreakLineId += 1;
+    await tick();
+    rememberTextareaSelection();
   }
 
   function isPdfRowMarked(row: PdfPreviewRow) {
     return pdfBreakLines.some(line => line.row.id === row.id);
   }
 
-  function applyPdfLineBreaks(text: string) {
-    const positions = pdfBreakLines
-      .map(line => offsetForMarkedRow(text, line.row))
-      .filter((position): position is number => position !== null);
-    let result = text;
+  function insertPdfBreakInDraft(row: PdfPreviewRow) {
+    const position = offsetForMarkedRow(pdfDraftText, row);
+    if (position === null || hasParagraphBreakBefore(pdfDraftText, position)) return false;
+    pdfDraftText = insertParagraphBreakAt(pdfDraftText, position);
+    lastDraftText = pdfDraftText;
+    return true;
+  }
 
-    for (const position of Array.from(new Set(positions)).sort((a, b) => b - a)) {
-      result = insertParagraphBreakAt(result, position);
-    }
+  function removePdfBreakFromDraft(row: PdfPreviewRow) {
+    const position = offsetForMarkedRow(pdfDraftText, row);
+    if (position === null) return;
+    pdfDraftText = removeParagraphBreakBefore(pdfDraftText, position);
+    lastDraftText = pdfDraftText;
+  }
 
-    return result;
+  function hasParagraphBreakBefore(text: string, position: number) {
+    return /(?:^|[^\n])\n[ \t]*\n[ \t]*$/.test(text.slice(0, Math.max(0, position)));
   }
 
   function offsetForMarkedRow(text: string, row: PdfPreviewRow) {
@@ -280,6 +325,14 @@
     const before = text.slice(0, from).replace(/[ \t]+$/, "");
     const after = text.slice(from).replace(/^[ \t]+/, "");
     return `${before}\n\n${after}`;
+  }
+
+  function removeParagraphBreakBefore(text: string, position: number) {
+    const from = Math.max(0, Math.min(position, text.length));
+    const before = text.slice(0, from);
+    const match = before.match(/[ \t]*\n[ \t]*\n[ \t]*$/);
+    if (!match || match.index === undefined) return text;
+    return `${before.slice(0, match.index).replace(/[ \t]+$/, "")} ${text.slice(from).replace(/^[ \t]+/, "")}`;
   }
 
   function offsetsOf(text: string, needle: string) {
@@ -343,7 +396,11 @@
           {/if}
           {#each pdfPreviewPages as page}
             <div class="pdf-page" style={`width: ${page.width}px; height: ${page.height}px`}>
-              <canvas class="pdf-page-canvas" data-page-number={page.pageNumber}></canvas>
+              <canvas
+                class="pdf-page-canvas"
+                data-page-number={page.pageNumber}
+                style={`width: ${page.fullWidth}px; height: ${page.fullHeight}px; left: -${page.cropLeft}px; top: -${page.cropTop}px`}
+              ></canvas>
               <div class="pdf-text-row-layer" aria-hidden={!pdfLineMarkMode}>
                 {#each page.rows as row}
                   <button
