@@ -1387,55 +1387,19 @@
 
   .pdf-preview-pane {
     position: relative;
+    overflow: hidden;
   }
 
   .pdf-preview-pane.line-marking {
     cursor: crosshair;
   }
 
-  .pdf-frame,
   .pdf-textarea {
     width: 100%;
     height: 100%;
     border: none;
     display: block;
     box-sizing: border-box;
-  }
-
-  .pdf-frame {
-    background: #ffffff;
-  }
-
-  .pdf-line-overlay,
-  .pdf-line-layer {
-    position: absolute;
-    top: 58px;
-    right: 0;
-    bottom: 0;
-    left: 0;
-  }
-
-  .pdf-line-overlay {
-    z-index: 3;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    cursor: crosshair;
-  }
-
-  .pdf-line-layer {
-    z-index: 2;
-    pointer-events: none;
-    overflow: hidden;
-  }
-
-  .pdf-line-marker {
-    position: absolute;
-    left: 0;
-    right: 0;
-    height: 3px;
-    background: #ff2a2a;
-    box-shadow: 0 0 0 1px rgba(255, 42, 42, 0.32);
   }
 
   .pdf-textarea {
@@ -1451,6 +1415,74 @@
 
   .pdf-textarea:disabled {
     color: var(--fg-muted);
+  }
+
+  .pdf-preview-scroll {
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    padding: 14px;
+    box-sizing: border-box;
+    background: #2f302f;
+  }
+
+  .pdf-preview-status {
+    padding: 10px;
+    color: #ebdbb2;
+    font-size: 11px;
+  }
+
+  .pdf-page {
+    position: relative;
+    margin: 0 auto 14px;
+    background: #ffffff;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+  }
+
+  .pdf-page-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  .pdf-text-row-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+  }
+
+  .pdf-text-row-button {
+    position: absolute;
+    padding: 0;
+    border: none;
+    background: transparent;
+    pointer-events: none;
+  }
+
+  .pdf-preview-pane.line-marking .pdf-text-row-button {
+    pointer-events: auto;
+    cursor: crosshair;
+  }
+
+  .pdf-preview-pane.line-marking .pdf-text-row-button:hover,
+  .pdf-preview-pane.line-marking .pdf-text-row-button:focus-visible {
+    background: rgba(250, 189, 47, 0.18);
+    outline: 1px solid rgba(250, 189, 47, 0.65);
+  }
+
+  .pdf-text-row-button.marked {
+    pointer-events: auto;
+  }
+
+  .pdf-text-row-button.marked::before {
+    content: "";
+    position: absolute;
+    top: -3px;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: #ff2a2a;
+    box-shadow: 0 0 0 1px rgba(255, 42, 42, 0.32);
   }
 
   .load-confirm-btn:disabled {

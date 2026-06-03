@@ -156,7 +156,6 @@
   let transcriptionError = "";
   let themeMode = loadThemeMode();
   let loadedFileType = "Markdown";
-  $: pdfFrameSrc = pdfPreviewUrl ? `${pdfPreviewUrl}#zoom=75` : "";
   $: if (audioElement) audioElement.playbackRate = audioRates[audioRateIndex];
   $: audioRateText = audioRateLabel();
   $: showTtsWidget = ttsAvailable && !audioUrl && loadedFileType !== "SRT";
@@ -4915,7 +4914,7 @@ ${body}
 
   {#if pdfModalOpen}
     <PdfReviewModal
-      {pdfFrameSrc}
+      {pdfPreviewUrl}
       {pdfFileName}
       {pdfParseError}
       bind:pdfDraftText
