@@ -618,6 +618,12 @@
     cursor: pointer;
   }
 
+  .toolbar-btn.active,
+  .toolbar-btn[aria-pressed="true"] {
+    color: var(--yellow);
+    border-color: var(--yellow);
+  }
+
   .settings-btn {
     min-width: 30px;
     height: 28px;
@@ -1318,6 +1324,13 @@
     gap: 12px;
     padding: 10px 12px;
     border-bottom: 1px solid var(--border);
+  }
+
+  .pdf-modal-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
   }
 
   .pdf-modal-footer {

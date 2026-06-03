@@ -54,6 +54,7 @@
     srtPattern,
     srtTimestampForTranscriptLine
   } from "./lib/srt";
+  import PdfReviewModal from "./lib/PdfReviewModal.svelte";
 
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -1499,8 +1500,8 @@
     return blocks.join("\n\n");
   }
 
-  function loadPdfDraft() {
-    replaceDocument(pdfDraftText);
+  function loadPdfDraft(text = pdfDraftText) {
+    replaceDocument(text);
     closePdfModal();
   }
 
@@ -4902,40 +4903,14 @@ ${body}
   {/if}
 
   {#if pdfModalOpen}
-    <div class="pdf-modal-overlay">
-      <div class="pdf-modal" role="dialog" aria-modal="true" aria-label="Review PDF text">
-        <div class="pdf-modal-header">
-          <div>
-            <div class="pdf-modal-title">Review PDF text</div>
-            <div class="pdf-modal-file">{pdfFileName}</div>
-            <div class="pdf-modal-help">Correct the extracted text on the right, then load it into the editor.</div>
-          </div>
-          <button class="toolbar-btn" on:click={closePdfModal}>Close</button>
-        </div>
-
-        {#if pdfParseError}
-          <div class="pdf-error">{pdfParseError}</div>
-        {/if}
-
-        <div class="pdf-modal-body">
-          <div class="pdf-pane">
-            <iframe class="pdf-frame" src={pdfFrameSrc} title="PDF preview"></iframe>
-          </div>
-          <div class="pdf-pane">
-            <textarea
-              class="pdf-textarea"
-              bind:value={pdfDraftText}
-              disabled={pdfIsParsing}
-              aria-label="Extracted PDF text"
-            ></textarea>
-          </div>
-        </div>
-
-        <div class="pdf-modal-footer">
-          <span>{pdfIsParsing ? "Extracting text..." : `${pdfDraftText.length} characters`}</span>
-          <button class="toolbar-btn load-confirm-btn" on:click={loadPdfDraft} disabled={pdfIsParsing}>Load text</button>
-        </div>
-      </div>
-    </div>
+    <PdfReviewModal
+      {pdfFrameSrc}
+      {pdfFileName}
+      {pdfParseError}
+      bind:pdfDraftText
+      {pdfIsParsing}
+      {closePdfModal}
+      {loadPdfDraft}
+    />
   {/if}
 </div>
