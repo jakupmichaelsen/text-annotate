@@ -16,6 +16,10 @@
   let selectionStart = 0;
   let selectionEnd = 0;
   let lastDraftText = pdfDraftText;
+  const textareaPaddingX = 12;
+  const textareaPaddingTop = 12;
+  const textareaLineHeight = 15.95;
+  const averageCharacterWidth = 6.8;
 
   $: if (pdfDraftText !== lastDraftText) {
     lastDraftText = pdfDraftText;
@@ -60,7 +64,7 @@
   }
 
   function loadMarkedPdfDraft() {
-    loadPdfDraft(pdfDraftText);
+    loadPdfDraft(applyPdfLineBreaks(pdfDraftText));
   }
 
   function togglePdfLineMarkMode() {
@@ -72,6 +76,53 @@
     const rect = (event.currentTarget as HTMLDivElement).getBoundingClientRect();
     const y = Math.max(0, Math.min(100, ((event.clientY - rect.top) / rect.height) * 100));
     pdfBreakLines = [...pdfBreakLines, y];
+  }
+
+  function applyPdfLineBreaks(text: string) {
+    if (!textareaEl || pdfBreakLines.length === 0) return text;
+
+    const positions = pdfBreakLines
+      .map(line => offsetForPdfLine(text, line))
+      .filter((position): position is number => position !== null);
+    let result = text;
+
+    for (const position of Array.from(new Set(positions)).sort((a, b) => b - a)) {
+      result = insertParagraphBreakAt(result, position);
+    }
+
+    return result;
+  }
+
+  function offsetForPdfLine(text: string, linePercent: number) {
+    if (!textareaEl) return null;
+    const y = textareaEl.scrollTop + textareaEl.clientHeight * (linePercent / 100);
+    const visualRow = Math.max(0, Math.floor((y - textareaPaddingTop) / textareaLineHeight));
+    const wrapColumn = Math.max(12, Math.floor((textareaEl.clientWidth - textareaPaddingX * 2) / averageCharacterWidth));
+    return offsetForVisualRow(text, visualRow, wrapColumn);
+  }
+
+  function offsetForVisualRow(text: string, targetRow: number, wrapColumn: number) {
+    const lines = text.split("\n");
+    let offset = 0;
+    let row = 0;
+
+    for (const line of lines) {
+      const rowCount = Math.max(1, Math.ceil(Math.max(line.length, 1) / wrapColumn));
+      if (targetRow < row + rowCount) {
+        return offset + Math.min(line.length, (targetRow - row) * wrapColumn);
+      }
+      row += rowCount;
+      offset += line.length + 1;
+    }
+
+    return text.length;
+  }
+
+  function insertParagraphBreakAt(text: string, position: number) {
+    const from = Math.max(0, Math.min(position, text.length));
+    const before = text.slice(0, from).replace(/[ \t]+$/, "");
+    const after = text.slice(from).replace(/^[ \t]+/, "");
+    return `${before}\n\n${after}`;
   }
 </script>
 
@@ -135,7 +186,7 @@
       <span>
         {pdfIsParsing ? "Extracting text..." : `${pdfDraftText.length} characters`}
         {#if pdfBreakLines.length > 0}
-          · {pdfBreakLines.length} PDF line{pdfBreakLines.length === 1 ? "" : "s"}
+          · {pdfBreakLines.length} PDF break{pdfBreakLines.length === 1 ? "" : "s"} ready
         {/if}
         {#if manualBreakCount > 0}
           · {manualBreakCount} break{manualBreakCount === 1 ? "" : "s"} inserted
