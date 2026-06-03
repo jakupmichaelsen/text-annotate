@@ -1386,6 +1386,7 @@
   }
 
   .pdf-frame,
+  .pdf-textarea-wrap,
   .pdf-textarea {
     width: 100%;
     height: 100%;
@@ -1398,7 +1399,13 @@
     background: #ffffff;
   }
 
+  .pdf-textarea-wrap {
+    position: relative;
+  }
+
   .pdf-textarea {
+    position: relative;
+    z-index: 1;
     resize: none;
     padding: 12px;
     background: var(--bg);
@@ -1407,6 +1414,23 @@
     font-size: 11px;
     line-height: 1.45;
     outline: none;
+  }
+
+  .pdf-break-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+    overflow: hidden;
+  }
+
+  .pdf-break-marker {
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    height: 3px;
+    background: #ff2a2a;
+    box-shadow: 0 0 0 1px rgba(255, 42, 42, 0.28);
   }
 
   .pdf-textarea:disabled {
