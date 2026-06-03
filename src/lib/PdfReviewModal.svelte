@@ -11,6 +11,8 @@
 
   let textareaEl: HTMLTextAreaElement;
   let manualBreakCount = 0;
+  let pdfLineMarkMode = false;
+  let pdfBreakLines: number[] = [];
   let selectionStart = 0;
   let selectionEnd = 0;
   let lastDraftText = pdfDraftText;
@@ -60,6 +62,17 @@
   function loadMarkedPdfDraft() {
     loadPdfDraft(pdfDraftText);
   }
+
+  function togglePdfLineMarkMode() {
+    pdfLineMarkMode = !pdfLineMarkMode;
+  }
+
+  function addPdfBreakLine(event: MouseEvent) {
+    if (!pdfLineMarkMode || pdfIsParsing) return;
+    const rect = (event.currentTarget as HTMLDivElement).getBoundingClientRect();
+    const y = Math.max(0, Math.min(100, ((event.clientY - rect.top) / rect.height) * 100));
+    pdfBreakLines = [...pdfBreakLines, y];
+  }
 </script>
 
 <div class="pdf-modal-overlay">
@@ -73,9 +86,11 @@
       <div class="pdf-modal-actions">
         <button
           class="toolbar-btn"
+          class:active={pdfLineMarkMode}
           type="button"
-          on:click={insertParagraphBreak}
-          title="Insert paragraph break at cursor"
+          on:click={togglePdfLineMarkMode}
+          title="Click the PDF preview to draw a break line"
+          aria-pressed={pdfLineMarkMode}
           disabled={pdfIsParsing}
         >
           Mark break
@@ -89,8 +104,16 @@
     {/if}
 
     <div class="pdf-modal-body">
-      <div class="pdf-pane">
+      <div class="pdf-pane pdf-preview-pane" class:line-marking={pdfLineMarkMode}>
         <iframe class="pdf-frame" src={pdfFrameSrc} title="PDF preview"></iframe>
+        {#if pdfLineMarkMode}
+          <button class="pdf-line-overlay" type="button" aria-label="Place PDF break line" on:click={addPdfBreakLine}></button>
+        {/if}
+        <div class="pdf-line-layer" aria-hidden="true">
+          {#each pdfBreakLines as line}
+            <div class="pdf-line-marker" style={`top: ${line}%`}></div>
+          {/each}
+        </div>
       </div>
       <div class="pdf-pane">
         <textarea
@@ -111,6 +134,9 @@
     <div class="pdf-modal-footer">
       <span>
         {pdfIsParsing ? "Extracting text..." : `${pdfDraftText.length} characters`}
+        {#if pdfBreakLines.length > 0}
+          · {pdfBreakLines.length} PDF line{pdfBreakLines.length === 1 ? "" : "s"}
+        {/if}
         {#if manualBreakCount > 0}
           · {manualBreakCount} break{manualBreakCount === 1 ? "" : "s"} inserted
         {/if}

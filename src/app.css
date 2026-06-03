@@ -1385,6 +1385,14 @@
     border-right: none;
   }
 
+  .pdf-preview-pane {
+    position: relative;
+  }
+
+  .pdf-preview-pane.line-marking {
+    cursor: crosshair;
+  }
+
   .pdf-frame,
   .pdf-textarea {
     width: 100%;
@@ -1396,6 +1404,35 @@
 
   .pdf-frame {
     background: #ffffff;
+  }
+
+  .pdf-line-overlay,
+  .pdf-line-layer {
+    position: absolute;
+    inset: 0;
+  }
+
+  .pdf-line-overlay {
+    z-index: 3;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: crosshair;
+  }
+
+  .pdf-line-layer {
+    z-index: 2;
+    pointer-events: none;
+    overflow: hidden;
+  }
+
+  .pdf-line-marker {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: #ff2a2a;
+    box-shadow: 0 0 0 1px rgba(255, 42, 42, 0.32);
   }
 
   .pdf-textarea {
