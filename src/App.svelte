@@ -13,7 +13,6 @@
     defaultKeymap, history, historyKeymap, undo, redo,
     cursorLineStart, cursorLineEnd,
     cursorCharLeft, cursorCharRight,
-    selectAll,
     selectCharLeft, selectCharRight,
     selectLineStart, selectLineEnd
   } from "@codemirror/commands";
@@ -679,7 +678,7 @@
 
     if (event.ctrlKey) {
       if (event.key === "ArrowLeft" || event.key === "ArrowRight" || event.key === "ArrowUp" || event.key === "ArrowDown") return true;
-      return ["h", "j", "k", "l", "w", "s", "a", "d"].includes(event.key.toLowerCase());
+      return ["h", "j", "k", "l", "w", "s", "d"].includes(event.key.toLowerCase());
     }
 
     return event.key === " " ||
@@ -3947,7 +3946,6 @@ ${body}
       { key: "C", run: normal(v => moveCursorByColumnStride(v, -1)) },
       { key: "Ctrl-w", run: normal(v => navigation.paragraphBoundary(v, "start")) },
       { key: "Ctrl-s", run: normal(v => navigation.paragraphBoundary(v, "end")) },
-      { key: "Ctrl-a", run: normal(v => navigation.moveByWordCount(v, false, 5)) },
       { key: "Ctrl-d", run: normal(v => navigation.moveByWordCount(v, true, 5)) },
       // Shift variants extend selection
       { key: "H", run: normal(v => { selectCharLeft(v);  return true; }) },

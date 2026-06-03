@@ -117,7 +117,6 @@ export function buildEditorTheme(theme: ThemePalette): Extension {
       opacity: "0 !important",
       visibility: "hidden !important"
     },
-    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { backgroundColor: `${theme.orange} !important`, color: theme.bg, opacity: "50%" },
     ".cm-gutters": { backgroundColor: theme.bgHard, color: theme.gutterText, borderRight: "none" },
     ".cm-activeLine": { backgroundColor: theme.activeLine },
     ".cm-activeLineGutter": { color: theme.gutterText, backgroundColor: theme.bgHard },

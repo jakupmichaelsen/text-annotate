@@ -11,7 +11,7 @@ export const helpSections = [
       ["Ctrl+k/j", "paragraph start / end"],
       ["Ctrl+w/s", "paragraph start / end"],
       ["Ctrl+↑/↓", "paragraph start / end"],
-      ["Ctrl+a/d", "jump 5 words left / right"]
+      ["Ctrl+d", "jump 5 words right"]
     ]
   },
   {
