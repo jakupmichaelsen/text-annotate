@@ -60,6 +60,7 @@
   const layoutStorageKey = "cm6-layout-settings";
   const appSettingsStorageKey = "textAnnotate-settings";
   const notesStorageKey = "textAnnotate-notes";
+  const notesOpenStorageKey = "textAnnotate-notes-open";
   const openAiApiKeyStorageKey = "textAnnotate-openai-api-key";
   const themeStorageKey = "cm6-theme";
   const fontFamilyOptions = [
@@ -136,7 +137,8 @@
   };
   const initialAppSettings = loadAppSettings();
   let settingsTab: SettingsTab = initialAppSettings.settingsTab;
-  let divideImportSentences = initialLayoutSettings.divideImportSentences ?? true;
+  type ImportLineMode = "original" | "sentences" | "reflow";
+  let importLineMode: ImportLineMode = initialLayoutSettings.importLineMode ?? (initialLayoutSettings.divideImportSentences === false ? "original" : "sentences");
   let pdfModalOpen = false;
   let pdfDraftText = "";
   let pdfSourceLines: string[] = [];
@@ -145,6 +147,7 @@
   let pdfIsParsing = false;
   let pdfParseError = "";
   let sessionNotes = loadSessionNotes();
+  let sidebarNotesOpen = loadSidebarNotesOpen();
   let activeSaveHandle: any = null;
   let activeSaveName = "";
   let pendingAutosaveText: string | null = null;
@@ -296,7 +299,7 @@
     columnStride;
     blockquoteAlign;
     blockquoteBgWidth;
-    divideImportSentences;
+    importLineMode;
     persistLayoutSettings();
     view?.dispatch({});
   }
@@ -877,7 +880,7 @@
     if (!view) return;
     applyDocumentLoadFontPreference();
     const normalized = text.replace(/\r\n?/g, "\n").trim();
-    const insert = preserveLineBreaks || !divideImportSentences ? normalized : sentenceLineBreaks(normalized);
+    const insert = importTextForEditor(normalized, preserveLineBreaks);
     const initialCursor = firstVisibleDocumentPosition(insert);
     view.dispatch({
       changes: { from: 0, to: view.state.doc.length, insert },
@@ -886,6 +889,12 @@
     });
     removeBlockquoteMetaMarkup(view);
     view.focus();
+  }
+
+  function importTextForEditor(text: string, preserveLineBreaks = false) {
+    if (preserveLineBreaks || importLineMode === "original") return text;
+    if (importLineMode === "reflow") return reflowImportedText(text);
+    return sentenceLineBreaks(text);
   }
 
   function firstVisibleDocumentPosition(text: string) {
@@ -913,6 +922,44 @@
           .trim();
       })
       .join("\n\n");
+  }
+
+  function reflowImportedText(text: string) {
+    const columns = importReflowColumns();
+    return text
+      .replace(/\r\n?/g, "\n")
+      .split(/\n{2,}/)
+      .map(block => wrapTextBlock(block.replace(/\s*\n\s*/g, " ").replace(/[ \t]+/g, " ").trim(), columns))
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  function importReflowColumns() {
+    const editorWidth = editorEl?.clientWidth || 760;
+    const availableWidth = Math.max(120, editorWidth - padLeft - padRight);
+    const charWidth = view?.defaultCharacterWidth || fontSize * 0.58 || 8;
+    return Math.max(20, Math.min(140, Math.floor(availableWidth / charWidth)));
+  }
+
+  function wrapTextBlock(block: string, columns: number) {
+    if (!block) return "";
+    const words = block.split(/\s+/).filter(Boolean);
+    const lines: string[] = [];
+    let line = "";
+    for (const word of words) {
+      if (!line) {
+        line = word;
+        continue;
+      }
+      if (`${line} ${word}`.length > columns) {
+        lines.push(line);
+        line = word;
+      } else {
+        line += ` ${word}`;
+      }
+    }
+    if (line) lines.push(line);
+    return lines.join("\n");
   }
 
   async function loadFile(e: Event) {
@@ -995,6 +1042,11 @@
     return localStorage.getItem(notesStorageKey) ?? "";
   }
 
+  function loadSidebarNotesOpen() {
+    if (typeof localStorage === "undefined") return false;
+    return localStorage.getItem(notesOpenStorageKey) === "true";
+  }
+
   function objectFromStorage(key: string): Record<string, unknown> | null {
     if (typeof localStorage === "undefined") return null;
     const stored = localStorage.getItem(key);
@@ -1070,6 +1122,7 @@
     columnStride: number;
     blockquoteAlign: number;
     blockquoteBgWidth: number;
+    importLineMode: ImportLineMode;
     divideImportSentences: boolean;
   };
 
@@ -1141,6 +1194,9 @@
       columnStride: Math.round(numberOr("columnStride", 40, 4, 120)),
       blockquoteAlign: Math.round(numberOr("blockquoteAlign", 0, 0, 100)),
       blockquoteBgWidth: Math.round(numberOr("blockquoteBgWidth", 100, 0, 100)),
+      importLineMode: settings.importLineMode === "original" || settings.importLineMode === "sentences" || settings.importLineMode === "reflow"
+        ? settings.importLineMode
+        : undefined,
       divideImportSentences: typeof settings.divideImportSentences === "boolean" ? settings.divideImportSentences : undefined
     };
   }
@@ -1165,7 +1221,8 @@
       columnStride,
       blockquoteAlign,
       blockquoteBgWidth,
-      divideImportSentences
+      importLineMode,
+      divideImportSentences: importLineMode !== "original"
     };
     localStorage.setItem(layoutStorageKey, JSON.stringify(payload));
   }
@@ -1200,7 +1257,7 @@
     columnStride = settings.columnStride ?? columnStride;
     blockquoteAlign = settings.blockquoteAlign ?? blockquoteAlign;
     blockquoteBgWidth = settings.blockquoteBgWidth ?? blockquoteBgWidth;
-    divideImportSentences = settings.divideImportSentences ?? divideImportSentences;
+    importLineMode = settings.importLineMode ?? (settings.divideImportSentences === false ? "original" : importLineMode);
   }
 
   function applyAppSettings(settings: AppSettings) {
@@ -1254,6 +1311,11 @@
   function handleSessionNotesInput(event: Event) {
     sessionNotes = (event.target as HTMLTextAreaElement).value;
     persistSessionNotes();
+  }
+
+  function toggleSidebarNotesOpen() {
+    sidebarNotesOpen = !sidebarNotesOpen;
+    if (typeof localStorage !== "undefined") localStorage.setItem(notesOpenStorageKey, String(sidebarNotesOpen));
   }
 
   function handleOpenAiKeyInput(event: Event) {
@@ -3583,6 +3645,66 @@ ${body}
     return navigation.lineHorizontalToggle(v, direction);
   }
 
+  function clearSelectionMode() {
+    selectionMode = "none";
+    visualSelectionAnchor = null;
+    lineSelectionAnchor = null;
+  }
+
+  function toggleVisualSelectionMode(v: EditorView) {
+    if (selectionMode === "visual") {
+      clearSelectionMode();
+      return true;
+    }
+    selectionMode = "visual";
+    visualSelectionAnchor = v.state.selection.main.anchor;
+    lineSelectionAnchor = null;
+    return true;
+  }
+
+  function logicalLineSelectionRange(v: EditorView, anchorPos: number, headPos: number) {
+    const anchorLine = v.state.doc.lineAt(anchorPos);
+    const headLine = v.state.doc.lineAt(headPos);
+    return {
+      from: Math.min(anchorLine.from, headLine.from),
+      to: Math.max(anchorLine.to, headLine.to)
+    };
+  }
+
+  function startLineSelectionMode(v: EditorView) {
+    const head = v.state.selection.main.head;
+    const range = logicalLineSelectionRange(v, head, head);
+    selectionMode = "line";
+    lineSelectionAnchor = head;
+    visualSelectionAnchor = null;
+    v.dispatch({ selection: EditorSelection.range(range.from, range.to), effects: cursorScrollEffect(v, head) });
+    return true;
+  }
+
+  function runSelectionAwareNavigation(
+    v: EditorView,
+    run: (extend: boolean) => boolean,
+    options: { line?: boolean; horizontal?: boolean } = {}
+  ) {
+    if (selectionMode === "line") {
+      if (options.horizontal) return true;
+      const before = v.state.selection.main.head;
+      const handled = run(false);
+      if (!handled) return false;
+      const head = v.state.selection.main.head;
+      const range = logicalLineSelectionRange(v, lineSelectionAnchor ?? before, head);
+      v.dispatch({ selection: EditorSelection.range(range.from, range.to), effects: cursorScrollEffect(v, head) });
+      return true;
+    }
+
+    if (selectionMode === "visual") {
+      if (visualSelectionAnchor === null) visualSelectionAnchor = v.state.selection.main.anchor;
+      return run(true);
+    }
+
+    return run(false);
+  }
+
   function buildHighlightDecorator(theme = activeTheme): Extension {
     const previewPlugin = ViewPlugin.fromClass(class {
       decorations: DecorationSet;
@@ -4238,9 +4360,17 @@ ${body}
   });
 
   const normalModeKeydownBehavior = EditorView.domEventHandlers({
+    copy() {
+      if (selectionMode !== "none") setTimeout(clearSelectionMode, 0);
+      return false;
+    },
     keydown(event, v) {
       if (editorMode !== "normal") return false;
       if (event.ctrlKey || event.metaKey || event.altKey) return false;
+      if (selectionMode === "line" && ["h", "l", "q", "r", "ArrowLeft", "ArrowRight"].includes(event.key)) {
+        event.preventDefault();
+        return true;
+      }
       if (event.key !== "c" && event.key !== "C") return false;
 
       event.preventDefault();
@@ -4256,7 +4386,7 @@ ${body}
     return Prec.high(keymap.of([
       { any: (v, event) => editorMode === "normal" && handleVariantPickerKey(v, event) },
       // Always: Escape returns to normal
-      { key: "Escape", run: v => { setMode("normal"); return true; } },
+      { key: "Escape", run: v => { clearSelectionMode(); setMode("normal"); return true; } },
       // Always: F2 toggles edit/annotate
       { key: "F2", run: v => { setMode(editorMode === "insert" ? "normal" : "insert"); return true; } },
       { key: "F1", run: () => { showHelp = !showHelp; return true; } },
@@ -4268,10 +4398,10 @@ ${body}
       { key: "ArrowDown", run: v => exitBlockquoteEditForNavigation(v) },
 
       // Normal-mode only: Navigation
-      { key: "ArrowLeft",        run: normal(v => { cursorCharLeft(v);  return true; }) },
-      { key: "ArrowRight",       run: normal(v => { cursorCharRight(v); return true; }) },
-      { key: "ArrowUp",          run: normal(v => navigation.moveLineSkippingSrt(v, "up")) },
-      { key: "ArrowDown",        run: normal(v => navigation.moveLineSkippingSrt(v, "down")) },
+      { key: "ArrowLeft",        run: normal(v => runSelectionAwareNavigation(v, extend => { extend ? selectCharLeft(v) : cursorCharLeft(v); return true; }, { horizontal: true })) },
+      { key: "ArrowRight",       run: normal(v => runSelectionAwareNavigation(v, extend => { extend ? selectCharRight(v) : cursorCharRight(v); return true; }, { horizontal: true })) },
+      { key: "ArrowUp",          run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveLineSkippingSrt(v, "up", extend), { line: true })) },
+      { key: "ArrowDown",        run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveLineSkippingSrt(v, "down", extend), { line: true })) },
       { key: "Shift-ArrowLeft",  run: normal(v => { selectCharLeft(v);  return true; }) },
       { key: "Shift-ArrowRight", run: normal(v => { selectCharRight(v); return true; }) },
       { key: "Shift-ArrowUp",    run: normal(v => navigation.moveLineSkippingSrt(v, "up", true)) },
@@ -4284,20 +4414,20 @@ ${body}
       { key: "Shift-Ctrl-ArrowRight", run: normal(v => navigation.moveByWordCount(v, true, 1, true)) },
       { key: "Shift-Ctrl-ArrowUp",    run: normal(v => navigation.paragraphBoundary(v, "start", true)) },
       { key: "Shift-Ctrl-ArrowDown",  run: normal(v => navigation.paragraphBoundary(v, "end", true)) },
-      { key: "h", run: normal(v => { cursorCharLeft(v);  return true; }) },
-      { key: "j", run: normal(v => navigation.moveLineSkippingSrt(v, "down")) },
-      { key: "k", run: normal(v => navigation.moveLineSkippingSrt(v, "up")) },
-      { key: "l", run: normal(v => { cursorCharRight(v); return true; }) },
-      { key: "q", run: normal(v => { cursorCharLeft(v);  return true; }) },
-      { key: "r", run: normal(v => { cursorCharRight(v); return true; }) },
+      { key: "h", run: normal(v => runSelectionAwareNavigation(v, extend => { extend ? selectCharLeft(v) : cursorCharLeft(v); return true; }, { horizontal: true })) },
+      { key: "j", run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveLineSkippingSrt(v, "down", extend), { line: true })) },
+      { key: "k", run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveLineSkippingSrt(v, "up", extend), { line: true })) },
+      { key: "l", run: normal(v => runSelectionAwareNavigation(v, extend => { extend ? selectCharRight(v) : cursorCharRight(v); return true; }, { horizontal: true })) },
+      { key: "q", run: normal(v => runSelectionAwareNavigation(v, extend => { extend ? selectCharLeft(v) : cursorCharLeft(v); return true; }, { horizontal: true })) },
+      { key: "r", run: normal(v => runSelectionAwareNavigation(v, extend => { extend ? selectCharRight(v) : cursorCharRight(v); return true; }, { horizontal: true })) },
       { key: "Ctrl-h", run: normal(v => navigation.moveByWordCount(v, false, 1)) },
       { key: "Ctrl-j", run: normal(v => navigation.paragraphBoundary(v, "end")) },
       { key: "Ctrl-k", run: normal(v => navigation.paragraphBoundary(v, "start")) },
       { key: "Ctrl-l", run: normal(v => navigation.moveByWordCount(v, true, 1)) },
-      { key: "w", run: normal(v => navigation.moveLineSkippingSrt(v, "up")) },
-      { key: "s", run: normal(v => navigation.moveLineSkippingSrt(v, "down")) },
-      { key: "a", run: normal(v => navigation.moveByWordCount(v, false, 1)) },
-      { key: "d", run: normal(v => navigation.moveByWordCount(v, true, 1)) },
+      { key: "w", run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveLineSkippingSrt(v, "up", extend), { line: true })) },
+      { key: "s", run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveLineSkippingSrt(v, "down", extend), { line: true })) },
+      { key: "a", run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveByWordCount(v, false, 1, extend), { horizontal: true })) },
+      { key: "d", run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveByWordCount(v, true, 1, extend), { horizontal: true })) },
       { key: "c", run: normal(v => moveCursorByColumnStride(v, 1)) },
       { key: "C", run: normal(v => moveCursorByColumnStride(v, -1)) },
       { key: "Ctrl-w", run: normal(v => navigation.paragraphBoundary(v, "start")) },
@@ -4322,6 +4452,8 @@ ${body}
       { key: "Shift-Ctrl-s", run: normal(v => navigation.paragraphBoundary(v, "end", true)) },
       { key: "Shift-Ctrl-a", run: normal(v => navigation.moveByWordCount(v, false, 5, true)) },
       { key: "Shift-Ctrl-d", run: normal(v => navigation.moveByWordCount(v, true, 5, true)) },
+      { key: "v", run: normal(v => toggleVisualSelectionMode(v)) },
+      { key: "V", run: normal(v => startLineSelectionMode(v)) },
       // Normal-mode only: Annotation actions
       {
         any: (v, event) => {
@@ -4361,12 +4493,17 @@ ${body}
       { key: "Alt-ArrowLeft",  run: () => { seekAudio(-10); return true; } },
       { key: "Alt-ArrowRight", run: () => { seekAudio(10); return true; } },
       {
-        any: (_view, event) =>
-          editorMode === "normal" &&
-          event.key.length === 1 &&
-          !event.ctrlKey &&
-          !event.metaKey &&
-          !event.altKey
+        any: (_view, event) => {
+          if (
+            editorMode !== "normal" ||
+            event.key.length !== 1 ||
+            event.ctrlKey ||
+            event.metaKey ||
+            event.altKey
+          ) return false;
+          event.preventDefault();
+          return true;
+        }
       },
     ]));
   }
@@ -4728,11 +4865,23 @@ ${body}
         <div class="settings-panel">
           <section class="settings-section">
             <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">↵</span><span>Import</span></div>
-            <label class="settings-toggle-row">
-              <span class="settings-control-icon" aria-hidden="true">¶</span>
-              <span>Divide imported sentences into lines</span>
-              <input type="checkbox" bind:checked={divideImportSentences} />
-            </label>
+            <div class="settings-radio-group" aria-label="Imported line handling">
+              <label class="settings-choice-row">
+                <span class="settings-control-icon" aria-hidden="true">≡</span>
+                <span>Original lines</span>
+                <input type="radio" name="importLineMode" value="original" bind:group={importLineMode} />
+              </label>
+              <label class="settings-choice-row">
+                <span class="settings-control-icon" aria-hidden="true">.</span>
+                <span>Sentence lines</span>
+                <input type="radio" name="importLineMode" value="sentences" bind:group={importLineMode} />
+              </label>
+              <label class="settings-choice-row">
+                <span class="settings-control-icon" aria-hidden="true">↵</span>
+                <span>Reflow to margin</span>
+                <input type="radio" name="importLineMode" value="reflow" bind:group={importLineMode} />
+              </label>
+            </div>
           </section>
           <section class="settings-section">
             <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">⎋</span><span>Connection</span></div>
@@ -4805,7 +4954,8 @@ ${body}
     <div class="sidebar" class:collapsed={leftSidebarCollapsed}>
       <div class="sidebar-header">
         {#if !leftSidebarCollapsed}
-          <div class="sidebar-title">Controls</div>
+          <input type="file" accept=".srt,.txt,.md,.docx,.pdf,.mp3,.wav,.m4a,.ogg,.oga,.webm,.aac,.flac,.mp4,.mov,.mkv" multiple style="display:none" bind:this={fileInput} on:change={loadFile} />
+          <button class="sidebar-label load-btn" on:click={() => fileInput.click()}>LOAD</button>
         {/if}
         <button class="summary-icon-btn sidebar-collapse-btn" type="button" title={leftSidebarCollapsed ? "Show controls" : "Hide controls"} aria-label={leftSidebarCollapsed ? "Show controls" : "Hide controls"} on:click={() => leftSidebarCollapsed = !leftSidebarCollapsed}>
           {leftSidebarCollapsed ? "›" : "‹"}
@@ -4813,8 +4963,6 @@ ${body}
       </div>
       {#if !leftSidebarCollapsed}
       <div class="sidebar-section">
-        <input type="file" accept=".srt,.txt,.md,.docx,.pdf,.mp3,.wav,.m4a,.ogg,.oga,.webm,.aac,.flac,.mp4,.mov,.mkv" multiple style="display:none" bind:this={fileInput} on:change={loadFile} />
-        <button class="sidebar-label load-btn" on:click={() => fileInput.click()}>LOAD</button>
         <div class="file-actions">
           <button class="sidebar-label load-btn" on:click={saveDocument}>SAVE</button>
           <button class="sidebar-label load-btn" on:click={exportCleanHtml}>EXPORT</button>
@@ -4958,17 +5106,26 @@ ${body}
 
       <div class="sidebar-section sidebar-notes-section">
         <div class="sidebar-section-header">
-          <div class="sidebar-label">Notes</div>
+          <button
+            class="sidebar-label load-btn sidebar-notes-toggle"
+            type="button"
+            aria-expanded={sidebarNotesOpen}
+            on:click={toggleSidebarNotesOpen}
+          >
+            NOTES {sidebarNotesOpen ? "−" : "+"}
+          </button>
         </div>
-        <div class="sidebar-hint">Persistent scratchpad for follow-up ideas, synced locally.</div>
-        <textarea
-          class="settings-input settings-textarea sidebar-notes"
-          rows="10"
-          bind:value={sessionNotes}
-          placeholder="Write ideas, change requests, or a handoff for the next pass..."
-          aria-label="Persistent notes"
-          on:input={handleSessionNotesInput}
-        ></textarea>
+        {#if sidebarNotesOpen}
+          <div class="sidebar-hint">Persistent scratchpad for follow-up ideas, synced locally.</div>
+          <textarea
+            class="settings-input settings-textarea sidebar-notes"
+            rows="10"
+            bind:value={sessionNotes}
+            placeholder="Write ideas, change requests, or a handoff for the next pass..."
+            aria-label="Persistent notes"
+            on:input={handleSessionNotesInput}
+          ></textarea>
+        {/if}
       </div>
       {/if}
 
@@ -5245,9 +5402,9 @@ ${body}
   </div>
 
   {#if !summaryFullscreen}
-    <div class="statusbar">
+    <div class="statusbar" style="--status-accent: {editorMode === 'insert' ? activeTheme.green : activeTheme.orange}">
       <div class="status-cluster status-primary">
-        <span class="status-mode" style="--mode-color: {editorMode === 'insert' ? activeTheme.green : activeTheme.orange}">{editorModeLabel}</span>
+        <span class="status-mode">{editorModeLabel}</span>
         <span class="status-annotation" style={`--swatch-color: ${currentStyleColor}; --swatch-text: ${annotationTextColorForStyle(styleName(currentStyle), currentStyleColor)}; --status-annotation-color: ${currentStyleColor}`}>
           <span
             class="status-swatch"
