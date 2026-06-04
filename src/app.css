@@ -1807,43 +1807,6 @@
     z-index: 1;
   }
 
-  .cm-display-lineNumbers .cm-gutterElement {
-    min-width: 3.8em;
-    padding: 0 18px 0 6px;
-    box-sizing: border-box;
-  }
-
-  .cm-display-line-number-wrap {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    justify-content: flex-start;
-    min-height: 100%;
-    line-height: inherit;
-    color: var(--fg-muted);
-  }
-
-  .cm-display-line-number {
-    display: block;
-    min-height: 1lh;
-    padding: 0 3px;
-    border-radius: 2px;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .cm-display-line-number.active {
-    background: var(--active-gutter-annotate);
-    color: var(--fg);
-  }
-
-  .mode-insert .cm-display-line-number.active {
-    background: var(--active-gutter-edit);
-  }
-
-  .cm-display-line-number-timestamp .cm-display-line-number {
-    color: var(--fg-muted);
-    font-size: 10px;
-  }
   .statusbar {
     display: grid;
     grid-template-columns: minmax(220px, 1fr) minmax(0, auto) minmax(260px, 1fr);

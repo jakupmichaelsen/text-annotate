@@ -2,9 +2,9 @@
   import { onMount, tick } from "svelte";
   import { Compartment, EditorState, Prec, type Extension } from "@codemirror/state";
   import {
-    EditorView, keymap, drawSelection, runScopeHandlers,
-    gutter, ViewPlugin, Decoration,
-    GutterMarker,
+    EditorView, keymap, lineNumbers, drawSelection, runScopeHandlers,
+    highlightActiveLineGutter, ViewPlugin, Decoration,
+    GutterMarker, lineNumberMarkers,
     WidgetType, showTooltip, type Tooltip,
     type DecorationSet, type ViewUpdate
   } from "@codemirror/view";
@@ -222,9 +222,6 @@
   let blockquoteBgWidth = 100;
   let blockquoteEditReturnAnchor: number | null = null;
   let editorMode: "normal" | "insert" = "normal";
-  let selectionMode: "none" | "visual" | "line" = "none";
-  let visualSelectionAnchor: number | null = null;
-  let lineSelectionAnchor: number | null = null;
   let line = 1;
   let column = 1;
   let selectionInfo = "0 selected";
@@ -1755,7 +1752,6 @@
   function setMode(mode: "normal" | "insert") {
     const selection = view?.state.selection;
     editorMode = mode;
-    clearSelectionMode();
     if (mode === "normal") blockquoteEditReturnAnchor = null;
     if (view) {
       view.dispatch(selection ? { selection } : {});  // trigger keymap/decoration rebuild
@@ -2404,9 +2400,8 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     const sel = v.state.selection.main;
     const pos = sel.head;
     const lineInfo = v.state.doc.lineAt(pos);
-    const displayBlock = view ? visualLineBlockAt(v, pos) : null;
-    line = displayBlock ? displayLineNumberForBlock(v, displayBlock) : lineInfo.number;
-    column = pos - (displayBlock?.from ?? lineInfo.from) + 1;
+    line = lineInfo.number;
+    column = pos - lineInfo.from + 1;
     selectionInfo = `${Math.abs(sel.to - sel.from)} selected`;
     const totalWords = countWords(v.state.doc.toString());
     const selectedWords = sel.empty ? 0 : countWords(v.state.doc.sliceString(sel.from, sel.to));
@@ -3505,71 +3500,9 @@ ${body}
   const srtGutterMarkerField = StateField.define<RangeSet<GutterMarker>>({
     create: state => buildSrtGutterMarkers(state),
     update: (markers, tr) => tr.docChanged ? buildSrtGutterMarkers(tr.state) : markers,
+    provide: field => lineNumberMarkers.from(field)
   });
 
-
-  class DisplayLineGutterMarker extends GutterMarker {
-    labels: string[];
-    activeIndex: number;
-    isTimestamp: boolean;
-    startSeconds: number | null;
-
-    constructor(labels: string[], activeIndex = -1, isTimestamp = false, startSeconds: number | null = null) {
-      super();
-      this.labels = labels;
-      this.activeIndex = activeIndex;
-      this.isTimestamp = isTimestamp;
-      this.startSeconds = startSeconds;
-    }
-
-    eq(other: GutterMarker) {
-      return other instanceof DisplayLineGutterMarker &&
-        other.activeIndex === this.activeIndex &&
-        other.isTimestamp === this.isTimestamp &&
-        other.startSeconds === this.startSeconds &&
-        other.labels.length === this.labels.length &&
-        other.labels.every((label, index) => label === this.labels[index]);
-    }
-
-    toDOM() {
-      const wrap = document.createElement("span");
-      wrap.className = "cm-display-line-number-wrap";
-      if (this.isTimestamp) wrap.classList.add("cm-display-line-number-timestamp");
-      for (let index = 0; index < this.labels.length; index += 1) {
-        const line = document.createElement("span");
-        line.className = "cm-display-line-number";
-        if (index === this.activeIndex) line.classList.add("active");
-        line.textContent = this.labels[index];
-        wrap.appendChild(line);
-      }
-      if (this.startSeconds !== null) {
-        wrap.title = this.labels[0] ?? "";
-        wrap.addEventListener("mousedown", event => {
-          event.preventDefault();
-          event.stopPropagation();
-          jumpAudioToAndPlay(this.startSeconds!);
-        });
-      }
-      return wrap;
-    }
-  }
-
-  function displayLineGutterMarker(v: EditorView, block: { from: number; to: number; height: number }) {
-    const docLine = v.state.doc.lineAt(block.from);
-    const timestamp = srtTimestampForTranscriptLine(v.state, docLine.number);
-    if (isSrtTimestampLine(docLine.text)) return new DisplayLineGutterMarker([""], -1, true);
-    if (timestamp) return new DisplayLineGutterMarker([timestamp.label], -1, true, timestamp.startSeconds);
-
-    const count = displayLineCountForBlock(v, block);
-    const first = displayLineNumberForBlock(v, block);
-    const labels = Array.from({ length: count }, (_value, index) => String(first + index));
-    const headBlock = visualLineBlockAt(v, v.state.selection.main.head);
-    let activeIndex = -1;
-    if (headBlock.from >= block.from && headBlock.to <= block.to) {
-      activeIndex = Math.max(0, Math.min(count - 1, displayLineNumberForBlock(v, headBlock) - first));
-    }
-    return new DisplayLineGutterMarker(labels, activeIndex);
-  }
 
   function formatEditorLineNumber(lineNumber: number, state: EditorState) {
     const hasSrt = documentHasSrtTimestamps(state);
@@ -4175,103 +4108,6 @@ ${body}
     }
   });
 
-  function visualLineBlockAt(v: EditorView, pos: number) {
-    const getter = (v as unknown as { visualLineAt?: (pos: number) => { from: number; to: number; top: number; bottom: number; height: number } }).visualLineAt;
-    return typeof getter === "function" ? getter.call(v, pos) : v.lineBlockAt(pos);
-  }
-
-  function lineHeightPx(v: EditorView) {
-    return parseFloat(getComputedStyle(v.contentDOM).lineHeight) || fontSize * lineHeight;
-  }
-
-  function displayLineCountForBlock(v: EditorView, block: { from: number; to: number; height: number }) {
-    const px = lineHeightPx(v);
-    if (px <= 0) return 1;
-    if (block.to <= block.from) return 1;
-    return Math.max(1, Math.round(block.height / px));
-  }
-
-  function displayLineNumberForBlock(v: EditorView, block: { from: number }) {
-    let lineNumber = 1;
-    let pos = 0;
-    const seen = new Set<number>();
-    while (pos < block.from) {
-      const current = v.lineBlockAt(pos);
-      if (seen.has(current.from)) break;
-      seen.add(current.from);
-      lineNumber += displayLineCountForBlock(v, current);
-      pos = Math.max(current.to + 1, pos + 1);
-    }
-    return lineNumber;
-  }
-
-  function displayLineRangeAt(v: EditorView, pos: number) {
-    const block = visualLineBlockAt(v, Math.max(0, Math.min(pos, v.state.doc.length)));
-    return { from: block.from, to: block.to };
-  }
-
-  function selectDisplayLineRange(v: EditorView, anchorPos: number, headPos: number) {
-    const anchorLine = displayLineRangeAt(v, anchorPos);
-    const headLine = displayLineRangeAt(v, headPos);
-    const from = Math.min(anchorLine.from, headLine.from);
-    const to = Math.max(anchorLine.to, headLine.to);
-    v.dispatch({
-      selection: EditorSelection.range(from, to),
-      effects: cursorScrollEffect(v, headPos)
-    });
-  }
-
-  function clearSelectionMode() {
-    selectionMode = "none";
-    visualSelectionAnchor = null;
-    lineSelectionAnchor = null;
-  }
-
-  function toggleVisualSelectionMode(v: EditorView) {
-    if (selectionMode === "visual") {
-      clearSelectionMode();
-      return true;
-    }
-    selectionMode = "visual";
-    visualSelectionAnchor = v.state.selection.main.anchor;
-    lineSelectionAnchor = null;
-    return true;
-  }
-
-  function startLineSelectionMode(v: EditorView) {
-    const head = v.state.selection.main.head;
-    const range = displayLineRangeAt(v, head);
-    selectionMode = "line";
-    lineSelectionAnchor = head;
-    visualSelectionAnchor = null;
-    v.dispatch({ selection: EditorSelection.range(range.from, range.to), effects: cursorScrollEffect(v, head) });
-    return true;
-  }
-
-  function runSelectionAwareNavigation(
-    v: EditorView,
-    run: (extend: boolean) => boolean,
-    options: { line?: boolean; horizontal?: boolean } = {}
-  ) {
-    if (selectionMode === "line") {
-      if (options.horizontal) return true;
-      const before = v.state.selection.main.head;
-      const handled = run(false);
-      if (!handled) return false;
-      const head = v.state.selection.main.head;
-      selectDisplayLineRange(v, lineSelectionAnchor ?? before, head);
-      return true;
-    }
-
-    if (selectionMode === "visual") {
-      if (visualSelectionAnchor === null) visualSelectionAnchor = v.state.selection.main.anchor;
-      const handled = run(true);
-      return handled;
-    }
-
-    return run(false);
-  }
-
   function visualLineMeasureTarget(state: EditorState) {
     const head = state.selection.main.head;
     if (annotationMode !== "clean") return { pos: head, side: 1 };
@@ -4376,10 +4212,6 @@ ${body}
   });
 
   const dblClickBehavior = EditorView.domEventHandlers({
-    copy() {
-      if (selectionMode !== "none") setTimeout(clearSelectionMode, 0);
-      return false;
-    },
     dblclick(event, v) {
       const pos = v.posAtCoords({ x: event.clientX, y: event.clientY });
       if (pos === null) return false;
@@ -4409,10 +4241,6 @@ ${body}
     keydown(event, v) {
       if (editorMode !== "normal") return false;
       if (event.ctrlKey || event.metaKey || event.altKey) return false;
-      if (selectionMode === "line" && ["h", "l", "q", "r", "ArrowLeft", "ArrowRight"].includes(event.key)) {
-        event.preventDefault();
-        return true;
-      }
       if (event.key !== "c" && event.key !== "C") return false;
 
       event.preventDefault();
@@ -4428,7 +4256,7 @@ ${body}
     return Prec.high(keymap.of([
       { any: (v, event) => editorMode === "normal" && handleVariantPickerKey(v, event) },
       // Always: Escape returns to normal
-      { key: "Escape", run: v => { clearSelectionMode(); setMode("normal"); return true; } },
+      { key: "Escape", run: v => { setMode("normal"); return true; } },
       // Always: F2 toggles edit/annotate
       { key: "F2", run: v => { setMode(editorMode === "insert" ? "normal" : "insert"); return true; } },
       { key: "F1", run: () => { showHelp = !showHelp; return true; } },
@@ -4440,10 +4268,10 @@ ${body}
       { key: "ArrowDown", run: v => exitBlockquoteEditForNavigation(v) },
 
       // Normal-mode only: Navigation
-      { key: "ArrowLeft",        run: normal(v => runSelectionAwareNavigation(v, extend => { extend ? selectCharLeft(v) : cursorCharLeft(v); return true; }, { horizontal: true })) },
-      { key: "ArrowRight",       run: normal(v => runSelectionAwareNavigation(v, extend => { extend ? selectCharRight(v) : cursorCharRight(v); return true; }, { horizontal: true })) },
-      { key: "ArrowUp",          run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveLineSkippingSrt(v, "up", extend), { line: true })) },
-      { key: "ArrowDown",        run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveLineSkippingSrt(v, "down", extend), { line: true })) },
+      { key: "ArrowLeft",        run: normal(v => { cursorCharLeft(v);  return true; }) },
+      { key: "ArrowRight",       run: normal(v => { cursorCharRight(v); return true; }) },
+      { key: "ArrowUp",          run: normal(v => navigation.moveLineSkippingSrt(v, "up")) },
+      { key: "ArrowDown",        run: normal(v => navigation.moveLineSkippingSrt(v, "down")) },
       { key: "Shift-ArrowLeft",  run: normal(v => { selectCharLeft(v);  return true; }) },
       { key: "Shift-ArrowRight", run: normal(v => { selectCharRight(v); return true; }) },
       { key: "Shift-ArrowUp",    run: normal(v => navigation.moveLineSkippingSrt(v, "up", true)) },
@@ -4456,20 +4284,20 @@ ${body}
       { key: "Shift-Ctrl-ArrowRight", run: normal(v => navigation.moveByWordCount(v, true, 1, true)) },
       { key: "Shift-Ctrl-ArrowUp",    run: normal(v => navigation.paragraphBoundary(v, "start", true)) },
       { key: "Shift-Ctrl-ArrowDown",  run: normal(v => navigation.paragraphBoundary(v, "end", true)) },
-      { key: "h", run: normal(v => runSelectionAwareNavigation(v, extend => { extend ? selectCharLeft(v) : cursorCharLeft(v); return true; }, { horizontal: true })) },
-      { key: "j", run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveLineSkippingSrt(v, "down", extend), { line: true })) },
-      { key: "k", run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveLineSkippingSrt(v, "up", extend), { line: true })) },
-      { key: "l", run: normal(v => runSelectionAwareNavigation(v, extend => { extend ? selectCharRight(v) : cursorCharRight(v); return true; }, { horizontal: true })) },
-      { key: "q", run: normal(v => runSelectionAwareNavigation(v, extend => { extend ? selectCharLeft(v) : cursorCharLeft(v); return true; }, { horizontal: true })) },
-      { key: "r", run: normal(v => runSelectionAwareNavigation(v, extend => { extend ? selectCharRight(v) : cursorCharRight(v); return true; }, { horizontal: true })) },
+      { key: "h", run: normal(v => { cursorCharLeft(v);  return true; }) },
+      { key: "j", run: normal(v => navigation.moveLineSkippingSrt(v, "down")) },
+      { key: "k", run: normal(v => navigation.moveLineSkippingSrt(v, "up")) },
+      { key: "l", run: normal(v => { cursorCharRight(v); return true; }) },
+      { key: "q", run: normal(v => { cursorCharLeft(v);  return true; }) },
+      { key: "r", run: normal(v => { cursorCharRight(v); return true; }) },
       { key: "Ctrl-h", run: normal(v => navigation.moveByWordCount(v, false, 1)) },
       { key: "Ctrl-j", run: normal(v => navigation.paragraphBoundary(v, "end")) },
       { key: "Ctrl-k", run: normal(v => navigation.paragraphBoundary(v, "start")) },
       { key: "Ctrl-l", run: normal(v => navigation.moveByWordCount(v, true, 1)) },
-      { key: "w", run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveLineSkippingSrt(v, "up", extend), { line: true })) },
-      { key: "s", run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveLineSkippingSrt(v, "down", extend), { line: true })) },
-      { key: "a", run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveByWordCount(v, false, 1, extend), { horizontal: true })) },
-      { key: "d", run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveByWordCount(v, true, 1, extend), { horizontal: true })) },
+      { key: "w", run: normal(v => navigation.moveLineSkippingSrt(v, "up")) },
+      { key: "s", run: normal(v => navigation.moveLineSkippingSrt(v, "down")) },
+      { key: "a", run: normal(v => navigation.moveByWordCount(v, false, 1)) },
+      { key: "d", run: normal(v => navigation.moveByWordCount(v, true, 1)) },
       { key: "c", run: normal(v => moveCursorByColumnStride(v, 1)) },
       { key: "C", run: normal(v => moveCursorByColumnStride(v, -1)) },
       { key: "Ctrl-w", run: normal(v => navigation.paragraphBoundary(v, "start")) },
@@ -4494,8 +4322,6 @@ ${body}
       { key: "Shift-Ctrl-s", run: normal(v => navigation.paragraphBoundary(v, "end", true)) },
       { key: "Shift-Ctrl-a", run: normal(v => navigation.moveByWordCount(v, false, 5, true)) },
       { key: "Shift-Ctrl-d", run: normal(v => navigation.moveByWordCount(v, true, 5, true)) },
-      { key: "v", run: normal(v => toggleVisualSelectionMode(v)) },
-      { key: "V", run: normal(v => startLineSelectionMode(v)) },
       // Normal-mode only: Annotation actions
       {
         any: (v, event) => {
@@ -4550,17 +4376,25 @@ ${body}
       dblClickBehavior,
       normalModeKeydownBehavior,
       EditorView.lineWrapping,
-      gutter({
-        class: "cm-display-lineNumbers",
-        renderEmptyElements: true,
-        lineMarker: (v, block) => displayLineGutterMarker(v, block),
-        lineMarkerChange: update => update.docChanged || update.selectionSet || update.geometryChanged || update.viewportChanged || update.transactions.length > 0,
-        initialSpacer: () => new DisplayLineGutterMarker(["0000"])
+      lineNumbers({
+        formatNumber: formatEditorLineNumber,
+        domEventHandlers: {
+          mousedown: (v, line, event) => {
+            const docLine = v.state.doc.lineAt(line.from);
+            const timestamp = srtTimestampForTranscriptLine(v.state, docLine.number);
+            if (!timestamp || timestamp.startSeconds === null) return false;
+            event.preventDefault();
+            event.stopPropagation();
+            jumpAudioToAndPlay(timestamp.startSeconds);
+            return true;
+          }
+        }
       }),
       drawSelection(),
       history(),
       indentOnInput(),
       bracketMatching(),
+      highlightActiveLineGutter(),
       buildKeymap(),
       keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
       markdown({ base: markdownLanguage }),
