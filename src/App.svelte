@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { Compartment, EditorState, Prec, type Extension } from "@codemirror/state";
+  import { Compartment, EditorState, type Extension } from "@codemirror/state";
   import {
     EditorView, keymap, lineNumbers, drawSelection, runScopeHandlers,
     highlightActiveLineGutter, ViewPlugin, Decoration,
@@ -52,6 +52,14 @@
     srtPattern,
     srtTimestampForTranscriptLine
   } from "./lib/srt";
+  import {
+    isAudioRateShortcut,
+    isAudioShortcut,
+    isAppShortcutCandidate,
+    isModeShortcut,
+    normalizeStyleKey,
+    reservedStyleKeys
+  } from "./lib/keyboard";
   import PdfReviewModal from "./lib/PdfReviewModal.svelte";
 
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -272,7 +280,6 @@
   const styleTitlesStorageKey = "cm6-style-titles";
   const styleKeysStorageKey = "cm6-style-keys";
   const defaultStyleKeyOrder = ["1", "2", "3"];
-  const reservedStyleKeys = new Set(["h", "j", "k", "l", "w", "a", "s", "d", "c", "q", "r", "e", "n", "u", "x", "?", " "]);
   let customStyles = loadCustomStyles();
   let styleTitles = loadStyleTitles();
   let styleKeys = loadStyleKeys();
@@ -750,44 +757,6 @@
 
   function isEditorEventTarget(target: EventTarget | null) {
     return target instanceof Node && !!view?.dom.contains(target);
-  }
-
-  function isModeShortcut(event: KeyboardEvent) {
-    return !event.ctrlKey && !event.metaKey && !event.altKey && (event.key === "Escape" || event.key === "F1" || event.key === "F2");
-  }
-
-  function isAudioShortcut(event: KeyboardEvent) {
-    const key = event.key.toLowerCase();
-    return event.altKey && !event.ctrlKey && !event.metaKey &&
-      (event.key === " " || event.key === "ArrowLeft" || event.key === "Left" || event.key === "ArrowRight" || event.key === "Right" ||
-        key === "a" || key === "d" || key === "s" || key === "w");
-  }
-
-  function isAudioRateShortcut(event: KeyboardEvent) {
-    return event.altKey && !event.ctrlKey && !event.metaKey && (event.key.toLowerCase() === "r" || event.key.toLowerCase() === "w");
-  }
-
-  function isAppShortcutCandidate(event: KeyboardEvent) {
-    if (event.metaKey) return false;
-    if (isModeShortcut(event) || isAudioShortcut(event) || isAudioRateShortcut(event)) return true;
-    if (event.ctrlKey && !event.altKey && (event.key === "z" || event.key === "y" || event.key === "Z")) return true;
-    if (editorMode !== "normal" || event.altKey) return false;
-    if (!event.ctrlKey && (styleNumberForKey(event.key) !== null || event.key === "Tab")) return true;
-
-    if (event.ctrlKey) {
-      if (event.key === "ArrowLeft" || event.key === "ArrowRight" || event.key === "ArrowUp" || event.key === "ArrowDown") return true;
-      return ["h", "j", "k", "l", "w", "s", "d"].includes(event.key.toLowerCase());
-    }
-
-    return event.key === " " ||
-      event.key === "Tab" ||
-      event.key === "Enter" ||
-      event.key === "?" ||
-      event.key === "ArrowLeft" ||
-      event.key === "ArrowRight" ||
-      event.key === "ArrowUp" ||
-      event.key === "ArrowDown" ||
-      "hjklwasdcqrHJKLWASDCQRfxeqnNuU".includes(event.key);
   }
 
   function shouldDeferWindowShortcut(event: KeyboardEvent) {
@@ -1927,12 +1896,6 @@
     if (normalized === "0") return 0;
     const index = highlightStyles.findIndex(style => styleKeyForName(style.name) === normalized);
     return index < 0 ? null : index + 1;
-  }
-
-  function normalizeStyleKey(key: string) {
-    if (key.length !== 1 || /\s/.test(key)) return "";
-    const normalized = key.toLowerCase();
-    return normalized === "0" || !reservedStyleKeys.has(normalized) ? normalized : "";
   }
 
   function defaultStyleKeyForName(name: string) {
@@ -4350,129 +4313,6 @@ ${body}
     }
   });
 
-  // Custom keymap — all app-specific bindings
-  function buildKeymap() {
-    const normal = (fn: (v: EditorView) => boolean) =>
-      (v: EditorView) => editorMode === "normal" ? fn(v) : false;
-
-    return Prec.high(keymap.of([
-      { any: (v, event) => editorMode === "normal" && handleVariantPickerKey(v, event) },
-      // Always: Escape returns to normal
-      { key: "Escape", run: v => { setMode("normal"); return true; } },
-      // Always: F2 toggles edit/annotate
-      { key: "F2", run: v => { setMode(editorMode === "insert" ? "normal" : "insert"); return true; } },
-      { key: "F1", run: () => { showHelp = !showHelp; return true; } },
-      { key: "Enter", run: v => finishBlockquoteEditMode(v) },
-      { key: "Shift-Enter", run: v => insertBlockquoteLineBreak(v) },
-      { key: "Alt-Enter", run: v => insertBlockquoteLineBreak(v) },
-      { key: "Tab", run: v => insertBlockquoteLevel(v) },
-      { key: "ArrowUp", run: v => exitBlockquoteEditForNavigation(v) },
-      { key: "ArrowDown", run: v => exitBlockquoteEditForNavigation(v) },
-
-      // Normal-mode only: Navigation
-      { key: "ArrowLeft",        run: normal(v => { cursorCharLeft(v);  return true; }) },
-      { key: "ArrowRight",       run: normal(v => { cursorCharRight(v); return true; }) },
-      { key: "ArrowUp",          run: normal(v => navigation.moveLineSkippingSrt(v, "up")) },
-      { key: "ArrowDown",        run: normal(v => navigation.moveLineSkippingSrt(v, "down")) },
-      { key: "Shift-ArrowLeft",  run: normal(v => { selectCharLeft(v);  return true; }) },
-      { key: "Shift-ArrowRight", run: normal(v => { selectCharRight(v); return true; }) },
-      { key: "Shift-ArrowUp",    run: normal(v => navigation.moveLineSkippingSrt(v, "up", true)) },
-      { key: "Shift-ArrowDown",  run: normal(v => navigation.moveLineSkippingSrt(v, "down", true)) },
-      { key: "Ctrl-ArrowLeft",        run: normal(v => navigation.moveByWordCount(v, false, 1)) },
-      { key: "Ctrl-ArrowRight",       run: normal(v => navigation.moveByWordCount(v, true, 1)) },
-      { key: "Ctrl-ArrowUp",          run: normal(v => navigation.paragraphBoundary(v, "start")) },
-      { key: "Ctrl-ArrowDown",        run: normal(v => navigation.paragraphBoundary(v, "end")) },
-      { key: "Shift-Ctrl-ArrowLeft",  run: normal(v => navigation.moveByWordCount(v, false, 1, true)) },
-      { key: "Shift-Ctrl-ArrowRight", run: normal(v => navigation.moveByWordCount(v, true, 1, true)) },
-      { key: "Shift-Ctrl-ArrowUp",    run: normal(v => navigation.paragraphBoundary(v, "start", true)) },
-      { key: "Shift-Ctrl-ArrowDown",  run: normal(v => navigation.paragraphBoundary(v, "end", true)) },
-      { key: "h", run: normal(v => { cursorCharLeft(v);  return true; }) },
-      { key: "j", run: normal(v => navigation.moveLineSkippingSrt(v, "down")) },
-      { key: "k", run: normal(v => navigation.moveLineSkippingSrt(v, "up")) },
-      { key: "l", run: normal(v => { cursorCharRight(v); return true; }) },
-      { key: "q", run: normal(v => { cursorCharLeft(v);  return true; }) },
-      { key: "r", run: normal(v => { cursorCharRight(v); return true; }) },
-      { key: "Ctrl-h", run: normal(v => navigation.moveByWordCount(v, false, 1)) },
-      { key: "Ctrl-j", run: normal(v => navigation.paragraphBoundary(v, "end")) },
-      { key: "Ctrl-k", run: normal(v => navigation.paragraphBoundary(v, "start")) },
-      { key: "Ctrl-l", run: normal(v => navigation.moveByWordCount(v, true, 1)) },
-      { key: "w", run: normal(v => navigation.moveLineSkippingSrt(v, "up")) },
-      { key: "s", run: normal(v => navigation.moveLineSkippingSrt(v, "down")) },
-      { key: "a", run: normal(v => navigation.moveByWordCount(v, false, 1)) },
-      { key: "d", run: normal(v => navigation.moveByWordCount(v, true, 1)) },
-      { key: "c", run: normal(v => moveCursorByColumnStride(v, 1)) },
-      { key: "C", run: normal(v => moveCursorByColumnStride(v, -1)) },
-      { key: "Ctrl-w", run: normal(v => navigation.paragraphBoundary(v, "start")) },
-      { key: "Ctrl-s", run: normal(v => navigation.paragraphBoundary(v, "end")) },
-      { key: "Ctrl-d", run: normal(v => navigation.moveByWordCount(v, true, 5)) },
-      // Shift variants extend selection
-      { key: "H", run: normal(v => { selectCharLeft(v);  return true; }) },
-      { key: "J", run: normal(v => navigation.moveLineSkippingSrt(v, "down", true)) },
-      { key: "K", run: normal(v => navigation.moveLineSkippingSrt(v, "up", true)) },
-      { key: "L", run: normal(v => { selectCharRight(v); return true; }) },
-      { key: "Q", run: normal(v => { selectCharLeft(v);  return true; }) },
-      { key: "R", run: normal(v => { selectCharRight(v); return true; }) },
-      { key: "Shift-Ctrl-h", run: normal(v => navigation.moveByWordCount(v, false, 1, true)) },
-      { key: "Shift-Ctrl-j", run: normal(v => navigation.paragraphBoundary(v, "end", true)) },
-      { key: "Shift-Ctrl-k", run: normal(v => navigation.paragraphBoundary(v, "start", true)) },
-      { key: "Shift-Ctrl-l", run: normal(v => navigation.moveByWordCount(v, true, 1, true)) },
-      { key: "W", run: normal(v => navigation.moveLineSkippingSrt(v, "up", true)) },
-      { key: "S", run: normal(v => navigation.moveLineSkippingSrt(v, "down", true)) },
-      { key: "A", run: normal(v => navigation.moveByWordCount(v, false, 1, true)) },
-      { key: "D", run: normal(v => navigation.moveByWordCount(v, true, 1, true)) },
-      { key: "Shift-Ctrl-w", run: normal(v => navigation.paragraphBoundary(v, "start", true)) },
-      { key: "Shift-Ctrl-s", run: normal(v => navigation.paragraphBoundary(v, "end", true)) },
-      { key: "Shift-Ctrl-a", run: normal(v => navigation.moveByWordCount(v, false, 5, true)) },
-      { key: "Shift-Ctrl-d", run: normal(v => navigation.moveByWordCount(v, true, 5, true)) },
-      // Normal-mode only: Annotation actions
-      {
-        any: (v, event) => {
-          if (
-            editorMode !== "normal" ||
-            event.key.length !== 1 ||
-            event.ctrlKey ||
-            event.metaKey ||
-            event.altKey
-          ) return false;
-          const style = styleNumberForKey(event.key);
-          return style === null ? false : setAnnotationColorOrStyle(v, style);
-        }
-      },
-      { key: "Space",  run: normal(v => wrapSelectionOrWord(v, currentStyle)) },
-      { key: "Enter",  run: normal(v => handleEnterInAnnotationMode(v)) },
-      { key: "x",      run: normal(v => removeAnnotationOrDelete(v)) },
-      { key: "Tab",    run: normal(v => cycleAnnotationVariant(v, +1)) },
-      { key: "Shift-Tab", run: normal(v => cycleAnnotationVariant(v, -1)) },
-      { key: "e",      run: normal(v => cycleAnnotationVariant(v, +1)) },
-      { key: "f",      run: normal(() => { toggleMediaPlayback(); return true; }) },
-      { key: "n",      run: normal(v => enterBlockquoteEditMode(v)) },
-      { key: "N",      run: normal(v => { if (!cycleAnnotationColor(v, -1)) cycleStyle(-1); return true; }) },
-      // Undo/redo (both modes)
-      { key: "u",      run: normal(v => undo(v)) },
-      { key: "U",      run: normal(v => redo(v)) },
-      { key: "Ctrl-z", run: v => undo(v) },
-      { key: "Ctrl-y", run: v => redo(v) },
-      { key: "Ctrl-Z", run: v => redo(v) },
-      { key: "?",      run: normal(() => { showHelp = !showHelp; return true; }) },
-      { key: "Alt-r", run: () => { cycleAudioRate(); return true; } },
-      { key: "Alt-w", run: () => { handleMediaShortcut("w"); return true; } },
-      { key: "Alt-a", run: () => { handleMediaShortcut("a"); return true; } },
-      { key: "Alt-s", run: () => { handleMediaShortcut("s"); return true; } },
-      { key: "Alt-d", run: () => { handleMediaShortcut("d"); return true; } },
-      { key: "Alt-Space",  run: () => { toggleMediaPlayback(); return true; } },
-      { key: "Alt-ArrowLeft",  run: () => { seekAudio(-10); return true; } },
-      { key: "Alt-ArrowRight", run: () => { seekAudio(10); return true; } },
-      {
-        any: (_view, event) =>
-          editorMode === "normal" &&
-          event.key.length === 1 &&
-          !event.ctrlKey &&
-          !event.metaKey &&
-          !event.altKey
-      },
-    ]));
-  }
-
   function baseExtensions(): Extension[] {
     return [
       dblClickBehavior,
@@ -4497,7 +4337,37 @@ ${body}
       indentOnInput(),
       bracketMatching(),
       highlightActiveLineGutter(),
-      buildKeymap(),
+      buildEditorKeymap({
+        getEditorMode: () => editorMode,
+        handleVariantPickerKey,
+        setAnnotationColorOrStyle,
+        setMode: mode => { setMode(mode); return true; },
+        toggleHelp: () => { showHelp = !showHelp; return true; },
+        finishBlockquoteEditMode,
+        insertBlockquoteLineBreak,
+        insertBlockquoteLevel,
+        exitBlockquoteEditForNavigation,
+        cursorCharLeft,
+        cursorCharRight,
+        selectCharLeft,
+        selectCharRight,
+        navigation,
+        moveCursorByColumnStride,
+        wrapSelectionOrWord,
+        currentStyle: () => currentStyle,
+        handleEnterInAnnotationMode,
+        removeAnnotationOrDelete,
+        cycleAnnotationVariant,
+        toggleMediaPlayback,
+        enterBlockquoteEditMode,
+        cycleAnnotationColor,
+        cycleStyle,
+        undo,
+        redo,
+        handleMediaShortcut,
+        seekAudio,
+        styleNumberForKey
+      }),
       keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
       markdown({ base: markdownLanguage }),
       statusPlugin,
