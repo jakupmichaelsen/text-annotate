@@ -1697,7 +1697,7 @@
   }
 
   .active-line-fill .cm-visual-line-marker.is-edit {
-    background: var(--active-line-edit);
+    display: none !important;
   }
 
   .active-line-underline .cm-visual-line-marker {
@@ -1706,7 +1706,7 @@
   }
 
   .active-line-underline .cm-visual-line-marker.is-edit {
-    border-bottom-color: var(--active-line-edit);
+    display: none !important;
   }
 
   .active-line-borders .cm-visual-line-marker {
@@ -1717,8 +1717,7 @@
   }
 
   .active-line-borders .cm-visual-line-marker.is-edit {
-    border-top-color: var(--active-line-edit);
-    border-bottom-color: var(--active-line-edit);
+    display: none !important;
   }
   .cm-column-guide {
     position: absolute;
@@ -1727,6 +1726,9 @@
     background: var(--orange);
     opacity: 0.45;
     pointer-events: none;
+  }
+  .mode-insert .cm-column-guide {
+    display: none !important;
   }
   .cm-summary-jump-flash {
     animation: summary-jump-flash 850ms ease-out;

@@ -364,6 +364,21 @@
     }
   }
 
+  async function clearPersistedAudioFile() {
+    try {
+      const db = await openAudioDb();
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(audioStoreName, "readwrite");
+        tx.objectStore(audioStoreName).delete("current");
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+      db.close();
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
   async function restoreAudioFile() {
     try {
       const db = await openAudioDb();
@@ -899,34 +914,53 @@
     if (!files.length) return;
     clearActiveSaveTarget();
     const audioFile = files.find(isMediaFile);
-    const srtFile = files.find(file => file.name.toLowerCase().endsWith(".srt"));
+    const documentFiles = files.filter(file => !isMediaFile(file));
     if (audioFile) await loadAudioFile(audioFile);
-    if (srtFile) {
-      loadedFileType = "SRT";
-      replaceDocument(formatSrtTranscript(await srtFile.text()), true);
-      return;
+    else if (documentFiles.length) {
+      clearAudioTarget();
+      await clearPersistedAudioFile();
     }
+    if (!documentFiles.length) return;
 
-    const file = files.find(file => !isMediaFile(file));
-    if (!file) return;
-
-    if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+    if (documentFiles.length === 1 && isPdfFile(documentFiles[0])) {
       loadedFileType = "PDF";
-      await openPdfModal(file);
+      await openPdfModal(documentFiles[0]);
       return;
     }
 
+    const documents = await Promise.all(documentFiles.map(documentTextFromFile));
+    const multiple = documents.length > 1;
+    const combined = documents
+      .map(document => multiple ? `# ${document.file.name}\n\n${document.text}` : document.text)
+      .join("\n\n");
+    loadedFileType = multiple ? "MULTI" : documents[0]?.type ?? "TEXT";
+    replaceDocument(combined, documents.some(document => document.preserveLineBreaks));
+  }
+
+  async function documentTextFromFile(file: File) {
+    if (file.name.toLowerCase().endsWith(".srt")) {
+      return { file, type: "SRT", text: formatSrtTranscript(await file.text()), preserveLineBreaks: true };
+    }
+    if (isPdfFile(file)) {
+      const extracted = await extractPdfText(file);
+      return { file, type: "PDF", text: extracted.text || "", preserveLineBreaks: false };
+    }
     if (file.name.toLowerCase().endsWith(".docx")) {
-      loadedFileType = "DOCX";
       const buffer = await file.arrayBuffer();
       const mammoth = await import("mammoth");
       const result = await mammoth.extractRawText({ arrayBuffer: buffer });
-      replaceDocument(stripEmptyLines(result.value));
-      return;
+      return { file, type: "DOCX", text: stripEmptyLines(result.value), preserveLineBreaks: false };
     }
+    return {
+      file,
+      type: file.name.split(".").pop()?.toUpperCase() || "TEXT",
+      text: stripEmptyLines(await file.text()),
+      preserveLineBreaks: false
+    };
+  }
 
-    loadedFileType = file.name.split(".").pop()?.toUpperCase() || "TEXT";
-    replaceDocument(stripEmptyLines(await file.text()));
+  function isPdfFile(file: File) {
+    return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
   }
 
   function isMediaFile(file: File) {
@@ -4192,8 +4226,8 @@ ${body}
       { any: (v, event) => editorMode === "normal" && handleVariantPickerKey(v, event) },
       // Always: Escape returns to normal
       { key: "Escape", run: v => { setMode("normal"); return true; } },
-      // Always: F2 enters edit
-      { key: "F2", run: v => { setMode("insert"); return true; } },
+      // Always: F2 toggles edit/annotate
+      { key: "F2", run: v => { setMode(editorMode === "insert" ? "normal" : "insert"); return true; } },
       { key: "F1", run: () => { showHelp = !showHelp; return true; } },
       { key: "Enter", run: v => finishBlockquoteEditMode(v) },
       { key: "Shift-Enter", run: v => insertBlockquoteLineBreak(v) },
@@ -4747,7 +4781,7 @@ ${body}
     <div class="sidebar">
       <div class="sidebar-section">
         <input type="file" accept=".srt,.txt,.md,.docx,.pdf,.mp3,.wav,.m4a,.ogg,.oga,.webm,.aac,.flac,.mp4,.mov,.mkv" multiple style="display:none" bind:this={fileInput} on:change={loadFile} />
-        <button class="sidebar-label load-btn" on:click={() => fileInput.click()}>LOAD FILE(S)...</button>
+        <button class="sidebar-label load-btn" on:click={() => fileInput.click()}>LOAD</button>
         <div class="file-actions">
           <button class="sidebar-label load-btn" on:click={saveDocument}>Save</button>
           <button class="sidebar-label load-btn" on:click={exportCleanHtml}>Export</button>
