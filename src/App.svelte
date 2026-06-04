@@ -193,6 +193,7 @@
   type AnnotationStyle = { name: string; color: string; colorName?: string; custom?: boolean };
   type AnnotationVariant = "fill" | "box" | "underline" | "rail" | "bars";
   const annotationVariants: AnnotationVariant[] = ["fill", "box", "underline", "rail", "bars"];
+  type AnnotationPreview = { from: number; to: number; style: number; variant: AnnotationVariant };
   const namedStyleColors = [
     { name: "steel", color: "#83a598" },
     { name: "orange", color: "#fe8019" },
@@ -209,6 +210,7 @@
     { name: "purple", color: "#d3869b" }
   ];
   let currentAnnotationVariant: AnnotationVariant = "fill";
+  let annotationPreview: AnnotationPreview | null = null;
   let variantPickerOpen = false;
   let addStyleModalOpen = false;
   let newStyleColorName = "steel";
@@ -1823,8 +1825,44 @@
     return `${base}color:${theme.fg};border-left:2px solid ${color};border-right:2px solid ${color};`;
   }
 
+  function annotationStyleForPreview(style: number) {
+    return style === 0 ? "" : styleName(style);
+  }
+
+  function annotationVariantForPreview() {
+    return annotationPreview?.variant ?? currentAnnotationVariant;
+  }
+
+  function setAnnotationPreview(v: EditorView, style = currentStyle, variant = currentAnnotationVariant) {
+    const range = v.state.selection.main;
+    if (range.empty) return false;
+    annotationPreview = {
+      from: Math.min(range.from, range.to),
+      to: Math.max(range.from, range.to),
+      style,
+      variant
+    };
+    currentStyle = style;
+    currentAnnotationVariant = variant;
+    v.dispatch({});
+    return true;
+  }
+
+  function refreshAnnotationPreviewForSelection(v: EditorView) {
+    if (!annotationPreview) return;
+    const range = v.state.selection.main;
+    if (
+      range.empty ||
+      annotationPreview.from !== Math.min(range.from, range.to) ||
+      annotationPreview.to !== Math.max(range.from, range.to)
+    ) {
+      annotationPreview = null;
+    }
+  }
+
   function setAnnotationVariant(v: EditorView, variant: AnnotationVariant) {
     currentAnnotationVariant = variant;
+    if (setAnnotationPreview(v, currentStyle, variant)) return true;
     const cursor = v.state.selection.main.head;
     const docText = v.state.doc.toString();
     annotationPattern.lastIndex = 0;
@@ -1843,6 +1881,14 @@
 
   function cycleAnnotationVariant(v: EditorView | null, delta: number) {
     if (v) {
+      const range = v.state.selection.main;
+      if (!range.empty) {
+        const current = annotationVariantForPreview();
+        const index = annotationVariants.indexOf(current);
+        const next = annotationVariants[(index + delta + annotationVariants.length) % annotationVariants.length];
+        return setAnnotationPreview(v, currentStyle, next);
+      }
+
       const cursor = v.state.selection.main.head;
       const docText = v.state.doc.toString();
       annotationPattern.lastIndex = 0;
@@ -3288,7 +3334,7 @@ ${body}
       setTimeout(() => input.focus(), 0);
       return wrap;
     }
-    ignoreEvent() { return false; }
+    ignoreEvent() { return true; }
   }
 
   class EmptyWidget extends WidgetType {
@@ -3466,6 +3512,34 @@ ${body}
   }
 
   function buildHighlightDecorator(theme = activeTheme): Extension {
+    const previewPlugin = ViewPlugin.fromClass(class {
+      decorations: DecorationSet;
+      constructor(v: EditorView) { this.decorations = this.build(v); }
+      update(u: ViewUpdate) {
+        if (u.docChanged || u.viewportChanged || u.selectionSet || u.transactions.length > 0)
+          this.decorations = this.build(u.view);
+      }
+      build(v: EditorView): DecorationSet {
+        const preview = annotationPreview;
+        if (!preview) return Decoration.none;
+        const range = v.state.selection.main;
+        if (
+          range.empty ||
+          preview.from !== Math.min(range.from, range.to) ||
+          preview.to !== Math.max(range.from, range.to)
+        ) return Decoration.none;
+
+        const style = annotationStyleForPreview(preview.style);
+        const color = preview.style === 0 ? theme.orange : annotationColorForStyle(style, theme);
+        const css = preview.style === 0
+          ? `background-color:color-mix(in srgb, ${color} 16%, transparent);color:${theme.fg};border-bottom:2px solid ${color};border-radius:3px;padding:0 2px;`
+          : annotationMarkCss(style, preview.variant, color, theme);
+        return Decoration.set([
+          Decoration.mark({ attributes: { style: css }, inclusive: false }).range(preview.from, preview.to)
+        ]);
+      }
+    }, { decorations: v => v.decorations });
+
     const plugin = ViewPlugin.fromClass(class {
       decorations: DecorationSet;
       constructor(v: EditorView) { this.decorations = this.build(v); }
@@ -3633,7 +3707,7 @@ ${body}
         if (beforeWord) return beforeWord;
 
         const afterWord = snapSelectionAroundProtectedRange(tr, {
-          from: wordEnd,
+          from: wordEnd + 1,
           to: spanEnd,
           leftExit: wordEnd,
           rightExit: spanEnd
@@ -3664,24 +3738,35 @@ ${body}
       return tr;
     });
 
-    return [plugin, plainTheme, plainPlugin, atomicPlugin, srtPlugin, snapFilter, srtSnapFilter];
+    return [plugin, previewPlugin, plainTheme, plainPlugin, atomicPlugin, srtPlugin, snapFilter, srtSnapFilter];
   }
 
   function wrapSelectionOrWord(v: EditorView, style: number = 0) {
     const state = v.state;
     const range = state.selection.main;
+    const preview = annotationPreview &&
+      !range.empty &&
+      annotationPreview.from === Math.min(range.from, range.to) &&
+      annotationPreview.to === Math.max(range.from, range.to)
+        ? annotationPreview
+        : null;
+    const appliedStyle = preview?.style ?? style;
+    const appliedVariant = preview?.variant ?? currentAnnotationVariant;
     const makeInsert = (text: string): string => {
-      if (style === 0) return `\`${text}\``;
+      if (appliedStyle === 0) return `\`${text}\``;
       const now = new Date();
       const ts = now.toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).replace(/,/g, "");
-      const name = styleName(style);
+      const name = styleName(appliedStyle);
       const title = customStyleTitle(name);
       const titlePart = title ? `, title: "${title}"` : "";
-      return `\`${text}\`<!-- ${annotationStyleToken(name)}, ${ts}: ""${titlePart} -->`;
+      return `\`${text}\`<!-- ${annotationStyleToken(name, appliedVariant)}, ${ts}: ""${titlePart} -->`;
     };
     if (!range.empty) {
       const selectedText = state.doc.sliceString(range.from, range.to);
       const insert = makeInsert(selectedText);
+      annotationPreview = null;
+      currentStyle = appliedStyle;
+      currentAnnotationVariant = appliedVariant;
       v.dispatch({
         changes: { from: range.from, to: range.to, insert },
         selection: { anchor: range.from + 1 + selectedText.length }
@@ -3694,6 +3779,9 @@ ${body}
     const { from, to } = wordRange;
     const wordText = state.doc.sliceString(from, to);
     const insert = makeInsert(wordText);
+    annotationPreview = null;
+    currentStyle = appliedStyle;
+    currentAnnotationVariant = appliedVariant;
     v.dispatch({
       changes: { from, to, insert },
       selection: { anchor: from + 1 + wordText.length }
@@ -3722,6 +3810,8 @@ ${body}
   }
 
   function setAnnotationColorOrStyle(v: EditorView, style: number) {
+    if (setAnnotationPreview(v, style, currentAnnotationVariant)) return true;
+
     const cursor = v.state.selection.main.head;
     const docText = v.state.doc.toString();
     annotationPattern.lastIndex = 0;
@@ -3804,6 +3894,8 @@ ${body}
     constructor(v: EditorView) { applyEditorModeClasses(v); updateStatusFromView(v); }
     update(u: ViewUpdate) {
       applyEditorModeClasses(u.view);
+      if (u.docChanged) annotationPreview = null;
+      else if (u.selectionSet) refreshAnnotationPreviewForSelection(u.view);
       if (u.docChanged || u.selectionSet || u.focusChanged || u.viewportChanged)
         updateStatusFromView(u.view);
       if (u.docChanged) {
