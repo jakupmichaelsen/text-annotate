@@ -19,7 +19,7 @@
   let textareaEl: HTMLTextAreaElement;
   let previewScrollEl: HTMLDivElement;
   let manualBreakCount = 0;
-  let pdfLineMarkMode = false;
+  let pdfRowMarkMode: "none" | "break" | "ignore" = "none";
   type PdfPreviewRow = {
     id: string;
     pageNumber: number;
@@ -41,8 +41,11 @@
     rows: PdfPreviewRow[];
   };
   type PdfBreakLine = { id: number; row: PdfPreviewRow; insertedBreak: boolean };
+  type PdfIgnoredLine = { id: number; row: PdfPreviewRow };
   let pdfBreakLines: PdfBreakLine[] = [];
   let nextPdfBreakLineId = 1;
+  let pdfIgnoredLines: PdfIgnoredLine[] = [];
+  let nextPdfIgnoredLineId = 1;
   let pdfPreviewPages: PdfPreviewPage[] = [];
   let pdfPreviewLoading = false;
   let pdfRenderError = "";
@@ -112,11 +115,15 @@
   }
 
   function loadMarkedPdfDraft() {
-    loadPdfDraft(pdfDraftText);
+    loadPdfDraft(textWithoutIgnoredRows(pdfDraftText));
   }
 
-  function togglePdfLineMarkMode() {
-    pdfLineMarkMode = !pdfLineMarkMode;
+  function togglePdfBreakMarkMode() {
+    pdfRowMarkMode = pdfRowMarkMode === "break" ? "none" : "break";
+  }
+
+  function togglePdfIgnoreMarkMode() {
+    pdfRowMarkMode = pdfRowMarkMode === "ignore" ? "none" : "ignore";
   }
 
   async function runPdfOcr() {
@@ -187,6 +194,7 @@
     pdfRenderError = "";
     pdfPreviewPages = [];
     pdfBreakLines = [];
+    pdfIgnoredLines = [];
 
     try {
       const data = await fetch(url).then(response => response.arrayBuffer());
@@ -332,7 +340,7 @@
   }
 
   async function togglePdfBreakRow(row: PdfPreviewRow) {
-    if (!pdfLineMarkMode || pdfIsParsing) return;
+    if (pdfRowMarkMode !== "break" || pdfIsParsing) return;
     const existingMark = pdfBreakLines.find(line => line.row.id === row.id);
     if (existingMark) {
       pdfBreakLines = pdfBreakLines.filter(line => line.row.id !== row.id);
@@ -345,6 +353,29 @@
     nextPdfBreakLineId += 1;
     await tick();
     rememberTextareaSelection();
+  }
+
+  function togglePdfIgnoreRow(row: PdfPreviewRow) {
+    if (pdfRowMarkMode !== "ignore" || pdfIsParsing) return;
+    const existingMark = pdfIgnoredLines.find(line => line.row.id === row.id);
+    if (existingMark) {
+      pdfIgnoredLines = pdfIgnoredLines.filter(line => line.row.id !== row.id);
+      return;
+    }
+    pdfIgnoredLines = [...pdfIgnoredLines, { id: nextPdfIgnoredLineId, row }];
+    nextPdfIgnoredLineId += 1;
+  }
+
+  function handlePdfRowClick(row: PdfPreviewRow) {
+    if (pdfRowMarkMode === "break") {
+      void togglePdfBreakRow(row);
+      return;
+    }
+    if (pdfRowMarkMode === "ignore") togglePdfIgnoreRow(row);
+  }
+
+  function isPdfRowIgnored(row: PdfPreviewRow) {
+    return pdfIgnoredLines.some(line => line.row.id === row.id);
   }
 
   function isPdfRowMarked(row: PdfPreviewRow) {
@@ -430,6 +461,32 @@
     return offsets;
   }
 
+  function textWithoutIgnoredRows(text: string) {
+    const removals = pdfIgnoredLines
+      .map(line => rowRemovalRange(text, line.row))
+      .filter((range): range is { from: number; to: number } => !!range)
+      .sort((a, b) => b.from - a.from);
+
+    let next = text;
+    for (const range of removals) {
+      const before = next.slice(0, range.from).replace(/[ \t]+$/, "");
+      const after = next.slice(range.to).replace(/^[ \t\n]+/, "");
+      next = before + (before && after ? "\n" : "") + after;
+    }
+    return next.replace(/\n{3,}/g, "\n\n").trim();
+  }
+
+  function rowRemovalRange(text: string, row: PdfPreviewRow) {
+    const offset = offsetForMarkedRow(text, row);
+    if (offset === null) return null;
+    let from = offset;
+    let to = offset + row.text.trim().length;
+    while (from > 0 && text[from - 1] !== "\n") from -= 1;
+    while (to < text.length && text[to] !== "\n") to += 1;
+    while (to < text.length && text[to] === "\n") to += 1;
+    return { from, to };
+  }
+
   function cleanRowText(text: string) {
     return text
       .replace(/\s+/g, " ")
@@ -461,14 +518,25 @@
       <div class="pdf-modal-actions">
         <button
           class="toolbar-btn"
-          class:active={pdfLineMarkMode}
+          class:active={pdfRowMarkMode === "break"}
           type="button"
-          on:click={togglePdfLineMarkMode}
+          on:click={togglePdfBreakMarkMode}
           title="Click a PDF text row to mark a paragraph break"
-          aria-pressed={pdfLineMarkMode}
+          aria-pressed={pdfRowMarkMode === "break"}
           disabled={pdfIsParsing || pdfOcrRunning}
         >
           Mark break
+        </button>
+        <button
+          class="toolbar-btn"
+          class:active={pdfRowMarkMode === "ignore"}
+          type="button"
+          on:click={togglePdfIgnoreMarkMode}
+          title="Click a PDF text row to ignore it when loading"
+          aria-pressed={pdfRowMarkMode === "ignore"}
+          disabled={pdfIsParsing || pdfOcrRunning}
+        >
+          Ignore text
         </button>
         <button
           class="toolbar-btn"
@@ -491,7 +559,7 @@
     {/if}
 
     <div class="pdf-modal-body">
-      <div class="pdf-pane pdf-preview-pane" class:line-marking={pdfLineMarkMode}>
+      <div class="pdf-pane pdf-preview-pane" class:line-marking={pdfRowMarkMode !== "none"} class:ignore-marking={pdfRowMarkMode === "ignore"}>
         <div class="pdf-preview-scroll" bind:this={previewScrollEl} aria-label="PDF preview">
           {#if pdfPreviewLoading}
             <div class="pdf-preview-status">Rendering PDF...</div>
@@ -506,17 +574,18 @@
                 data-page-number={page.pageNumber}
                 style={`width: ${page.fullWidth}px; height: ${page.fullHeight}px; left: -${page.cropLeft}px; top: -${page.cropTop}px`}
               ></canvas>
-              <div class="pdf-text-row-layer" aria-hidden={!pdfLineMarkMode}>
+              <div class="pdf-text-row-layer" aria-hidden={pdfRowMarkMode === "none"}>
                 {#each page.rows as row}
                   <button
                     class="pdf-text-row-button"
                     class:marked={isPdfRowMarked(row)}
+                    class:ignored={isPdfRowIgnored(row)}
                     type="button"
                     style={`top: ${row.top}px; left: ${row.left}px; width: ${row.width}px; height: ${row.height}px`}
                     title={row.text}
-                    aria-label={`Mark paragraph break before ${row.text}`}
-                    tabindex={pdfLineMarkMode ? 0 : -1}
-                    on:click={() => togglePdfBreakRow(row)}
+                    aria-label={pdfRowMarkMode === "ignore" ? `Ignore ${row.text}` : `Mark paragraph break before ${row.text}`}
+                    tabindex={pdfRowMarkMode !== "none" ? 0 : -1}
+                    on:click={() => handlePdfRowClick(row)}
                   ></button>
                 {/each}
               </div>
@@ -545,6 +614,9 @@
         {pdfIsParsing ? "Extracting text..." : `${pdfDraftText.length} characters`}
         {#if pdfBreakLines.length > 0}
           · {pdfBreakLines.length} PDF break{pdfBreakLines.length === 1 ? "" : "s"} ready
+        {/if}
+        {#if pdfIgnoredLines.length > 0}
+          · {pdfIgnoredLines.length} ignored
         {/if}
         {#if manualBreakCount > 0}
           · {manualBreakCount} break{manualBreakCount === 1 ? "" : "s"} inserted

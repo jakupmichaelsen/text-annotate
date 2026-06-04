@@ -39,12 +39,24 @@
     min-height: 0;
   }
 
+  .main.left-sidebar-collapsed {
+    grid-template-columns: 42px minmax(0, 1fr) var(--summary-sidebar-width, 320px);
+  }
+
   .main.summary-collapsed {
     grid-template-columns: 200px minmax(0, 1fr) 42px;
   }
 
+  .main.left-sidebar-collapsed.summary-collapsed {
+    grid-template-columns: 42px minmax(0, 1fr) 42px;
+  }
+
   .main.summary-fullscreen {
     grid-template-columns: 200px minmax(0, 1fr);
+  }
+
+  .main.left-sidebar-collapsed.summary-fullscreen {
+    grid-template-columns: 42px minmax(0, 1fr);
   }
 
   .main.summary-fullscreen .editor {
@@ -116,6 +128,32 @@
 
   .summary-resize-handle:focus-visible {
     outline: none;
+  }
+
+  .sidebar-header {
+    min-height: 38px;
+    padding: 0 8px 0 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--internal-border);
+  }
+
+  .sidebar.collapsed .sidebar-header {
+    justify-content: center;
+    padding: 0;
+  }
+
+  .sidebar-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--fg-muted);
+    font-weight: 600;
+  }
+
+  .sidebar-collapse-btn {
+    flex: 0 0 auto;
   }
 
   .summary-header {
@@ -662,18 +700,12 @@
     border-color: var(--yellow);
   }
 
-  .settings-btn {
-    min-width: 30px;
-    height: 28px;
-    padding: 0 5px;
-    font-size: 12px;
-    font-weight: 700;
-    line-height: 1;
-    background: transparent;
-    border: 0;
+  .sidebar-settings-btn {
+    margin-top: 2px;
+    color: var(--fg-muted);
   }
 
-  .settings-btn.active {
+  .sidebar-settings-btn.active {
     color: var(--orange);
   }
 
@@ -1773,6 +1805,44 @@
   .cm-gutters {
     position: relative;
     z-index: 1;
+  }
+
+  .cm-display-lineNumbers .cm-gutterElement {
+    min-width: 3.8em;
+    padding: 0 18px 0 6px;
+    box-sizing: border-box;
+  }
+
+  .cm-display-line-number-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    justify-content: flex-start;
+    min-height: 100%;
+    line-height: inherit;
+    color: var(--fg-muted);
+  }
+
+  .cm-display-line-number {
+    display: block;
+    min-height: 1lh;
+    padding: 0 3px;
+    border-radius: 2px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .cm-display-line-number.active {
+    background: var(--active-gutter-annotate);
+    color: var(--fg);
+  }
+
+  .mode-insert .cm-display-line-number.active {
+    background: var(--active-gutter-edit);
+  }
+
+  .cm-display-line-number-timestamp .cm-display-line-number {
+    color: var(--fg-muted);
+    font-size: 10px;
   }
   .statusbar {
     display: grid;

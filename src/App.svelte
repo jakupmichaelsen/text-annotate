@@ -2,9 +2,9 @@
   import { onMount, tick } from "svelte";
   import { Compartment, EditorState, Prec, type Extension } from "@codemirror/state";
   import {
-    EditorView, keymap, lineNumbers, drawSelection, runScopeHandlers,
-    highlightActiveLineGutter, ViewPlugin, Decoration,
-    GutterMarker, lineNumberMarkers,
+    EditorView, keymap, drawSelection, runScopeHandlers,
+    gutter, ViewPlugin, Decoration,
+    GutterMarker,
     WidgetType, showTooltip, type Tooltip,
     type DecorationSet, type ViewUpdate
   } from "@codemirror/view";
@@ -28,7 +28,6 @@
   import {
     annotationPattern,
     annotationWithTitle,
-    blockquoteMetaPattern,
     summaryVisibleText
   } from "./lib/annotations";
   import { createNavigationCommands } from "./lib/navigation";
@@ -110,6 +109,7 @@
   let padTop = initialLayoutSettings.padTop ?? 16;
   let padBottom = initialLayoutSettings.padBottom ?? 64;
   let editorViewportHeight = 0;
+  let cursorScrollMarginLines = initialLayoutSettings.cursorScrollMarginLines ?? 4;
   let lineHeight = initialLayoutSettings.lineHeight ?? 1.6;
   let fontSize = initialLayoutSettings.fontSize ?? 14;
   let paragraphSpacing = initialLayoutSettings.paragraphSpacing ?? 0;
@@ -119,12 +119,13 @@
   let columnStride = initialLayoutSettings.columnStride ?? 40;
   let layoutFontFamilyName = initialLayoutSettings.fontFamilyName ?? defaultFontFamilyName;
   let randomizeFontOnLoad = initialLayoutSettings.randomizeFontOnLoad ?? false;
+  let rotateFontOnLoad = initialLayoutSettings.rotateFontOnLoad ?? false;
   let showHelp = false;
   let settingsOpen = false;
   let settingsPersistenceReady = false;
   let settingsButtonEl: HTMLButtonElement | null = null;
   let settingsPopoverEl: HTMLDivElement | null = null;
-  type SettingsTab = "markup" | "layout" | "transcribe";
+  type SettingsTab = "annotation" | "editor" | "import";
   type AnnotationMode = "clean" | "raw" | "all";
   type AppSettings = {
     annotationMode: AnnotationMode;
@@ -215,12 +216,15 @@
   let addStyleModalOpen = false;
   let newStyleColorName = "steel";
   let newStyleName = newStyleColorName;
+  let newStyleKeyDraft = "";
   let annotationMode: AnnotationMode = initialAppSettings.annotationMode;
-  let blockquoteAlign: "left" | "center" | "right" = "left";
+  let blockquoteAlign = initialLayoutSettings.blockquoteAlign ?? 0;
   let blockquoteBgWidth = 100;
-  let blockquoteActive = false;
   let blockquoteEditReturnAnchor: number | null = null;
   let editorMode: "normal" | "insert" = "normal";
+  let selectionMode: "none" | "visual" | "line" = "none";
+  let visualSelectionAnchor: number | null = null;
+  let lineSelectionAnchor: number | null = null;
   let line = 1;
   let column = 1;
   let selectionInfo = "0 selected";
@@ -248,6 +252,7 @@
   let reorderDragState: ReorderDragState = null;
   let reorderDropTarget: ReorderDropTarget = null;
   let summaryCollapsed = true;
+  let leftSidebarCollapsed = false;
   let summaryFullscreen = false;
   let summarySidebarWidth = 320;
   let editingSummaryTitleKey: string | null = null;
@@ -281,17 +286,22 @@
     padRight;
     padTop;
     padBottom;
+    cursorScrollMarginLines;
     lineHeight;
     fontSize;
     paragraphSpacing;
     layoutFontFamilyName;
     randomizeFontOnLoad;
+    rotateFontOnLoad;
     currentLineHighlightStyle;
     currentLineHighlightOpacity;
     columnGuideThickness;
     columnStride;
+    blockquoteAlign;
+    blockquoteBgWidth;
     divideImportSentences;
     persistLayoutSettings();
+    view?.dispatch({});
   }
   $: if (settingsPersistenceReady) {
     annotationMode;
@@ -777,7 +787,7 @@
       event.key === "ArrowRight" ||
       event.key === "ArrowUp" ||
       event.key === "ArrowDown" ||
-      "hjklwasdcqrHJKLWASDCQRfxeqnNuU".includes(event.key);
+      "hjklwasdcqrvHJKLWASDCQRVfxeqnNuU".includes(event.key);
   }
 
   function shouldDeferWindowShortcut(event: KeyboardEvent) {
@@ -877,6 +887,7 @@
       selection: { anchor: initialCursor },
       effects: EditorView.scrollIntoView(initialCursor, { y: "start", yMargin: 0 })
     });
+    removeBlockquoteMetaMarkup(view);
     view.focus();
   }
 
@@ -1014,10 +1025,18 @@
     return mode === "gruvbox" || mode === "nord" ? mode : "nord";
   }
 
+  function normalizeSettingsTab(value: unknown): SettingsTab {
+    if (value === "annotation" || value === "editor" || value === "import") return value;
+    if (value === "markup") return "annotation";
+    if (value === "layout") return "editor";
+    if (value === "transcribe") return "import";
+    return "annotation";
+  }
+
   function loadAppSettings(): AppSettings {
     const defaults: AppSettings = {
       annotationMode: "clean",
-      settingsTab: "markup",
+      settingsTab: "annotation",
       rememberOpenAiApiKey: false,
       transcriptionModel: "whisper-1",
       transcriptionPrompt: ""
@@ -1027,7 +1046,7 @@
 
     return {
       annotationMode: settings.annotationMode === "raw" || settings.annotationMode === "all" ? settings.annotationMode : "clean",
-      settingsTab: settings.settingsTab === "layout" || settings.settingsTab === "transcribe" ? settings.settingsTab : "markup",
+      settingsTab: normalizeSettingsTab(settings.settingsTab),
       rememberOpenAiApiKey: typeof settings.rememberOpenAiApiKey === "boolean" ? settings.rememberOpenAiApiKey : false,
       transcriptionModel: typeof settings.transcriptionModel === "string" && settings.transcriptionModel.trim()
         ? settings.transcriptionModel
@@ -1041,15 +1060,19 @@
     padRight: number;
     padTop: number;
     padBottom: number;
+    cursorScrollMarginLines: number;
     lineHeight: number;
     fontSize: number;
     paragraphSpacing: number;
     fontFamilyName: string;
     randomizeFontOnLoad: boolean;
+    rotateFontOnLoad: boolean;
     currentLineHighlightStyle: "fill" | "underline" | "borders";
     currentLineHighlightOpacity: number;
     columnGuideThickness: number;
     columnStride: number;
+    blockquoteAlign: number;
+    blockquoteBgWidth: number;
     divideImportSentences: boolean;
   };
 
@@ -1084,6 +1107,7 @@
 
   function applyDocumentLoadFontPreference() {
     if (randomizeFontOnLoad) randomizeLayoutFontFamily();
+    else if (rotateFontOnLoad) rotateLayoutFontFamily();
   }
 
   function loadLayoutSettings(): Partial<LayoutSettings> {
@@ -1107,15 +1131,19 @@
       padRight: numberOr("padRight", 40, 0, 400),
       padTop: numberOr("padTop", 16, 0, 400),
       padBottom: numberOr("padBottom", 64, 0, 9999),
+      cursorScrollMarginLines: Math.round(numberOr("cursorScrollMarginLines", 4, 0, 16)),
       lineHeight: Math.round(numberOr("lineHeight", 1.6, 1, 3) * 100) / 100,
       fontSize: Math.round(numberOr("fontSize", 14, 10, 28)),
       paragraphSpacing: Math.round(numberOr("paragraphSpacing", 0, 0, 2) * 100) / 100,
       fontFamilyName,
       randomizeFontOnLoad: typeof settings.randomizeFontOnLoad === "boolean" ? settings.randomizeFontOnLoad : undefined,
+      rotateFontOnLoad: typeof settings.rotateFontOnLoad === "boolean" ? settings.rotateFontOnLoad : undefined,
       currentLineHighlightStyle,
       currentLineHighlightOpacity: Math.round(numberOr("currentLineHighlightOpacity", 0.34, 0.08, 0.7) * 100) / 100,
       columnGuideThickness: Math.round(numberOr("columnGuideThickness", 1, 1, 6)),
       columnStride: Math.round(numberOr("columnStride", 40, 4, 120)),
+      blockquoteAlign: Math.round(numberOr("blockquoteAlign", 0, 0, 100)),
+      blockquoteBgWidth: Math.round(numberOr("blockquoteBgWidth", 100, 0, 100)),
       divideImportSentences: typeof settings.divideImportSentences === "boolean" ? settings.divideImportSentences : undefined
     };
   }
@@ -1127,15 +1155,19 @@
       padRight,
       padTop,
       padBottom,
+      cursorScrollMarginLines,
       lineHeight,
       fontSize,
       paragraphSpacing,
       fontFamilyName: layoutFontFamilyName,
       randomizeFontOnLoad,
+      rotateFontOnLoad,
       currentLineHighlightStyle,
       currentLineHighlightOpacity,
       columnGuideThickness,
       columnStride,
+      blockquoteAlign,
+      blockquoteBgWidth,
       divideImportSentences
     };
     localStorage.setItem(layoutStorageKey, JSON.stringify(payload));
@@ -1158,15 +1190,19 @@
     padRight = settings.padRight ?? padRight;
     padTop = settings.padTop ?? padTop;
     padBottom = settings.padBottom ?? padBottom;
+    cursorScrollMarginLines = settings.cursorScrollMarginLines ?? cursorScrollMarginLines;
     lineHeight = settings.lineHeight ?? lineHeight;
     fontSize = settings.fontSize ?? fontSize;
     paragraphSpacing = settings.paragraphSpacing ?? paragraphSpacing;
     layoutFontFamilyName = settings.fontFamilyName ?? layoutFontFamilyName;
     randomizeFontOnLoad = settings.randomizeFontOnLoad ?? randomizeFontOnLoad;
+    rotateFontOnLoad = settings.rotateFontOnLoad ?? rotateFontOnLoad;
     currentLineHighlightStyle = settings.currentLineHighlightStyle ?? currentLineHighlightStyle;
     currentLineHighlightOpacity = settings.currentLineHighlightOpacity ?? currentLineHighlightOpacity;
     columnGuideThickness = settings.columnGuideThickness ?? columnGuideThickness;
     columnStride = settings.columnStride ?? columnStride;
+    blockquoteAlign = settings.blockquoteAlign ?? blockquoteAlign;
+    blockquoteBgWidth = settings.blockquoteBgWidth ?? blockquoteBgWidth;
     divideImportSentences = settings.divideImportSentences ?? divideImportSentences;
   }
 
@@ -1719,6 +1755,7 @@
   function setMode(mode: "normal" | "insert") {
     const selection = view?.state.selection;
     editorMode = mode;
+    clearSelectionMode();
     if (mode === "normal") blockquoteEditReturnAnchor = null;
     if (view) {
       view.dispatch(selection ? { selection } : {});  // trigger keymap/decoration rebuild
@@ -2064,10 +2101,13 @@
     const colorName = normalizeNamedStyleColor(newStyleColorName);
     const nextStyle = { name, colorName, color: namedStyleColor(colorName), custom: true };
     persistCustomStyles([...customStyles, nextStyle]);
+    if (newStyleKeyDraft && isUnusedStyleKey(newStyleKeyDraft)) persistStyleKey(name, newStyleKeyDraft);
     currentStyle = baseHighlightStyles.length + customStyles.length;
     newStyleColorName = "steel";
     newStyleName = newStyleColorName;
+    newStyleKeyDraft = "";
     addStyleModalOpen = false;
+    view?.dispatch({});
     view?.focus();
   }
 
@@ -2233,6 +2273,37 @@
     }
     nextKeys[name] = normalized;
     persistStyleKeys(nextKeys);
+    view?.dispatch({});
+  }
+
+  function isUnusedStyleKey(key: string) {
+    const normalized = normalizeStyleKey(key);
+    return !!normalized && !highlightStyles.some(style => styleKeyForName(style.name) === normalized);
+  }
+
+  function handleNewStyleKeyKeydown(event: KeyboardEvent) {
+    event.stopPropagation();
+    if (event.key === "Enter") {
+      event.preventDefault();
+      addCustomStyle();
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      addStyleModalOpen = false;
+      return;
+    }
+    if (event.key === "Backspace" || event.key === "Delete") {
+      event.preventDefault();
+      newStyleKeyDraft = "";
+      return;
+    }
+    if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      const key = normalizeStyleKey(event.key);
+      if (!key || !isUnusedStyleKey(key)) return;
+      event.preventDefault();
+      newStyleKeyDraft = key;
+    }
   }
 
   function cancelStyleKeyEdit() {
@@ -2333,19 +2404,17 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     const sel = v.state.selection.main;
     const pos = sel.head;
     const lineInfo = v.state.doc.lineAt(pos);
-    line = lineInfo.number;
-    column = pos - lineInfo.from + 1;
+    const displayBlock = view ? visualLineBlockAt(v, pos) : null;
+    line = displayBlock ? displayLineNumberForBlock(v, displayBlock) : lineInfo.number;
+    column = pos - (displayBlock?.from ?? lineInfo.from) + 1;
     selectionInfo = `${Math.abs(sel.to - sel.from)} selected`;
     const totalWords = countWords(v.state.doc.toString());
     const selectedWords = sel.empty ? 0 : countWords(v.state.doc.sliceString(sel.from, sel.to));
     wordCountInfo = sel.empty ? `${totalWords} words` : `${totalWords} words (${selectedWords} selected)`;
     updateSummaryFromView(v);
-    setCurrentBlockquoteFromView(v);
   }
 
   let editingSpan: number | null = null;
-  type BlockquoteAlign = "left" | "center" | "right";
-
   function countWords(text: string) {
     const visibleText = text
       .replace(/`([^`]+)`<!--\s*\w+(?:\s+\w+)?,\s*.+?:\s*"[^"]*"\s*-->/g, "$1")
@@ -2356,6 +2425,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
 
   type WordRange = { from: number; to: number };
   const wordCorePattern = /[\p{L}\p{N}_-]/u;
+  const endingPunctuationPattern = /[.,;:!?]/;
 
   function isWordCoreChar(ch: string | undefined): boolean {
     return !!ch && wordCorePattern.test(ch);
@@ -2371,13 +2441,17 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     return isWordApostrophe(ch) && isWordCoreChar(text[index - 1]) && isWordCoreChar(text[index + 1]);
   }
 
-  function wordRangeAt(text: string, pos: number): WordRange | null {
+  function wordRangeAt(text: string, pos: number, includeTrailingPunctuation = false): WordRange | null {
     const safePos = Math.max(0, Math.min(pos, text.length));
     let start = safePos;
     let end = safePos;
     while (start > 0 && isSelectableWordChar(text, start - 1)) start -= 1;
     while (end < text.length && isSelectableWordChar(text, end)) end += 1;
-    return start === end ? null : { from: start, to: end };
+    if (start === end) return null;
+    if (includeTrailingPunctuation) {
+      while (end < text.length && endingPunctuationPattern.test(text[end] ?? "")) end += 1;
+    }
+    return { from: start, to: end };
   }
 
   function wordBoundary(text: string, pos: number, forward: boolean): number {
@@ -2598,12 +2672,10 @@ ${body}
 
       if (lineText.startsWith(">")) {
         flushParagraph();
-        const meta = parseBlockquoteMeta(lineText);
-        const quoteText = lineText
-          .replace(blockquoteMetaPattern, "")
+        const quoteText = cleanBlockquoteLineText(lineText)
           .replace(/^>\s?/, "")
           .trim();
-        blocks.push(`    <blockquote style="${escapeHtml(blockquoteStyle(meta))}">${renderInlineHtml(quoteText)}</blockquote>`);
+        blocks.push(`    <blockquote style="${escapeHtml(blockquoteStyle())}">${renderInlineHtml(quoteText)}</blockquote>`);
         continue;
       }
 
@@ -2985,8 +3057,7 @@ ${body}
       const isQuote = trimmed.startsWith(">");
 
       if (isQuote) {
-        const quoteText = trimmed
-          .replace(blockquoteMetaPattern, "")
+        const quoteText = cleanBlockquoteLineText(trimmed)
           .replace(/^>\s?/, "")
           .trim();
         if (!active) active = { from: lineStart, to: lineEnd, line: index + 1, parts: [] };
@@ -3126,65 +3197,29 @@ ${body}
     return Math.max(0, Math.min(100, Math.round(width)));
   }
 
-  function parseBlockquoteMeta(lineText: string) {
-    const match = blockquoteMetaPattern.exec(lineText);
-    blockquoteMetaPattern.lastIndex = 0;
-    if (!match) return { align: "left" as BlockquoteAlign, width: 100, hasComment: false, commentStart: -1, commentEnd: -1 };
-    return {
-      align: match[1].toLowerCase() as BlockquoteAlign,
-      width: clampBlockquoteWidth(+match[2]),
-      hasComment: true,
-      commentStart: match.index,
-      commentEnd: match.index + match[0].length
-    };
+  function cleanBlockquoteLineText(lineText: string) {
+    return lineText.replace(/<!--\s*align:(?:left|center|right)\s+width:\d{1,3}\s*-->/gi, "");
   }
 
-  function blockquoteComment(align: BlockquoteAlign, width: number) {
-    return `<!-- align:${align} width:${clampBlockquoteWidth(width)} -->`;
-  }
-
-  function blockquoteStyle(meta: { align: BlockquoteAlign; width: number }) {
-    const alignStyles = meta.align === "center"
-      ? "margin-left: auto; margin-right: auto;"
-      : meta.align === "right"
-        ? "margin-left: auto; margin-right: 0;"
-        : "margin-left: 0; margin-right: auto;";
-    return `display: block; box-sizing: border-box; width: ${meta.width}% !important; ${alignStyles}`;
-  }
-
-  function setCurrentBlockquoteFromView(v: EditorView) {
-    const lineInfo = v.state.doc.lineAt(v.state.selection.main.head);
-    if (!lineInfo.text.startsWith(">")) {
-      blockquoteActive = false;
-      return;
+  function removeBlockquoteMetaMarkup(v: EditorView) {
+    const docText = v.state.doc.toString();
+    const changes: { from: number; to: number; insert: string }[] = [];
+    const pattern = /[ \t]*<!--\s*align:(?:left|center|right)\s+width:\d{1,3}\s*-->/gi;
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(docText)) !== null) {
+      const line = v.state.doc.lineAt(match.index);
+      if (!line.text.startsWith(">")) continue;
+      changes.push({ from: match.index, to: match.index + match[0].length, insert: "" });
     }
-
-    const meta = parseBlockquoteMeta(lineInfo.text);
-    blockquoteActive = true;
-    blockquoteAlign = meta.align;
-    blockquoteBgWidth = meta.width;
+    if (changes.length) v.dispatch({ changes });
   }
 
-  function updateCurrentBlockquote(v: EditorView, next: Partial<{ align: BlockquoteAlign; width: number }>) {
-    const line = v.state.doc.lineAt(v.state.selection.main.head);
-    if (!line.text.startsWith(">")) return false;
-
-    const meta = parseBlockquoteMeta(line.text);
-    const align = next.align ?? meta.align;
-    const width = clampBlockquoteWidth(next.width ?? meta.width);
-    const comment = blockquoteComment(align, width);
-    if (meta.hasComment) {
-      v.dispatch({
-        changes: { from: line.from + meta.commentStart, to: line.from + meta.commentEnd, insert: comment }
-      });
-    } else {
-      const insert = line.text.length ? `${line.text} ${comment}` : comment;
-      v.dispatch({ changes: { from: line.from, to: line.to, insert } });
-    }
-    blockquoteAlign = align;
-    blockquoteBgWidth = width;
-    blockquoteActive = true;
-    return true;
+  function blockquoteStyle() {
+    const width = clampBlockquoteWidth(blockquoteBgWidth);
+    const available = 100 - width;
+    const left = Math.round((available * clampNumber(blockquoteAlign, 0, 100)) / 100);
+    const right = available - left;
+    return `display: block; box-sizing: border-box; width: ${width}% !important; margin-left: ${left}% !important; margin-right: ${right}% !important;`;
   }
 
   function enterBlockquoteEditMode(v: EditorView) {
@@ -3211,7 +3246,6 @@ ${body}
       });
       blockquoteEditReturnAnchor = tr.changes.mapPos(returnAnchor, 1);
       v.dispatch(tr);
-      blockquoteActive = true;
       setMode("insert");
       return true;
     }
@@ -3222,8 +3256,9 @@ ${body}
     blockquoteEditReturnAnchor = head;
 
     if (line.text.startsWith(">")) {
-      const contentStart = line.from + (line.text.startsWith("> ") ? 2 : 1);
-      cursor = Math.max(head, contentStart);
+      const cleaned = cleanBlockquoteLineText(line.text);
+      const contentEnd = line.from + cleaned.length;
+      cursor = Math.max(line.from + (line.text.startsWith("> ") ? 2 : 1), contentEnd);
       v.dispatch({ selection: { anchor: cursor } });
     } else if (line.text.trim().length === 0) {
       cursor = line.from + 2;
@@ -3239,7 +3274,6 @@ ${body}
       });
     }
 
-    blockquoteActive = true;
     setMode("insert");
     return true;
   }
@@ -3251,6 +3285,12 @@ ${body}
     setMode("normal");
     v.dispatch({ selection: EditorSelection.cursor(returnAnchor) });
     return true;
+  }
+
+  function exitBlockquoteEditForNavigation(v: EditorView) {
+    if (editorMode !== "insert" || blockquoteEditReturnAnchor === null) return false;
+    finishBlockquoteEditMode(v);
+    return false;
   }
 
   function insertBlockquoteLineBreak(v: EditorView) {
@@ -3465,8 +3505,71 @@ ${body}
   const srtGutterMarkerField = StateField.define<RangeSet<GutterMarker>>({
     create: state => buildSrtGutterMarkers(state),
     update: (markers, tr) => tr.docChanged ? buildSrtGutterMarkers(tr.state) : markers,
-    provide: field => lineNumberMarkers.from(field)
   });
+
+
+  class DisplayLineGutterMarker extends GutterMarker {
+    labels: string[];
+    activeIndex: number;
+    isTimestamp: boolean;
+    startSeconds: number | null;
+
+    constructor(labels: string[], activeIndex = -1, isTimestamp = false, startSeconds: number | null = null) {
+      super();
+      this.labels = labels;
+      this.activeIndex = activeIndex;
+      this.isTimestamp = isTimestamp;
+      this.startSeconds = startSeconds;
+    }
+
+    eq(other: GutterMarker) {
+      return other instanceof DisplayLineGutterMarker &&
+        other.activeIndex === this.activeIndex &&
+        other.isTimestamp === this.isTimestamp &&
+        other.startSeconds === this.startSeconds &&
+        other.labels.length === this.labels.length &&
+        other.labels.every((label, index) => label === this.labels[index]);
+    }
+
+    toDOM() {
+      const wrap = document.createElement("span");
+      wrap.className = "cm-display-line-number-wrap";
+      if (this.isTimestamp) wrap.classList.add("cm-display-line-number-timestamp");
+      for (let index = 0; index < this.labels.length; index += 1) {
+        const line = document.createElement("span");
+        line.className = "cm-display-line-number";
+        if (index === this.activeIndex) line.classList.add("active");
+        line.textContent = this.labels[index];
+        wrap.appendChild(line);
+      }
+      if (this.startSeconds !== null) {
+        wrap.title = this.labels[0] ?? "";
+        wrap.addEventListener("mousedown", event => {
+          event.preventDefault();
+          event.stopPropagation();
+          jumpAudioToAndPlay(this.startSeconds!);
+        });
+      }
+      return wrap;
+    }
+  }
+
+  function displayLineGutterMarker(v: EditorView, block: { from: number; to: number; height: number }) {
+    const docLine = v.state.doc.lineAt(block.from);
+    const timestamp = srtTimestampForTranscriptLine(v.state, docLine.number);
+    if (isSrtTimestampLine(docLine.text)) return new DisplayLineGutterMarker([""], -1, true);
+    if (timestamp) return new DisplayLineGutterMarker([timestamp.label], -1, true, timestamp.startSeconds);
+
+    const count = displayLineCountForBlock(v, block);
+    const first = displayLineNumberForBlock(v, block);
+    const labels = Array.from({ length: count }, (_value, index) => String(first + index));
+    const headBlock = visualLineBlockAt(v, v.state.selection.main.head);
+    let activeIndex = -1;
+    if (headBlock.from >= block.from && headBlock.to <= block.to) {
+      activeIndex = Math.max(0, Math.min(count - 1, displayLineNumberForBlock(v, headBlock) - first));
+    }
+    return new DisplayLineGutterMarker(labels, activeIndex);
+  }
 
   function formatEditorLineNumber(lineNumber: number, state: EditorState) {
     const hasSrt = documentHasSrtTimestamps(state);
@@ -3537,6 +3640,7 @@ ${body}
   }
 
   function handleEnterInAnnotationMode(v: EditorView) {
+    if (v.state.doc.lineAt(v.state.selection.main.head).text.startsWith(">")) return enterBlockquoteEditMode(v);
     if (toggleAnnotationEdit(v)) return true;
     toggleAssociatedSrtPlayback(v);
     return true;
@@ -3809,7 +3913,7 @@ ${body}
       return true;
     }
     const docText = state.doc.toString();
-    const wordRange = wordRangeAt(docText, range.from);
+    const wordRange = wordRangeAt(docText, range.from, true);
     if (!wordRange) return true;
     const { from, to } = wordRange;
     const wordText = state.doc.sliceString(from, to);
@@ -4000,19 +4104,13 @@ ${body}
         while (pos <= to) {
           const line = v.state.doc.lineAt(pos);
           if (line.text.startsWith(">")) {
-            const meta = parseBlockquoteMeta(line.text);
             builder.add(line.from, line.from, Decoration.line({
               class: "cm-blockquote-line",
-              attributes: { style: blockquoteStyle(meta) }
+              attributes: { style: blockquoteStyle() }
             }));
             const showMarkup = annotationMode === "all" || (annotationMode === "raw" && line.from === currentLineStart);
-            if (meta.hasComment && !showMarkup) {
-              builder.add(
-                line.from + meta.commentStart,
-                line.from + meta.commentEnd,
-                Decoration.replace({ widget: new EmptyWidget(), inclusive: false })
-              );
-            }
+            const comment = /<!--\s*align:(?:left|center|right)\s+width:\d{1,3}\s*-->/i.exec(line.text);
+            if (comment && !showMarkup) builder.add(line.from + comment.index, line.from + comment.index + comment[0].length, Decoration.replace({ widget: new EmptyWidget(), inclusive: false }));
           }
           pos = line.to + 1;
         }
@@ -4076,6 +4174,103 @@ ${body}
       this.marker.remove();
     }
   });
+
+  function visualLineBlockAt(v: EditorView, pos: number) {
+    const getter = (v as unknown as { visualLineAt?: (pos: number) => { from: number; to: number; top: number; bottom: number; height: number } }).visualLineAt;
+    return typeof getter === "function" ? getter.call(v, pos) : v.lineBlockAt(pos);
+  }
+
+  function lineHeightPx(v: EditorView) {
+    return parseFloat(getComputedStyle(v.contentDOM).lineHeight) || fontSize * lineHeight;
+  }
+
+  function displayLineCountForBlock(v: EditorView, block: { from: number; to: number; height: number }) {
+    const px = lineHeightPx(v);
+    if (px <= 0) return 1;
+    if (block.to <= block.from) return 1;
+    return Math.max(1, Math.round(block.height / px));
+  }
+
+  function displayLineNumberForBlock(v: EditorView, block: { from: number }) {
+    let lineNumber = 1;
+    let pos = 0;
+    const seen = new Set<number>();
+    while (pos < block.from) {
+      const current = v.lineBlockAt(pos);
+      if (seen.has(current.from)) break;
+      seen.add(current.from);
+      lineNumber += displayLineCountForBlock(v, current);
+      pos = Math.max(current.to + 1, pos + 1);
+    }
+    return lineNumber;
+  }
+
+  function displayLineRangeAt(v: EditorView, pos: number) {
+    const block = visualLineBlockAt(v, Math.max(0, Math.min(pos, v.state.doc.length)));
+    return { from: block.from, to: block.to };
+  }
+
+  function selectDisplayLineRange(v: EditorView, anchorPos: number, headPos: number) {
+    const anchorLine = displayLineRangeAt(v, anchorPos);
+    const headLine = displayLineRangeAt(v, headPos);
+    const from = Math.min(anchorLine.from, headLine.from);
+    const to = Math.max(anchorLine.to, headLine.to);
+    v.dispatch({
+      selection: EditorSelection.range(from, to),
+      effects: cursorScrollEffect(v, headPos)
+    });
+  }
+
+  function clearSelectionMode() {
+    selectionMode = "none";
+    visualSelectionAnchor = null;
+    lineSelectionAnchor = null;
+  }
+
+  function toggleVisualSelectionMode(v: EditorView) {
+    if (selectionMode === "visual") {
+      clearSelectionMode();
+      return true;
+    }
+    selectionMode = "visual";
+    visualSelectionAnchor = v.state.selection.main.anchor;
+    lineSelectionAnchor = null;
+    return true;
+  }
+
+  function startLineSelectionMode(v: EditorView) {
+    const head = v.state.selection.main.head;
+    const range = displayLineRangeAt(v, head);
+    selectionMode = "line";
+    lineSelectionAnchor = head;
+    visualSelectionAnchor = null;
+    v.dispatch({ selection: EditorSelection.range(range.from, range.to), effects: cursorScrollEffect(v, head) });
+    return true;
+  }
+
+  function runSelectionAwareNavigation(
+    v: EditorView,
+    run: (extend: boolean) => boolean,
+    options: { line?: boolean; horizontal?: boolean } = {}
+  ) {
+    if (selectionMode === "line") {
+      if (options.horizontal) return true;
+      const before = v.state.selection.main.head;
+      const handled = run(false);
+      if (!handled) return false;
+      const head = v.state.selection.main.head;
+      selectDisplayLineRange(v, lineSelectionAnchor ?? before, head);
+      return true;
+    }
+
+    if (selectionMode === "visual") {
+      if (visualSelectionAnchor === null) visualSelectionAnchor = v.state.selection.main.anchor;
+      const handled = run(true);
+      return handled;
+    }
+
+    return run(false);
+  }
 
   function visualLineMeasureTarget(state: EditorState) {
     const head = state.selection.main.head;
@@ -4161,11 +4356,11 @@ ${body}
   });
 
   function cursorScrollMargin(v: EditorView) {
-    const linePx = parseFloat(getComputedStyle(v.contentDOM).lineHeight) || fontSize * lineHeight;
+    const linePx = lineHeightPx(v);
     const viewportHeight = v.scrollDOM.clientHeight;
     if (viewportHeight <= 1) return 0;
-    const preferred = Math.max(linePx * 4, Math.min(viewportHeight * 0.24, 140));
-    return Math.min(Math.max(0, viewportHeight - 1), preferred);
+    const preferred = linePx * cursorScrollMarginLines;
+    return Math.min(Math.max(0, viewportHeight - 1), Math.max(0, preferred));
   }
 
   function cursorScrollEffect(v: EditorView, head = v.state.selection.main.head) {
@@ -4181,6 +4376,10 @@ ${body}
   });
 
   const dblClickBehavior = EditorView.domEventHandlers({
+    copy() {
+      if (selectionMode !== "none") setTimeout(clearSelectionMode, 0);
+      return false;
+    },
     dblclick(event, v) {
       const pos = v.posAtCoords({ x: event.clientX, y: event.clientY });
       if (pos === null) return false;
@@ -4199,7 +4398,7 @@ ${body}
           }
         }
       }
-      const wordRange = wordRangeAt(docText, pos);
+      const wordRange = wordRangeAt(docText, pos, editorMode === "normal");
       if (!wordRange) return false;
       v.dispatch({ selection: EditorSelection.range(wordRange.from, wordRange.to) });
       return true;
@@ -4210,6 +4409,10 @@ ${body}
     keydown(event, v) {
       if (editorMode !== "normal") return false;
       if (event.ctrlKey || event.metaKey || event.altKey) return false;
+      if (selectionMode === "line" && ["h", "l", "q", "r", "ArrowLeft", "ArrowRight"].includes(event.key)) {
+        event.preventDefault();
+        return true;
+      }
       if (event.key !== "c" && event.key !== "C") return false;
 
       event.preventDefault();
@@ -4225,7 +4428,7 @@ ${body}
     return Prec.high(keymap.of([
       { any: (v, event) => editorMode === "normal" && handleVariantPickerKey(v, event) },
       // Always: Escape returns to normal
-      { key: "Escape", run: v => { setMode("normal"); return true; } },
+      { key: "Escape", run: v => { clearSelectionMode(); setMode("normal"); return true; } },
       // Always: F2 toggles edit/annotate
       { key: "F2", run: v => { setMode(editorMode === "insert" ? "normal" : "insert"); return true; } },
       { key: "F1", run: () => { showHelp = !showHelp; return true; } },
@@ -4233,12 +4436,14 @@ ${body}
       { key: "Shift-Enter", run: v => insertBlockquoteLineBreak(v) },
       { key: "Alt-Enter", run: v => insertBlockquoteLineBreak(v) },
       { key: "Tab", run: v => insertBlockquoteLevel(v) },
+      { key: "ArrowUp", run: v => exitBlockquoteEditForNavigation(v) },
+      { key: "ArrowDown", run: v => exitBlockquoteEditForNavigation(v) },
 
       // Normal-mode only: Navigation
-      { key: "ArrowLeft",        run: normal(v => { cursorCharLeft(v);  return true; }) },
-      { key: "ArrowRight",       run: normal(v => { cursorCharRight(v); return true; }) },
-      { key: "ArrowUp",          run: normal(v => navigation.moveLineSkippingSrt(v, "up")) },
-      { key: "ArrowDown",        run: normal(v => navigation.moveLineSkippingSrt(v, "down")) },
+      { key: "ArrowLeft",        run: normal(v => runSelectionAwareNavigation(v, extend => { extend ? selectCharLeft(v) : cursorCharLeft(v); return true; }, { horizontal: true })) },
+      { key: "ArrowRight",       run: normal(v => runSelectionAwareNavigation(v, extend => { extend ? selectCharRight(v) : cursorCharRight(v); return true; }, { horizontal: true })) },
+      { key: "ArrowUp",          run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveLineSkippingSrt(v, "up", extend), { line: true })) },
+      { key: "ArrowDown",        run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveLineSkippingSrt(v, "down", extend), { line: true })) },
       { key: "Shift-ArrowLeft",  run: normal(v => { selectCharLeft(v);  return true; }) },
       { key: "Shift-ArrowRight", run: normal(v => { selectCharRight(v); return true; }) },
       { key: "Shift-ArrowUp",    run: normal(v => navigation.moveLineSkippingSrt(v, "up", true)) },
@@ -4251,20 +4456,20 @@ ${body}
       { key: "Shift-Ctrl-ArrowRight", run: normal(v => navigation.moveByWordCount(v, true, 1, true)) },
       { key: "Shift-Ctrl-ArrowUp",    run: normal(v => navigation.paragraphBoundary(v, "start", true)) },
       { key: "Shift-Ctrl-ArrowDown",  run: normal(v => navigation.paragraphBoundary(v, "end", true)) },
-      { key: "h", run: normal(v => { cursorCharLeft(v);  return true; }) },
-      { key: "j", run: normal(v => navigation.moveLineSkippingSrt(v, "down")) },
-      { key: "k", run: normal(v => navigation.moveLineSkippingSrt(v, "up")) },
-      { key: "l", run: normal(v => { cursorCharRight(v); return true; }) },
-      { key: "q", run: normal(v => { cursorCharLeft(v);  return true; }) },
-      { key: "r", run: normal(v => { cursorCharRight(v); return true; }) },
+      { key: "h", run: normal(v => runSelectionAwareNavigation(v, extend => { extend ? selectCharLeft(v) : cursorCharLeft(v); return true; }, { horizontal: true })) },
+      { key: "j", run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveLineSkippingSrt(v, "down", extend), { line: true })) },
+      { key: "k", run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveLineSkippingSrt(v, "up", extend), { line: true })) },
+      { key: "l", run: normal(v => runSelectionAwareNavigation(v, extend => { extend ? selectCharRight(v) : cursorCharRight(v); return true; }, { horizontal: true })) },
+      { key: "q", run: normal(v => runSelectionAwareNavigation(v, extend => { extend ? selectCharLeft(v) : cursorCharLeft(v); return true; }, { horizontal: true })) },
+      { key: "r", run: normal(v => runSelectionAwareNavigation(v, extend => { extend ? selectCharRight(v) : cursorCharRight(v); return true; }, { horizontal: true })) },
       { key: "Ctrl-h", run: normal(v => navigation.moveByWordCount(v, false, 1)) },
       { key: "Ctrl-j", run: normal(v => navigation.paragraphBoundary(v, "end")) },
       { key: "Ctrl-k", run: normal(v => navigation.paragraphBoundary(v, "start")) },
       { key: "Ctrl-l", run: normal(v => navigation.moveByWordCount(v, true, 1)) },
-      { key: "w", run: normal(v => navigation.moveLineSkippingSrt(v, "up")) },
-      { key: "s", run: normal(v => navigation.moveLineSkippingSrt(v, "down")) },
-      { key: "a", run: normal(v => navigation.moveByWordCount(v, false, 1)) },
-      { key: "d", run: normal(v => navigation.moveByWordCount(v, true, 1)) },
+      { key: "w", run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveLineSkippingSrt(v, "up", extend), { line: true })) },
+      { key: "s", run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveLineSkippingSrt(v, "down", extend), { line: true })) },
+      { key: "a", run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveByWordCount(v, false, 1, extend), { horizontal: true })) },
+      { key: "d", run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveByWordCount(v, true, 1, extend), { horizontal: true })) },
       { key: "c", run: normal(v => moveCursorByColumnStride(v, 1)) },
       { key: "C", run: normal(v => moveCursorByColumnStride(v, -1)) },
       { key: "Ctrl-w", run: normal(v => navigation.paragraphBoundary(v, "start")) },
@@ -4289,6 +4494,8 @@ ${body}
       { key: "Shift-Ctrl-s", run: normal(v => navigation.paragraphBoundary(v, "end", true)) },
       { key: "Shift-Ctrl-a", run: normal(v => navigation.moveByWordCount(v, false, 5, true)) },
       { key: "Shift-Ctrl-d", run: normal(v => navigation.moveByWordCount(v, true, 5, true)) },
+      { key: "v", run: normal(v => toggleVisualSelectionMode(v)) },
+      { key: "V", run: normal(v => startLineSelectionMode(v)) },
       // Normal-mode only: Annotation actions
       {
         any: (v, event) => {
@@ -4343,25 +4550,17 @@ ${body}
       dblClickBehavior,
       normalModeKeydownBehavior,
       EditorView.lineWrapping,
-      lineNumbers({
-        formatNumber: formatEditorLineNumber,
-        domEventHandlers: {
-          mousedown: (v, line, event) => {
-            const docLine = v.state.doc.lineAt(line.from);
-            const timestamp = srtTimestampForTranscriptLine(v.state, docLine.number);
-            if (!timestamp || timestamp.startSeconds === null) return false;
-            event.preventDefault();
-            event.stopPropagation();
-            jumpAudioToAndPlay(timestamp.startSeconds);
-            return true;
-          }
-        }
+      gutter({
+        class: "cm-display-lineNumbers",
+        renderEmptyElements: true,
+        lineMarker: (v, block) => displayLineGutterMarker(v, block),
+        lineMarkerChange: update => update.docChanged || update.selectionSet || update.geometryChanged || update.viewportChanged || update.transactions.length > 0,
+        initialSpacer: () => new DisplayLineGutterMarker(["0000"])
       }),
       drawSelection(),
       history(),
       indentOnInput(),
       bracketMatching(),
-      highlightActiveLineGutter(),
       buildKeymap(),
       keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
       markdown({ base: markdownLanguage }),
@@ -4412,6 +4611,7 @@ ${body}
     });
 
     view.dom.classList.add("mode-normal");
+    removeBlockquoteMetaMarkup(view);
     view.focus();
     updateEditorViewportHeight();
     if (editorEl) editorResizeObserver.observe(editorEl);
@@ -4462,15 +4662,6 @@ ${body}
   <div class="toolbar">
     <div class="title">textAnnotate</div>
     <span class="subtitle">paste or load .srt, .txt, .md, .docx, .pdf</span>
-    <button
-      class="toolbar-btn settings-btn"
-      bind:this={settingsButtonEl}
-      class:active={settingsOpen}
-      on:click={() => settingsOpen = !settingsOpen}
-      title="Settings"
-      aria-label="Settings"
-      aria-expanded={settingsOpen}
-    >⚙</button>
     <button class="toolbar-btn help-btn" on:click={() => showHelp = !showHelp} title="Keyboard shortcuts (?)">?</button>
   </div>
 
@@ -4490,21 +4681,13 @@ ${body}
       }}
     >
       <div class="settings-tabs" role="tablist" aria-label="Settings sections">
-        <button type="button" class:active={settingsTab === "markup"} on:click={() => settingsTab = "markup"}>Markup</button>
-        <button type="button" class:active={settingsTab === "layout"} on:click={() => settingsTab = "layout"}>Layout</button>
-        <button type="button" class:active={settingsTab === "transcribe"} on:click={() => settingsTab = "transcribe"}>Transcribe</button>
+        <button type="button" class:active={settingsTab === "annotation"} on:click={() => settingsTab = "annotation"}>Annotation</button>
+        <button type="button" class:active={settingsTab === "editor"} on:click={() => settingsTab = "editor"}>Editor</button>
+        <button type="button" class:active={settingsTab === "import"} on:click={() => settingsTab = "import"}>Import</button>
       </div>
 
-      {#if settingsTab === "markup"}
+      {#if settingsTab === "annotation"}
         <div class="settings-panel">
-          <section class="settings-section">
-            <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">↵</span><span>Import</span></div>
-            <label class="settings-toggle-row">
-              <span class="settings-control-icon" aria-hidden="true">¶</span>
-              <span>Divide imported sentences into lines</span>
-              <input type="checkbox" bind:checked={divideImportSentences} />
-            </label>
-          </section>
           <section class="settings-section">
             <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">`</span><span>Markup Visibility</span></div>
             <div class="settings-radio-group" aria-label="Markup visibility">
@@ -4532,10 +4715,36 @@ ${body}
             </div>
           </section>
         </div>
-      {:else if settingsTab === "layout"}
+      {:else if settingsTab === "editor"}
         <div class="settings-panel">
           <section class="settings-section">
             <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">Aa</span><span>Typography</span></div>
+            <label class="settings-field layout-font-field">
+              <span class="settings-field-label">Font face</span>
+              <span class="layout-font-controls">
+                <select class="settings-input" bind:value={layoutFontFamilyName}>
+                  {#each fontFamilyOptions as font}
+                    <option value={font.name}>{font.name}</option>
+                  {/each}
+                </select>
+                <button
+                  class="settings-icon-button"
+                  type="button"
+                  aria-label={randomizeFontOnLoad ? "Disable random font on document load" : "Enable random font on document load"}
+                  title={randomizeFontOnLoad ? "Random font on load: on" : "Random font on load: off"}
+                  aria-pressed={randomizeFontOnLoad}
+                  on:click={() => { randomizeFontOnLoad = !randomizeFontOnLoad; if (randomizeFontOnLoad) rotateFontOnLoad = false; }}
+                >⇄</button>
+                <button
+                  class="settings-icon-button"
+                  type="button"
+                  aria-label={rotateFontOnLoad ? "Disable next font on document load" : "Enable next font on document load"}
+                  title={rotateFontOnLoad ? "Next font on load: on" : "Next font on load: off"}
+                  aria-pressed={rotateFontOnLoad}
+                  on:click={() => { rotateFontOnLoad = !rotateFontOnLoad; if (rotateFontOnLoad) randomizeFontOnLoad = false; }}
+                >↻</button>
+              </span>
+            </label>
             <div class="layout-stepper-grid">
               <div class="layout-stepper">
                 <span class="layout-control-icon" aria-hidden="true">↕</span>
@@ -4555,31 +4764,6 @@ ${body}
                   <button type="button" on:click={() => adjustLayoutValue("fontSize", 1)} aria-label="Increase font size">+</button>
                 </span>
               </div>
-              <label class="settings-field layout-font-field">
-                <span class="settings-field-label">Font face</span>
-                <span class="layout-font-controls">
-                  <select class="settings-input" bind:value={layoutFontFamilyName}>
-                    {#each fontFamilyOptions as font}
-                      <option value={font.name}>{font.name}</option>
-                    {/each}
-                  </select>
-                  <button
-                    class="settings-icon-button"
-                    type="button"
-                    aria-label={randomizeFontOnLoad ? "Disable random font on document load" : "Enable random font on document load"}
-                    title={randomizeFontOnLoad ? "Random font on load: on" : "Random font on load: off"}
-                    aria-pressed={randomizeFontOnLoad}
-                    on:click={() => randomizeFontOnLoad = !randomizeFontOnLoad}
-                  >⇄</button>
-                  <button
-                    class="settings-icon-button"
-                    type="button"
-                    aria-label="Use next font"
-                    title="Use next font"
-                    on:click={rotateLayoutFontFamily}
-                  >↻</button>
-                </span>
-              </label>
               <div class="layout-stepper">
                 <span class="layout-control-icon" aria-hidden="true">¶</span>
                 <span class="layout-stepper-label">Paragraph spacing</span>
@@ -4667,6 +4851,12 @@ ${body}
               <input type="range" min="0" max={Math.max(0, editorViewportHeight - 48)} step="4" bind:value={padBottom} class="slider" aria-label="Bottom padding" />
               <span class="settings-range-value">{padBottom}</span>
             </label>
+            <label class="settings-range-row">
+              <span class="settings-control-icon" aria-hidden="true">⇅</span>
+              <span class="settings-range-label">Scroll border</span>
+              <input type="range" min="0" max="16" step="1" bind:value={cursorScrollMarginLines} class="slider" aria-label="Cursor scroll border in display lines" />
+              <span class="settings-range-value">{cursorScrollMarginLines}</span>
+            </label>
           </section>
           <section class="settings-section">
             <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">❝</span><span>Notes</span></div>
@@ -4676,18 +4866,13 @@ ${body}
               <input
                 type="range"
                 min="0"
-                max="2"
+                max="100"
                 step="1"
                 class="slider"
                 aria-label="Notes alignment"
-                disabled={!blockquoteActive}
-                value={blockquoteAlign === "left" ? 0 : blockquoteAlign === "center" ? 1 : 2}
-                on:input={e => {
-                  const align = ["left", "center", "right"][+(e.target as HTMLInputElement).value] as BlockquoteAlign;
-                  if (view) updateCurrentBlockquote(view, { align });
-                }}
+                bind:value={blockquoteAlign}
               />
-              <span class="settings-range-value">{blockquoteAlign[0].toUpperCase()}</span>
+              <span class="settings-range-value">{blockquoteAlign}</span>
             </label>
             <label class="settings-range-row">
               <span class="settings-control-icon" aria-hidden="true">W</span>
@@ -4699,18 +4884,22 @@ ${body}
                 step="1"
                 class="slider"
                 aria-label="Notes width"
-                disabled={!blockquoteActive}
-                value={blockquoteBgWidth}
-                on:input={e => {
-                  if (view) updateCurrentBlockquote(view, { width: +(e.target as HTMLInputElement).value });
-                }}
+                bind:value={blockquoteBgWidth}
               />
               <span class="settings-range-value">{blockquoteBgWidth}</span>
             </label>
           </section>
         </div>
-      {:else if settingsTab === "transcribe"}
+      {:else if settingsTab === "import"}
         <div class="settings-panel">
+          <section class="settings-section">
+            <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">↵</span><span>Import</span></div>
+            <label class="settings-toggle-row">
+              <span class="settings-control-icon" aria-hidden="true">¶</span>
+              <span>Divide imported sentences into lines</span>
+              <input type="checkbox" bind:checked={divideImportSentences} />
+            </label>
+          </section>
           <section class="settings-section">
             <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">⎋</span><span>Connection</span></div>
             <label class="settings-field">
@@ -4763,6 +4952,7 @@ ${body}
 
   <div
     class="main"
+    class:left-sidebar-collapsed={leftSidebarCollapsed}
     class:summary-collapsed={summaryCollapsed}
     class:summary-fullscreen={summaryFullscreen}
     style={`
@@ -4778,14 +4968,31 @@ ${body}
       --summary-paragraph-spacing: ${summaryFullscreen ? paragraphSpacing : 0}em;
     `}
   >
-    <div class="sidebar">
+    <div class="sidebar" class:collapsed={leftSidebarCollapsed}>
+      <div class="sidebar-header">
+        {#if !leftSidebarCollapsed}
+          <div class="sidebar-title">Controls</div>
+        {/if}
+        <button class="summary-icon-btn sidebar-collapse-btn" type="button" title={leftSidebarCollapsed ? "Show controls" : "Hide controls"} aria-label={leftSidebarCollapsed ? "Show controls" : "Hide controls"} on:click={() => leftSidebarCollapsed = !leftSidebarCollapsed}>
+          {leftSidebarCollapsed ? "›" : "‹"}
+        </button>
+      </div>
+      {#if !leftSidebarCollapsed}
       <div class="sidebar-section">
         <input type="file" accept=".srt,.txt,.md,.docx,.pdf,.mp3,.wav,.m4a,.ogg,.oga,.webm,.aac,.flac,.mp4,.mov,.mkv" multiple style="display:none" bind:this={fileInput} on:change={loadFile} />
         <button class="sidebar-label load-btn" on:click={() => fileInput.click()}>LOAD</button>
         <div class="file-actions">
-          <button class="sidebar-label load-btn" on:click={saveDocument}>Save</button>
-          <button class="sidebar-label load-btn" on:click={exportCleanHtml}>Export</button>
+          <button class="sidebar-label load-btn" on:click={saveDocument}>SAVE</button>
+          <button class="sidebar-label load-btn" on:click={exportCleanHtml}>EXPORT</button>
         </div>
+        <button
+          class="sidebar-label load-btn sidebar-settings-btn"
+          bind:this={settingsButtonEl}
+          class:active={settingsOpen}
+          on:click={() => settingsOpen = !settingsOpen}
+          aria-label="Settings"
+          aria-expanded={settingsOpen}
+        >SETTINGS</button>
         {#if audioSourceFile}
           <button class="sidebar-label load-btn" on:click={transcribeLoadedAudio} disabled={transcriptionBusy}>
             {transcriptionBusy ? "Transcribing..." : "Transcribe"}
@@ -4929,6 +5136,7 @@ ${body}
           on:input={handleSessionNotesInput}
         ></textarea>
       </div>
+      {/if}
 
     </div>
 
@@ -5316,6 +5524,20 @@ ${body}
                 event.preventDefault();
                 addStyleModalOpen = false;
               }
+            }}
+          />
+        </label>
+        <label class="style-modal-field">
+          <span>Hotkey</span>
+          <input
+            class="style-modal-input"
+            value={newStyleKeyDraft}
+            aria-label="New annotation style hotkey"
+            placeholder="Press a key"
+            on:keydown={handleNewStyleKeyKeydown}
+            on:input={event => {
+              const key = normalizeStyleKey((event.target as HTMLInputElement).value.slice(-1));
+              newStyleKeyDraft = key && isUnusedStyleKey(key) ? key : "";
             }}
           />
         </label>
