@@ -189,7 +189,7 @@
   let themeMode = loadThemeMode();
   let loadedFileType = "Markdown";
   $: if (audioElement) audioElement.playbackRate = audioRates[audioRateIndex];
-  $: audioRateText = audioRateLabel();
+  $: audioRateText = audioRateLabel(audioRateIndex);
   $: showTtsWidget = ttsAvailable && !audioUrl && loadedFileType !== "SRT";
   $: ttsProgressText = ttsStatus || (ttsSegments.length ? `${Math.min(ttsIndex + 1, ttsSegments.length)}/${ttsSegments.length}` : "ready");
 
@@ -438,14 +438,14 @@
 
   function cycleAudioRate() {
     audioRateIndex = (audioRateIndex + 1) % audioRates.length;
-    if (!audioElement) return;
-    audioElement.playbackRate = audioRates[audioRateIndex];
+    if (audioElement) audioElement.playbackRate = audioRates[audioRateIndex];
+    if (ttsUtterance) ttsUtterance.rate = audioRates[audioRateIndex];
   }
 
-  function audioRateLabel() {
-    return audioRates[audioRateIndex] === 1
+  function audioRateLabel(index = audioRateIndex) {
+    return audioRates[index] === 1
       ? "x1"
-      : audioRates[audioRateIndex] === 1.5
+      : audioRates[index] === 1.5
         ? "x1½"
         : "x2";
   }
@@ -787,7 +787,7 @@
       event.key === "ArrowRight" ||
       event.key === "ArrowUp" ||
       event.key === "ArrowDown" ||
-      "hjklwasdcqrvHJKLWASDCQRVfxeqnNuU".includes(event.key);
+      "hjklwasdcqrHJKLWASDCQRfxeqnNuU".includes(event.key);
   }
 
   function shouldDeferWindowShortcut(event: KeyboardEvent) {
@@ -937,8 +937,36 @@
   function importReflowColumns() {
     const editorWidth = editorEl?.clientWidth || 760;
     const availableWidth = Math.max(120, editorWidth - padLeft - padRight);
-    const charWidth = view?.defaultCharacterWidth || fontSize * 0.58 || 8;
+    const charWidth = measureImportReflowCharWidth();
     return Math.max(20, Math.min(140, Math.floor(availableWidth / charWidth)));
+  }
+
+  function measureImportReflowCharWidth() {
+    const content = view?.dom.querySelector<HTMLElement>(".cm-content");
+    if (!content) return view?.defaultCharacterWidth || fontSize * 0.58 || 8;
+
+    const sample = "The quick brown fox jumps over the lazy dog. Students write naturally, with commas, spaces, and varied words.";
+    const computed = getComputedStyle(content);
+    const probe = document.createElement("span");
+    probe.textContent = sample;
+    probe.style.cssText = [
+      "position:absolute",
+      "visibility:hidden",
+      "pointer-events:none",
+      "white-space:pre",
+      "inset:auto",
+      "width:auto",
+      "height:auto",
+      "padding:0",
+      "margin:0",
+      "border:0"
+    ].join(";");
+    probe.style.font = computed.font;
+    probe.style.letterSpacing = computed.letterSpacing;
+    content.appendChild(probe);
+    const width = probe.getBoundingClientRect().width;
+    probe.remove();
+    return width > 0 ? width / sample.length : view?.defaultCharacterWidth || fontSize * 0.58 || 8;
   }
 
   function wrapTextBlock(block: string, columns: number) {
@@ -2159,7 +2187,7 @@
     const colorName = normalizeNamedStyleColor(newStyleColorName);
     const nextStyle = { name, colorName, color: namedStyleColor(colorName), custom: true };
     persistCustomStyles([...customStyles, nextStyle]);
-    if (newStyleKeyDraft && isUnusedStyleKey(newStyleKeyDraft)) persistStyleKey(name, newStyleKeyDraft);
+    if (newStyleKeyDraft) persistStyleKey(name, newStyleKeyDraft);
     currentStyle = baseHighlightStyles.length + customStyles.length;
     newStyleColorName = "steel";
     newStyleName = newStyleColorName;
@@ -2328,15 +2356,27 @@
     );
     if (otherStyle && oldKey) {
       nextKeys[otherStyle.name] = oldKey;
+    } else if (otherStyle) {
+      const replacement = firstAvailableStyleKey(new Set([normalized]), name);
+      if (replacement) nextKeys[otherStyle.name] = replacement;
     }
     nextKeys[name] = normalized;
     persistStyleKeys(nextKeys);
     view?.dispatch({});
   }
 
-  function isUnusedStyleKey(key: string) {
-    const normalized = normalizeStyleKey(key);
-    return !!normalized && !highlightStyles.some(style => styleKeyForName(style.name) === normalized);
+  function firstAvailableStyleKey(excluded = new Set<string>(), ignoreName = "") {
+    const used = new Set(
+      highlightStyles
+        .filter(style => style.name !== ignoreName)
+        .map(style => styleKeyForName(style.name))
+        .filter(Boolean)
+    );
+    for (const key of "123456789abcdefghijklmnopqrstuvwxyz") {
+      const normalized = normalizeStyleKey(key);
+      if (normalized && !excluded.has(normalized) && !used.has(normalized)) return normalized;
+    }
+    return "";
   }
 
   function handleNewStyleKeyKeydown(event: KeyboardEvent) {
@@ -2358,7 +2398,7 @@
     }
     if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
       const key = normalizeStyleKey(event.key);
-      if (!key || !isUnusedStyleKey(key)) return;
+      if (!key) return;
       event.preventDefault();
       newStyleKeyDraft = key;
     }
@@ -3645,66 +3685,6 @@ ${body}
     return navigation.lineHorizontalToggle(v, direction);
   }
 
-  function clearSelectionMode() {
-    selectionMode = "none";
-    visualSelectionAnchor = null;
-    lineSelectionAnchor = null;
-  }
-
-  function toggleVisualSelectionMode(v: EditorView) {
-    if (selectionMode === "visual") {
-      clearSelectionMode();
-      return true;
-    }
-    selectionMode = "visual";
-    visualSelectionAnchor = v.state.selection.main.anchor;
-    lineSelectionAnchor = null;
-    return true;
-  }
-
-  function logicalLineSelectionRange(v: EditorView, anchorPos: number, headPos: number) {
-    const anchorLine = v.state.doc.lineAt(anchorPos);
-    const headLine = v.state.doc.lineAt(headPos);
-    return {
-      from: Math.min(anchorLine.from, headLine.from),
-      to: Math.max(anchorLine.to, headLine.to)
-    };
-  }
-
-  function startLineSelectionMode(v: EditorView) {
-    const head = v.state.selection.main.head;
-    const range = logicalLineSelectionRange(v, head, head);
-    selectionMode = "line";
-    lineSelectionAnchor = head;
-    visualSelectionAnchor = null;
-    v.dispatch({ selection: EditorSelection.range(range.from, range.to), effects: cursorScrollEffect(v, head) });
-    return true;
-  }
-
-  function runSelectionAwareNavigation(
-    v: EditorView,
-    run: (extend: boolean) => boolean,
-    options: { line?: boolean; horizontal?: boolean } = {}
-  ) {
-    if (selectionMode === "line") {
-      if (options.horizontal) return true;
-      const before = v.state.selection.main.head;
-      const handled = run(false);
-      if (!handled) return false;
-      const head = v.state.selection.main.head;
-      const range = logicalLineSelectionRange(v, lineSelectionAnchor ?? before, head);
-      v.dispatch({ selection: EditorSelection.range(range.from, range.to), effects: cursorScrollEffect(v, head) });
-      return true;
-    }
-
-    if (selectionMode === "visual") {
-      if (visualSelectionAnchor === null) visualSelectionAnchor = v.state.selection.main.anchor;
-      return run(true);
-    }
-
-    return run(false);
-  }
-
   function buildHighlightDecorator(theme = activeTheme): Extension {
     const previewPlugin = ViewPlugin.fromClass(class {
       decorations: DecorationSet;
@@ -4360,17 +4340,9 @@ ${body}
   });
 
   const normalModeKeydownBehavior = EditorView.domEventHandlers({
-    copy() {
-      if (selectionMode !== "none") setTimeout(clearSelectionMode, 0);
-      return false;
-    },
     keydown(event, v) {
       if (editorMode !== "normal") return false;
       if (event.ctrlKey || event.metaKey || event.altKey) return false;
-      if (selectionMode === "line" && ["h", "l", "q", "r", "ArrowLeft", "ArrowRight"].includes(event.key)) {
-        event.preventDefault();
-        return true;
-      }
       if (event.key !== "c" && event.key !== "C") return false;
 
       event.preventDefault();
@@ -4386,7 +4358,7 @@ ${body}
     return Prec.high(keymap.of([
       { any: (v, event) => editorMode === "normal" && handleVariantPickerKey(v, event) },
       // Always: Escape returns to normal
-      { key: "Escape", run: v => { clearSelectionMode(); setMode("normal"); return true; } },
+      { key: "Escape", run: v => { setMode("normal"); return true; } },
       // Always: F2 toggles edit/annotate
       { key: "F2", run: v => { setMode(editorMode === "insert" ? "normal" : "insert"); return true; } },
       { key: "F1", run: () => { showHelp = !showHelp; return true; } },
@@ -4398,10 +4370,10 @@ ${body}
       { key: "ArrowDown", run: v => exitBlockquoteEditForNavigation(v) },
 
       // Normal-mode only: Navigation
-      { key: "ArrowLeft",        run: normal(v => runSelectionAwareNavigation(v, extend => { extend ? selectCharLeft(v) : cursorCharLeft(v); return true; }, { horizontal: true })) },
-      { key: "ArrowRight",       run: normal(v => runSelectionAwareNavigation(v, extend => { extend ? selectCharRight(v) : cursorCharRight(v); return true; }, { horizontal: true })) },
-      { key: "ArrowUp",          run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveLineSkippingSrt(v, "up", extend), { line: true })) },
-      { key: "ArrowDown",        run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveLineSkippingSrt(v, "down", extend), { line: true })) },
+      { key: "ArrowLeft",        run: normal(v => { cursorCharLeft(v);  return true; }) },
+      { key: "ArrowRight",       run: normal(v => { cursorCharRight(v); return true; }) },
+      { key: "ArrowUp",          run: normal(v => navigation.moveLineSkippingSrt(v, "up")) },
+      { key: "ArrowDown",        run: normal(v => navigation.moveLineSkippingSrt(v, "down")) },
       { key: "Shift-ArrowLeft",  run: normal(v => { selectCharLeft(v);  return true; }) },
       { key: "Shift-ArrowRight", run: normal(v => { selectCharRight(v); return true; }) },
       { key: "Shift-ArrowUp",    run: normal(v => navigation.moveLineSkippingSrt(v, "up", true)) },
@@ -4414,20 +4386,20 @@ ${body}
       { key: "Shift-Ctrl-ArrowRight", run: normal(v => navigation.moveByWordCount(v, true, 1, true)) },
       { key: "Shift-Ctrl-ArrowUp",    run: normal(v => navigation.paragraphBoundary(v, "start", true)) },
       { key: "Shift-Ctrl-ArrowDown",  run: normal(v => navigation.paragraphBoundary(v, "end", true)) },
-      { key: "h", run: normal(v => runSelectionAwareNavigation(v, extend => { extend ? selectCharLeft(v) : cursorCharLeft(v); return true; }, { horizontal: true })) },
-      { key: "j", run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveLineSkippingSrt(v, "down", extend), { line: true })) },
-      { key: "k", run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveLineSkippingSrt(v, "up", extend), { line: true })) },
-      { key: "l", run: normal(v => runSelectionAwareNavigation(v, extend => { extend ? selectCharRight(v) : cursorCharRight(v); return true; }, { horizontal: true })) },
-      { key: "q", run: normal(v => runSelectionAwareNavigation(v, extend => { extend ? selectCharLeft(v) : cursorCharLeft(v); return true; }, { horizontal: true })) },
-      { key: "r", run: normal(v => runSelectionAwareNavigation(v, extend => { extend ? selectCharRight(v) : cursorCharRight(v); return true; }, { horizontal: true })) },
+      { key: "h", run: normal(v => { cursorCharLeft(v);  return true; }) },
+      { key: "j", run: normal(v => navigation.moveLineSkippingSrt(v, "down")) },
+      { key: "k", run: normal(v => navigation.moveLineSkippingSrt(v, "up")) },
+      { key: "l", run: normal(v => { cursorCharRight(v); return true; }) },
+      { key: "q", run: normal(v => { cursorCharLeft(v);  return true; }) },
+      { key: "r", run: normal(v => { cursorCharRight(v); return true; }) },
       { key: "Ctrl-h", run: normal(v => navigation.moveByWordCount(v, false, 1)) },
       { key: "Ctrl-j", run: normal(v => navigation.paragraphBoundary(v, "end")) },
       { key: "Ctrl-k", run: normal(v => navigation.paragraphBoundary(v, "start")) },
       { key: "Ctrl-l", run: normal(v => navigation.moveByWordCount(v, true, 1)) },
-      { key: "w", run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveLineSkippingSrt(v, "up", extend), { line: true })) },
-      { key: "s", run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveLineSkippingSrt(v, "down", extend), { line: true })) },
-      { key: "a", run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveByWordCount(v, false, 1, extend), { horizontal: true })) },
-      { key: "d", run: normal(v => runSelectionAwareNavigation(v, extend => navigation.moveByWordCount(v, true, 1, extend), { horizontal: true })) },
+      { key: "w", run: normal(v => navigation.moveLineSkippingSrt(v, "up")) },
+      { key: "s", run: normal(v => navigation.moveLineSkippingSrt(v, "down")) },
+      { key: "a", run: normal(v => navigation.moveByWordCount(v, false, 1)) },
+      { key: "d", run: normal(v => navigation.moveByWordCount(v, true, 1)) },
       { key: "c", run: normal(v => moveCursorByColumnStride(v, 1)) },
       { key: "C", run: normal(v => moveCursorByColumnStride(v, -1)) },
       { key: "Ctrl-w", run: normal(v => navigation.paragraphBoundary(v, "start")) },
@@ -4452,8 +4424,6 @@ ${body}
       { key: "Shift-Ctrl-s", run: normal(v => navigation.paragraphBoundary(v, "end", true)) },
       { key: "Shift-Ctrl-a", run: normal(v => navigation.moveByWordCount(v, false, 5, true)) },
       { key: "Shift-Ctrl-d", run: normal(v => navigation.moveByWordCount(v, true, 5, true)) },
-      { key: "v", run: normal(v => toggleVisualSelectionMode(v)) },
-      { key: "V", run: normal(v => startLineSelectionMode(v)) },
       // Normal-mode only: Annotation actions
       {
         any: (v, event) => {
@@ -4493,17 +4463,12 @@ ${body}
       { key: "Alt-ArrowLeft",  run: () => { seekAudio(-10); return true; } },
       { key: "Alt-ArrowRight", run: () => { seekAudio(10); return true; } },
       {
-        any: (_view, event) => {
-          if (
-            editorMode !== "normal" ||
-            event.key.length !== 1 ||
-            event.ctrlKey ||
-            event.metaKey ||
-            event.altKey
-          ) return false;
-          event.preventDefault();
-          return true;
-        }
+        any: (_view, event) =>
+          editorMode === "normal" &&
+          event.key.length === 1 &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !event.altKey
       },
     ]));
   }
@@ -5522,13 +5487,13 @@ ${body}
           <span>Hotkey</span>
           <input
             class="style-modal-input"
-            value={newStyleKeyDraft}
+            bind:value={newStyleKeyDraft}
             aria-label="New annotation style hotkey"
             placeholder="Press a key"
             on:keydown={handleNewStyleKeyKeydown}
             on:input={event => {
               const key = normalizeStyleKey((event.target as HTMLInputElement).value.slice(-1));
-              newStyleKeyDraft = key && isUnusedStyleKey(key) ? key : "";
+              newStyleKeyDraft = key;
             }}
           />
         </label>
