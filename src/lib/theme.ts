@@ -46,7 +46,7 @@ export const themes: Record<ThemeMode, ThemePalette> = {
     bg: "#eceff4", bgSoft: "#e5e9f0", bgHard: "#d8dee9",
     bgAlt: "#e5e9f0", border: "#cfd7e3", fg: "#2e3440",
     fgMuted: "#4c566a", yellow: "#ebcb8b", green: "#a3be8c",
-    blue: "#81a1c1", aqua: "#8fbcbb", orange: "#d08770",
+    blue: "#81a1c1", aqua: "#8fbcbb", orange: "#b65f4a",
     red: "#bf616a", purple: "#b48ead", selection: "#d8dee9",
     activeLine: "transparent", gutterText: "#5e6472",
     cursor: "#5e81ac", comment: "#4c566a",

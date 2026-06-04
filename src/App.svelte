@@ -462,6 +462,29 @@
     return voices;
   }
 
+  function waitForTtsVoices(timeoutMs = 1800) {
+    const synth = speechSynth();
+    if (!synth) return Promise.resolve([] as SpeechSynthesisVoice[]);
+    const existingVoices = synth.getVoices();
+    if (existingVoices.length) return Promise.resolve(existingVoices);
+
+    ttsStatus = "loading voice";
+    return new Promise<SpeechSynthesisVoice[]>(resolve => {
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        synth.removeEventListener("voiceschanged", finish);
+        resolve(synth.getVoices());
+      };
+
+      timer = setTimeout(finish, timeoutMs);
+      synth.addEventListener("voiceschanged", finish);
+    });
+  }
+
   function preferredTtsVoice(voices: SpeechSynthesisVoice[]) {
     const isEnglish = (voice: SpeechSynthesisVoice) => voice.lang.toLowerCase().startsWith("en");
     return voices.find(voice => voice.localService && isEnglish(voice)) ??
@@ -559,15 +582,33 @@
     if (!segment) return;
 
     ttsRunId += 1;
-    const runId = ttsRunId;
+    void startTtsSegment(index, ttsRunId, useBrowserDefaultVoice);
+  }
+
+  async function startTtsSegment(index: number, runId: number, useBrowserDefaultVoice = false) {
+    const synth = speechSynth();
+    const segment = ttsSegments[index];
+    const Utterance = typeof window === "undefined" ? null : window.SpeechSynthesisUtterance;
+    if (!synth || !Utterance) {
+      ttsStatus = "unavailable";
+      return;
+    }
+    if (!segment) return;
+
     if (ttsSpeakTimer) {
       clearTimeout(ttsSpeakTimer);
       ttsSpeakTimer = null;
     }
-    const replacingSpeech = synth.speaking || synth.pending || !!ttsUtterance;
-    if (replacingSpeech) synth.cancel();
+    synth.cancel();
 
-    const voices = refreshTtsVoices();
+    ttsUtterance = null;
+    ttsIndex = index;
+    ttsSpeaking = false;
+    ttsPaused = false;
+    ttsStatus = "queued";
+
+    const voices = await waitForTtsVoices();
+    if (runId !== ttsRunId) return;
     if (!voices.length) {
       ttsUtterance = null;
       ttsSpeaking = false;
@@ -589,9 +630,9 @@
     };
     utterance.onend = () => {
       if (runId !== ttsRunId) return;
-      if (ttsIndex < ttsSegments.length - 1) {
-        ttsIndex += 1;
-        speakTtsSegment(ttsIndex);
+      if (index < ttsSegments.length - 1) {
+        ttsIndex = index + 1;
+        void startTtsSegment(ttsIndex, runId);
         return;
       }
       ttsUtterance = null;
@@ -606,7 +647,7 @@
       ttsPaused = false;
       if (!useBrowserDefaultVoice && utterance.voice) {
         ttsStatus = "retrying";
-        speakTtsSegment(index, true);
+        void startTtsSegment(index, runId, true);
         return;
       }
       ttsStatus = event.error === "interrupted" || event.error === "canceled" ? "" : event.error;
@@ -615,7 +656,7 @@
 
     ttsUtterance = utterance;
     ttsIndex = index;
-    ttsSpeaking = true;
+    ttsSpeaking = false;
     ttsPaused = false;
     ttsStatus = "queued";
     const startSpeaking = () => {
@@ -637,8 +678,7 @@
       }, 1200);
     };
 
-    if (replacingSpeech) ttsSpeakTimer = setTimeout(startSpeaking, 80);
-    else startSpeaking();
+    ttsSpeakTimer = setTimeout(startSpeaking, 0);
   }
 
   function toggleTtsPlayback() {
@@ -3147,6 +3187,23 @@ ${body}
     return true;
   }
 
+  function insertBlockquoteLevel(v: EditorView) {
+    if (editorMode !== "insert") return false;
+    const selection = v.state.selection.main;
+    if (!selection.empty) return false;
+    const head = selection.head;
+    const line = v.state.doc.lineAt(head);
+    if (!line.text.startsWith(">")) return false;
+
+    const match = /^(?:>\s*)+/.exec(line.text);
+    const insertAt = line.from + (match?.[0].length ?? 0);
+    v.dispatch({
+      changes: { from: insertAt, insert: "> " },
+      selection: { anchor: head + (insertAt <= head ? 2 : 0) }
+    });
+    return true;
+  }
+
   // Annotation tooltip StateField
   const annotationTooltipField = StateField.define<readonly Tooltip[]>({
     create: () => [],
@@ -4025,6 +4082,7 @@ ${body}
       { key: "Enter", run: v => finishBlockquoteEditMode(v) },
       { key: "Shift-Enter", run: v => insertBlockquoteLineBreak(v) },
       { key: "Alt-Enter", run: v => insertBlockquoteLineBreak(v) },
+      { key: "Tab", run: v => insertBlockquoteLevel(v) },
 
       // Normal-mode only: Navigation
       { key: "ArrowLeft",        run: normal(v => { cursorCharLeft(v);  return true; }) },
@@ -4591,31 +4649,6 @@ ${body}
       </div>
 
       <div class="sidebar-section">
-        <div class="sidebar-section-header">
-          <div class="sidebar-label">Notes</div>
-          <button
-            class="sidebar-copy-btn"
-            type="button"
-            on:click={() => navigator.clipboard?.writeText(sessionNotes)}
-            disabled={!sessionNotes.trim()}
-            title="Copy notes"
-            aria-label="Copy notes"
-          >
-            Copy
-          </button>
-        </div>
-        <div class="sidebar-hint">Persistent scratchpad for follow-up ideas, synced locally.</div>
-        <textarea
-          class="settings-input settings-textarea sidebar-notes"
-          rows="10"
-          bind:value={sessionNotes}
-          placeholder="Write ideas, change requests, or a handoff for the next pass..."
-          aria-label="Persistent notes"
-          on:input={handleSessionNotesInput}
-        ></textarea>
-      </div>
-
-      <div class="sidebar-section">
         <label class="mode-switch" aria-label="Switch between Annotate and Edit mode">
           <span class:active={editorMode === "normal"}>Annotate</span>
           <input
@@ -4730,6 +4763,31 @@ ${body}
           {/each}
         </div>
         <button class="add-style-inline" type="button" on:click={() => addStyleModalOpen = true} aria-label="Add annotation style">+</button>
+      </div>
+
+      <div class="sidebar-section sidebar-notes-section">
+        <div class="sidebar-section-header">
+          <div class="sidebar-label">Notes</div>
+          <button
+            class="sidebar-copy-btn"
+            type="button"
+            on:click={() => navigator.clipboard?.writeText(sessionNotes)}
+            disabled={!sessionNotes.trim()}
+            title="Copy notes"
+            aria-label="Copy notes"
+          >
+            Copy
+          </button>
+        </div>
+        <div class="sidebar-hint">Persistent scratchpad for follow-up ideas, synced locally.</div>
+        <textarea
+          class="settings-input settings-textarea sidebar-notes"
+          rows="10"
+          bind:value={sessionNotes}
+          placeholder="Write ideas, change requests, or a handoff for the next pass..."
+          aria-label="Persistent notes"
+          on:input={handleSessionNotesInput}
+        ></textarea>
       </div>
 
     </div>
@@ -5126,6 +5184,7 @@ ${body}
           <button type="button" class="primary" on:click={addCustomStyle}>Add</button>
         </div>
       </div>
+
     </div>
   {/if}
 

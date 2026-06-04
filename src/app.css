@@ -510,6 +510,12 @@
     resize: vertical;
   }
 
+  .sidebar-notes-section {
+    margin-top: auto;
+    border-top: 1px solid var(--internal-border);
+    border-bottom: 0;
+  }
+
   .sidebar-toggle {
     position: relative;
     display: flex;
