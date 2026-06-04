@@ -3869,6 +3869,29 @@ ${body}
     return false;
   }
 
+  function deleteSelectionOrNextChar(v: EditorView) {
+    const selection = v.state.selection.main;
+    if (!selection.empty) {
+      v.dispatch({
+        changes: { from: selection.from, to: selection.to, insert: "" },
+        selection: { anchor: selection.from }
+      });
+      return true;
+    }
+
+    const head = selection.head;
+    if (head >= v.state.doc.length) return true;
+    v.dispatch({
+      changes: { from: head, to: head + 1, insert: "" },
+      selection: { anchor: head }
+    });
+    return true;
+  }
+
+  function removeAnnotationOrDelete(v: EditorView) {
+    return removeAnnotation(v) || deleteSelectionOrNextChar(v);
+  }
+
   function toggleAnnotationEdit(v: EditorView) {
     const cursor = v.state.selection.main.head;
     const docText = v.state.doc.toString();
@@ -4248,7 +4271,7 @@ ${body}
       },
       { key: "Space",  run: normal(v => wrapSelectionOrWord(v, currentStyle)) },
       { key: "Enter",  run: normal(v => handleEnterInAnnotationMode(v)) },
-      { key: "x",      run: normal(v => removeAnnotation(v)) },
+      { key: "x",      run: normal(v => removeAnnotationOrDelete(v)) },
       { key: "Tab",    run: normal(v => cycleAnnotationVariant(v, +1)) },
       { key: "Shift-Tab", run: normal(v => cycleAnnotationVariant(v, -1)) },
       { key: "e",      run: normal(v => cycleAnnotationVariant(v, +1)) },
@@ -4861,16 +4884,6 @@ ${body}
       <div class="sidebar-section sidebar-notes-section">
         <div class="sidebar-section-header">
           <div class="sidebar-label">Notes</div>
-          <button
-            class="sidebar-copy-btn"
-            type="button"
-            on:click={() => navigator.clipboard?.writeText(sessionNotes)}
-            disabled={!sessionNotes.trim()}
-            title="Copy notes"
-            aria-label="Copy notes"
-          >
-            Copy
-          </button>
         </div>
         <div class="sidebar-hint">Persistent scratchpad for follow-up ideas, synced locally.</div>
         <textarea

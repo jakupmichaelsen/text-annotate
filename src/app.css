@@ -506,6 +506,7 @@
   }
 
   .sidebar-notes {
+    background: var(--bg);
     min-height: 128px;
     resize: vertical;
   }
