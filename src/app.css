@@ -1847,7 +1847,7 @@
 
   .status-annotation {
     gap: 5px;
-    color: var(--fg);
+    color: var(--status-annotation-color, var(--fg));
   }
 
   .status-swatch {

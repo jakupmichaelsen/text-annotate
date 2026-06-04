@@ -1747,7 +1747,7 @@
   function currentHighlightStyles(theme = activeTheme): AnnotationStyle[] {
     return [
       ...baseHighlightStyles.map(style => style.name === "callout" ? { ...style, color: theme.fg, colorName: style.name } : { ...style, colorName: style.name }),
-      ...customStyles
+      ...customStyles.map(style => ({ ...style, color: namedStyleColor(style.colorName ?? style.name, theme) }))
     ];
   }
 
@@ -1955,7 +1955,8 @@
       .slice(0, 24);
   }
 
-  function namedStyleColor(name: string) {
+  function namedStyleColor(name: string, theme = activeTheme) {
+    if (name === "orange") return theme.orange;
     return namedStyleColors.find(color => color.name === name)?.color ?? namedStyleColors[0].color;
   }
 
@@ -5158,7 +5159,7 @@ ${body}
     <div class="statusbar">
       <div class="status-cluster status-primary">
         <span class="status-mode" style="--mode-color: {editorMode === 'insert' ? activeTheme.green : activeTheme.orange}">{editorModeLabel}</span>
-        <span class="status-annotation" style={`--swatch-color: ${currentStyleColor}; --swatch-text: ${annotationTextColorForStyle(styleName(currentStyle), currentStyleColor)}`}>
+        <span class="status-annotation" style={`--swatch-color: ${currentStyleColor}; --swatch-text: ${annotationTextColorForStyle(styleName(currentStyle), currentStyleColor)}; --status-annotation-color: ${currentStyleColor}`}>
           <span
             class="status-swatch"
             class:variant-fill={currentAnnotationVariant === "fill"}
