@@ -127,6 +127,7 @@
   let currentLineHighlightOpacity = initialLayoutSettings.currentLineHighlightOpacity ?? 0.34;
   let columnGuideThickness = initialLayoutSettings.columnGuideThickness ?? 1;
   let columnStride = initialLayoutSettings.columnStride ?? 40;
+  let wordNavigation = initialLayoutSettings.wordNavigation ?? false;
   let layoutFontFamilyName = initialLayoutSettings.fontFamilyName ?? defaultFontFamilyName;
   let randomizeFontOnLoad = initialLayoutSettings.randomizeFontOnLoad ?? false;
   let rotateFontOnLoad = initialLayoutSettings.rotateFontOnLoad ?? false;
@@ -305,6 +306,7 @@
     currentLineHighlightOpacity;
     columnGuideThickness;
     columnStride;
+    wordNavigation;
     blockquoteAlign;
     blockquoteBgWidth;
     importLineMode;
@@ -798,25 +800,6 @@
     seekAudio(direction * (normalized === "a" || normalized === "d" ? mediaShortcutSeekSeconds : mediaSeekSeconds));
   }
 
-  function handleWindowKeydownCapture(event: KeyboardEvent) {
-    if (
-      event.defaultPrevented ||
-      !view ||
-      editorMode !== "normal" ||
-      !isEditorEventTarget(event.target) ||
-      event.ctrlKey ||
-      event.metaKey ||
-      event.altKey ||
-      (event.key !== "c" && event.key !== "C")
-    ) {
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-    moveCursorByColumnStride(view, event.key === "C" ? -1 : 1);
-  }
-
   function handleWindowKeydown(event: KeyboardEvent) {
     if (event.key === "Escape" && settingsOpen) {
       settingsOpen = false;
@@ -1118,6 +1101,7 @@
     currentLineHighlightOpacity: number;
     columnGuideThickness: number;
     columnStride: number;
+    wordNavigation: boolean;
     blockquoteAlign: number;
     blockquoteBgWidth: number;
     importLineMode: ImportLineMode;
@@ -1190,6 +1174,7 @@
       currentLineHighlightOpacity: Math.round(numberOr("currentLineHighlightOpacity", 0.34, 0.08, 0.7) * 100) / 100,
       columnGuideThickness: Math.round(numberOr("columnGuideThickness", 1, 1, 6)),
       columnStride: Math.round(numberOr("columnStride", 40, 4, 120)),
+      wordNavigation: typeof settings.wordNavigation === "boolean" ? settings.wordNavigation : undefined,
       blockquoteAlign: Math.round(numberOr("blockquoteAlign", 0, 0, 100)),
       blockquoteBgWidth: Math.round(numberOr("blockquoteBgWidth", 100, 0, 100)),
       importLineMode: settings.importLineMode === "original" || settings.importLineMode === "sentences" || settings.importLineMode === "reflow"
@@ -1217,6 +1202,7 @@
       currentLineHighlightOpacity,
       columnGuideThickness,
       columnStride,
+      wordNavigation,
       blockquoteAlign,
       blockquoteBgWidth,
       importLineMode,
@@ -1253,6 +1239,7 @@
     currentLineHighlightOpacity = settings.currentLineHighlightOpacity ?? currentLineHighlightOpacity;
     columnGuideThickness = settings.columnGuideThickness ?? columnGuideThickness;
     columnStride = settings.columnStride ?? columnStride;
+    wordNavigation = settings.wordNavigation ?? wordNavigation;
     blockquoteAlign = settings.blockquoteAlign ?? blockquoteAlign;
     blockquoteBgWidth = settings.blockquoteBgWidth ?? blockquoteBgWidth;
     importLineMode = settings.importLineMode ?? (settings.divideImportSentences === false ? "original" : importLineMode);
@@ -3649,11 +3636,25 @@ ${body}
     const stride = Math.max(1, Math.round(columnStride));
     const selection = v.state.selection.main;
     const head = selection.head;
-    const line = v.state.doc.lineAt(head);
+    const doc = v.state.doc;
+    const line = doc.lineAt(head);
     const columnOffset = head - line.from;
-    const nextColumn = Math.max(0, Math.min(line.length, columnOffset + direction * stride));
+    let target = line.from;
+
+    if (direction > 0) {
+      const nextColumn = columnOffset + stride;
+      if (nextColumn <= line.length) target = line.from + nextColumn;
+      else if (line.number < doc.lines) target = doc.line(line.number + 1).from;
+      else target = line.to;
+    } else {
+      const nextColumn = columnOffset - stride;
+      if (nextColumn >= 0) target = line.from + nextColumn;
+      else if (line.number > 1) target = doc.line(line.number - 1).to;
+      else target = line.from;
+    }
+
     v.dispatch({
-      selection: EditorSelection.cursor(line.from + nextColumn),
+      selection: EditorSelection.cursor(target),
       scrollIntoView: true
     });
     return true;
@@ -4338,6 +4339,7 @@ ${body}
       highlightActiveLineGutter(),
       buildEditorKeymap({
         getEditorMode: () => editorMode,
+        useWordNavigation: () => wordNavigation,
         handleVariantPickerKey,
         setAnnotationColorOrStyle,
         setMode: mode => { setMode(mode); return true; },
@@ -4395,7 +4397,6 @@ ${body}
       if (settingsPopoverEl?.contains(target) || settingsButtonEl?.contains(target)) return;
       settingsOpen = false;
     };
-    window.addEventListener("keydown", handleWindowKeydownCapture, true);
     window.addEventListener("keydown", onWindowKeydown);
     window.addEventListener("pointerdown", onWindowPointerDown);
     ttsAvailable = "speechSynthesis" in window && "SpeechSynthesisUtterance" in window;
@@ -4429,7 +4430,6 @@ ${body}
     void restoreAudioFile();
 
     return () => {
-      window.removeEventListener("keydown", handleWindowKeydownCapture, true);
       window.removeEventListener("keydown", onWindowKeydown);
       synth?.removeEventListener("voiceschanged", onVoicesChanged);
       resetTtsState();
@@ -4632,6 +4632,15 @@ ${body}
               />
               <span class="settings-range-value">{columnStride}</span>
             </label>
+            <label class="settings-toggle-row">
+              <span class="settings-control-icon" aria-hidden="true">W</span>
+              <span>Word navigation</span>
+              <input
+                type="checkbox"
+                checked={wordNavigation}
+                on:change={event => wordNavigation = (event.target as HTMLInputElement).checked}
+              />
+            </label>
             <label class="settings-range-row">
               <span class="settings-control-icon" aria-hidden="true">L</span>
               <span class="settings-range-label">Left padding</span>
@@ -4787,16 +4796,14 @@ ${body}
   >
     <div class="sidebar" class:collapsed={leftSidebarCollapsed}>
       <div class="sidebar-header">
-        {#if !leftSidebarCollapsed}
-          <input type="file" accept=".srt,.txt,.md,.docx,.pdf,.mp3,.wav,.m4a,.ogg,.oga,.webm,.aac,.flac,.mp4,.mov,.mkv" multiple style="display:none" bind:this={fileInput} on:change={loadFile} />
-          <button class="sidebar-label load-btn" on:click={() => fileInput.click()}>LOAD</button>
-        {/if}
         <button class="summary-icon-btn sidebar-collapse-btn" type="button" title={leftSidebarCollapsed ? "Show controls" : "Hide controls"} aria-label={leftSidebarCollapsed ? "Show controls" : "Hide controls"} on:click={() => leftSidebarCollapsed = !leftSidebarCollapsed}>
           {leftSidebarCollapsed ? "›" : "‹"}
         </button>
       </div>
       {#if !leftSidebarCollapsed}
       <div class="sidebar-section">
+        <input type="file" accept=".srt,.txt,.md,.docx,.pdf,.mp3,.wav,.m4a,.ogg,.oga,.webm,.aac,.flac,.mp4,.mov,.mkv" multiple style="display:none" bind:this={fileInput} on:change={loadFile} />
+        <button class="sidebar-label load-btn sidebar-load-btn" on:click={() => fileInput.click()}>LOAD</button>
         <div class="file-actions">
           <button class="sidebar-label load-btn" on:click={saveDocument}>SAVE</button>
           <button class="sidebar-label load-btn" on:click={exportCleanHtml}>EXPORT</button>
@@ -4839,7 +4846,7 @@ ${body}
 
       <div class="sidebar-section">
         <div class="sidebar-label">Annotation styles</div>
-        <div class="sidebar-hint">Tab / Shift+Tab: variation</div>
+        <div class="sidebar-hint">Tab / Shift+Tab: stride</div>
         <div class="style-list sidebar-style-list">
           <div
             class="style-row style-row-plain"
