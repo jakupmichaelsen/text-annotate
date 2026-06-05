@@ -53,6 +53,7 @@
     srtTimestampForTranscriptLine
   } from "./lib/srt";
   import {
+    buildEditorKeymap,
     isAudioRateShortcut,
     isAudioShortcut,
     isAppShortcutCandidate,
@@ -3645,7 +3646,17 @@ ${body}
   }
 
   function moveCursorByColumnStride(v: EditorView, direction: 1 | -1) {
-    return navigation.lineHorizontalToggle(v, direction);
+    const stride = Math.max(1, Math.round(columnStride));
+    const selection = v.state.selection.main;
+    const head = selection.head;
+    const line = v.state.doc.lineAt(head);
+    const columnOffset = head - line.from;
+    const nextColumn = Math.max(0, Math.min(line.length, columnOffset + direction * stride));
+    v.dispatch({
+      selection: EditorSelection.cursor(line.from + nextColumn),
+      scrollIntoView: true
+    });
+    return true;
   }
 
   function buildHighlightDecorator(theme = activeTheme): Extension {
@@ -4302,21 +4313,9 @@ ${body}
     }
   });
 
-  const normalModeKeydownBehavior = EditorView.domEventHandlers({
-    keydown(event, v) {
-      if (editorMode !== "normal") return false;
-      if (event.ctrlKey || event.metaKey || event.altKey) return false;
-      if (event.key !== "c" && event.key !== "C") return false;
-
-      event.preventDefault();
-      return moveCursorByColumnStride(v, event.key === "C" ? -1 : 1);
-    }
-  });
-
   function baseExtensions(): Extension[] {
     return [
       dblClickBehavior,
-      normalModeKeydownBehavior,
       EditorView.lineWrapping,
       lineNumbers({
         formatNumber: formatEditorLineNumber,
