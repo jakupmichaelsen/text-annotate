@@ -127,7 +127,9 @@
   let currentLineHighlightOpacity = initialLayoutSettings.currentLineHighlightOpacity ?? 0.34;
   let columnGuideThickness = initialLayoutSettings.columnGuideThickness ?? 1;
   let columnStride = initialLayoutSettings.columnStride ?? 40;
-  let wordNavigation = initialLayoutSettings.wordNavigation ?? false;
+  let arrowWordNavigation = initialLayoutSettings.arrowWordNavigation ?? initialLayoutSettings.wordNavigation ?? false;
+  let wasdWordNavigation = initialLayoutSettings.wasdWordNavigation ?? initialLayoutSettings.wordNavigation ?? false;
+  let hjklWordNavigation = initialLayoutSettings.hjklWordNavigation ?? initialLayoutSettings.wordNavigation ?? false;
   let layoutFontFamilyName = initialLayoutSettings.fontFamilyName ?? defaultFontFamilyName;
   let randomizeFontOnLoad = initialLayoutSettings.randomizeFontOnLoad ?? false;
   let rotateFontOnLoad = initialLayoutSettings.rotateFontOnLoad ?? false;
@@ -306,7 +308,9 @@
     currentLineHighlightOpacity;
     columnGuideThickness;
     columnStride;
-    wordNavigation;
+    arrowWordNavigation;
+    wasdWordNavigation;
+    hjklWordNavigation;
     blockquoteAlign;
     blockquoteBgWidth;
     importLineMode;
@@ -1101,11 +1105,14 @@
     currentLineHighlightOpacity: number;
     columnGuideThickness: number;
     columnStride: number;
-    wordNavigation: boolean;
+    arrowWordNavigation: boolean;
+    wasdWordNavigation: boolean;
+    hjklWordNavigation: boolean;
     blockquoteAlign: number;
     blockquoteBgWidth: number;
     importLineMode: ImportLineMode;
     divideImportSentences: boolean;
+    wordNavigation?: boolean;
   };
 
   function normalizeLayoutFontFamilyName(value: string) {
@@ -1174,7 +1181,24 @@
       currentLineHighlightOpacity: Math.round(numberOr("currentLineHighlightOpacity", 0.34, 0.08, 0.7) * 100) / 100,
       columnGuideThickness: Math.round(numberOr("columnGuideThickness", 1, 1, 6)),
       columnStride: Math.round(numberOr("columnStride", 40, 4, 120)),
-      wordNavigation: typeof settings.wordNavigation === "boolean" ? settings.wordNavigation : undefined,
+      arrowWordNavigation:
+        typeof settings.arrowWordNavigation === "boolean"
+          ? settings.arrowWordNavigation
+          : typeof settings.wordNavigation === "boolean"
+            ? settings.wordNavigation
+            : undefined,
+      wasdWordNavigation:
+        typeof settings.wasdWordNavigation === "boolean"
+          ? settings.wasdWordNavigation
+          : typeof settings.wordNavigation === "boolean"
+            ? settings.wordNavigation
+            : undefined,
+      hjklWordNavigation:
+        typeof settings.hjklWordNavigation === "boolean"
+          ? settings.hjklWordNavigation
+          : typeof settings.wordNavigation === "boolean"
+            ? settings.wordNavigation
+            : undefined,
       blockquoteAlign: Math.round(numberOr("blockquoteAlign", 0, 0, 100)),
       blockquoteBgWidth: Math.round(numberOr("blockquoteBgWidth", 100, 0, 100)),
       importLineMode: settings.importLineMode === "original" || settings.importLineMode === "sentences" || settings.importLineMode === "reflow"
@@ -1202,7 +1226,9 @@
       currentLineHighlightOpacity,
       columnGuideThickness,
       columnStride,
-      wordNavigation,
+      arrowWordNavigation,
+      wasdWordNavigation,
+      hjklWordNavigation,
       blockquoteAlign,
       blockquoteBgWidth,
       importLineMode,
@@ -1239,7 +1265,9 @@
     currentLineHighlightOpacity = settings.currentLineHighlightOpacity ?? currentLineHighlightOpacity;
     columnGuideThickness = settings.columnGuideThickness ?? columnGuideThickness;
     columnStride = settings.columnStride ?? columnStride;
-    wordNavigation = settings.wordNavigation ?? wordNavigation;
+    arrowWordNavigation = settings.arrowWordNavigation ?? arrowWordNavigation;
+    wasdWordNavigation = settings.wasdWordNavigation ?? wasdWordNavigation;
+    hjklWordNavigation = settings.hjklWordNavigation ?? hjklWordNavigation;
     blockquoteAlign = settings.blockquoteAlign ?? blockquoteAlign;
     blockquoteBgWidth = settings.blockquoteBgWidth ?? blockquoteBgWidth;
     importLineMode = settings.importLineMode ?? (settings.divideImportSentences === false ? "original" : importLineMode);
@@ -4339,7 +4367,9 @@ ${body}
       highlightActiveLineGutter(),
       buildEditorKeymap({
         getEditorMode: () => editorMode,
-        useWordNavigation: () => wordNavigation,
+        useArrowWordNavigation: () => arrowWordNavigation,
+        useWasdWordNavigation: () => wasdWordNavigation,
+        useHjklWordNavigation: () => hjklWordNavigation,
         handleVariantPickerKey,
         setAnnotationColorOrStyle,
         setMode: mode => { setMode(mode); return true; },
@@ -4633,12 +4663,30 @@ ${body}
               <span class="settings-range-value">{columnStride}</span>
             </label>
             <label class="settings-toggle-row">
-              <span class="settings-control-icon" aria-hidden="true">W</span>
-              <span>Word navigation</span>
+              <span class="settings-control-icon" aria-hidden="true">↔</span>
+              <span>Arrow keys word navigation</span>
               <input
                 type="checkbox"
-                checked={wordNavigation}
-                on:change={event => wordNavigation = (event.target as HTMLInputElement).checked}
+                checked={arrowWordNavigation}
+                on:change={event => arrowWordNavigation = (event.target as HTMLInputElement).checked}
+              />
+            </label>
+            <label class="settings-toggle-row">
+              <span class="settings-control-icon" aria-hidden="true">W</span>
+              <span>WASD word navigation</span>
+              <input
+                type="checkbox"
+                checked={wasdWordNavigation}
+                on:change={event => wasdWordNavigation = (event.target as HTMLInputElement).checked}
+              />
+            </label>
+            <label class="settings-toggle-row">
+              <span class="settings-control-icon" aria-hidden="true">H</span>
+              <span>HJKL word navigation</span>
+              <input
+                type="checkbox"
+                checked={hjklWordNavigation}
+                on:change={event => hjklWordNavigation = (event.target as HTMLInputElement).checked}
               />
             </label>
             <label class="settings-range-row">

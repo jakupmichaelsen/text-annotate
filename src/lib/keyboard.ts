@@ -54,7 +54,9 @@ export type EditorMode = "normal" | "insert";
 
 export type EditorKeymapHandlers = {
   getEditorMode: () => EditorMode;
-  useWordNavigation: () => boolean;
+  useArrowWordNavigation: () => boolean;
+  useWasdWordNavigation: () => boolean;
+  useHjklWordNavigation: () => boolean;
   handleVariantPickerKey: (view: EditorViewType, event: KeyboardEvent) => boolean;
   setAnnotationColorOrStyle: (view: EditorViewType, style: number) => boolean;
   setMode: (mode: EditorMode) => boolean;
@@ -93,33 +95,52 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
   const normal = (fn: (view: EditorViewType) => boolean) =>
     (view: EditorViewType) => handlers.getEditorMode() === "normal" ? fn(view) : false;
 
-  const moveHorizontal = (view: EditorViewType, forward: boolean, extend = false) => {
-    if (handlers.useWordNavigation()) {
+  const moveHorizontal = (view: EditorViewType, forward: boolean, extend = false, useWordNavigation = false) => {
+    if (useWordNavigation) {
       return handlers.navigation.moveByWordCount(view, forward, 1, extend);
     }
     if (forward) return extend ? handlers.selectCharRight(view) : handlers.cursorCharRight(view);
     return extend ? handlers.selectCharLeft(view) : handlers.cursorCharLeft(view);
   };
 
-  const normalVerticalNavigationBehavior = EditorView.domEventHandlers({
+  const normalNavigationBehavior = EditorView.domEventHandlers({
     keydown(event, view) {
       if (handlers.getEditorMode() !== "normal") return false;
       if (event.ctrlKey || event.metaKey || event.altKey) return false;
 
       const key = event.key.toLowerCase();
+      const extend = event.shiftKey;
+
+      if (
+        key === "arrowleft" || key === "arrowright" ||
+        key === "h" || key === "l" || key === "q" || key === "r" ||
+        key === "a" || key === "d"
+      ) {
+        const forward = key === "arrowright" || key === "l" || key === "r" || key === "d";
+        const useWordNavigation =
+          key === "arrowleft" || key === "arrowright"
+            ? handlers.useArrowWordNavigation()
+            : key === "a" || key === "d"
+              ? handlers.useWasdWordNavigation()
+              : handlers.useHjklWordNavigation();
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return moveHorizontal(view, forward, extend, useWordNavigation);
+      }
+
       let direction: "up" | "down" | null = null;
-      if (key === "j" || key === "s") direction = "down";
-      else if (key === "k" || key === "w") direction = "up";
+      if (key === "arrowup" || key === "j" || key === "s") direction = "down";
+      else if (key === "arrowdown" || key === "k" || key === "w") direction = "up";
       else return false;
 
       event.preventDefault();
       event.stopImmediatePropagation();
-      return handlers.navigation.moveLineSkippingSrt(view, direction, event.shiftKey);
+      return handlers.navigation.moveLineSkippingSrt(view, direction, extend);
     }
   });
 
   return [
-    normalVerticalNavigationBehavior,
+    normalNavigationBehavior,
     Prec.high(keymap.of([
       { any: (view, event) => handlers.getEditorMode() === "normal" && handlers.handleVariantPickerKey(view, event) },
       { key: "Escape", run: view => { handlers.setMode("normal"); return true; } },
@@ -132,14 +153,6 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       { key: "ArrowUp", run: view => handlers.exitBlockquoteEditForNavigation(view) },
       { key: "ArrowDown", run: view => handlers.exitBlockquoteEditForNavigation(view) },
 
-      { key: "ArrowLeft",        run: normal(view => moveHorizontal(view, false)) },
-      { key: "ArrowRight",       run: normal(view => moveHorizontal(view, true)) },
-      { key: "ArrowUp",          run: normal(view => handlers.navigation.moveLineSkippingSrt(view, "up")) },
-      { key: "ArrowDown",        run: normal(view => handlers.navigation.moveLineSkippingSrt(view, "down")) },
-      { key: "Shift-ArrowLeft",  run: normal(view => moveHorizontal(view, false, true)) },
-      { key: "Shift-ArrowRight", run: normal(view => moveHorizontal(view, true, true)) },
-      { key: "Shift-ArrowUp",    run: normal(view => handlers.navigation.moveLineSkippingSrt(view, "up", true)) },
-      { key: "Shift-ArrowDown",  run: normal(view => handlers.navigation.moveLineSkippingSrt(view, "down", true)) },
       { key: "Ctrl-ArrowLeft",        run: normal(view => handlers.navigation.moveByWordCount(view, false, 1)) },
       { key: "Ctrl-ArrowRight",       run: normal(view => handlers.navigation.moveByWordCount(view, true, 1)) },
       { key: "Ctrl-ArrowUp",          run: normal(view => handlers.navigation.paragraphBoundary(view, "start")) },
@@ -148,31 +161,19 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       { key: "Shift-Ctrl-ArrowRight", run: normal(view => handlers.navigation.moveByWordCount(view, true, 1, true)) },
       { key: "Shift-Ctrl-ArrowUp",    run: normal(view => handlers.navigation.paragraphBoundary(view, "start", true)) },
       { key: "Shift-Ctrl-ArrowDown",  run: normal(view => handlers.navigation.paragraphBoundary(view, "end", true)) },
-      { key: "h", run: normal(view => moveHorizontal(view, false)) },
-      { key: "l", run: normal(view => moveHorizontal(view, true)) },
-      { key: "q", run: normal(view => moveHorizontal(view, false)) },
-      { key: "r", run: normal(view => moveHorizontal(view, true)) },
       { key: "Ctrl-h", run: normal(view => handlers.navigation.moveByWordCount(view, false, 1)) },
       { key: "Ctrl-j", run: normal(view => handlers.navigation.paragraphBoundary(view, "end")) },
       { key: "Ctrl-k", run: normal(view => handlers.navigation.paragraphBoundary(view, "start")) },
       { key: "Ctrl-l", run: normal(view => handlers.navigation.moveByWordCount(view, true, 1)) },
-      { key: "a", run: normal(view => moveHorizontal(view, false)) },
-      { key: "d", run: normal(view => moveHorizontal(view, true)) },
       { key: "Ctrl-w", run: normal(view => handlers.navigation.paragraphBoundary(view, "start")) },
       { key: "Ctrl-s", run: normal(view => handlers.navigation.paragraphBoundary(view, "end")) },
       { key: "Ctrl-d", run: normal(view => handlers.navigation.moveByWordCount(view, true, 5)) },
       { key: "Tab", run: normal(view => handlers.moveCursorByColumnStride(view, 1)) },
       { key: "Shift-Tab", run: normal(view => handlers.moveCursorByColumnStride(view, -1)) },
-      { key: "H", run: normal(view => moveHorizontal(view, false, true)) },
-      { key: "L", run: normal(view => moveHorizontal(view, true, true)) },
-      { key: "Q", run: normal(view => moveHorizontal(view, false, true)) },
-      { key: "R", run: normal(view => moveHorizontal(view, true, true)) },
       { key: "Shift-Ctrl-h", run: normal(view => handlers.navigation.moveByWordCount(view, false, 1, true)) },
       { key: "Shift-Ctrl-j", run: normal(view => handlers.navigation.paragraphBoundary(view, "end", true)) },
       { key: "Shift-Ctrl-k", run: normal(view => handlers.navigation.paragraphBoundary(view, "start", true)) },
       { key: "Shift-Ctrl-l", run: normal(view => handlers.navigation.moveByWordCount(view, true, 1, true)) },
-      { key: "A", run: normal(view => moveHorizontal(view, false, true)) },
-      { key: "D", run: normal(view => moveHorizontal(view, true, true)) },
       { key: "Shift-Ctrl-w", run: normal(view => handlers.navigation.paragraphBoundary(view, "start", true)) },
       { key: "Shift-Ctrl-s", run: normal(view => handlers.navigation.paragraphBoundary(view, "end", true)) },
       { key: "Shift-Ctrl-a", run: normal(view => handlers.navigation.moveByWordCount(view, false, 5, true)) },
