@@ -4304,6 +4304,15 @@ ${body}
     return Math.min(Math.max(0, viewportHeight - 1), Math.max(0, preferred));
   }
 
+  function lineHeightPx(v: EditorView) {
+    const style = getComputedStyle(v.contentDOM);
+    const fontSizePx = Number.parseFloat(style.fontSize) || fontSize;
+    const computedLineHeight = Number.parseFloat(style.lineHeight);
+    return Number.isFinite(computedLineHeight) && computedLineHeight > 0
+      ? computedLineHeight
+      : fontSizePx * lineHeight;
+  }
+
   function cursorScrollEffect(v: EditorView, head = v.state.selection.main.head) {
     return EditorView.scrollIntoView(head, { y: "nearest", yMargin: cursorScrollMargin(v) });
   }
