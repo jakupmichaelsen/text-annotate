@@ -12,7 +12,8 @@ export const helpSections = [
       ["Ctrl+k/j", "paragraph start / end"],
       ["Ctrl+w/s", "paragraph start / end"],
       ["Ctrl+↑/↓", "paragraph start / end"],
-      ["Ctrl+d", "jump 5 words right"]
+      ["Ctrl+d", "jump 5 words right"],
+      ["Ctrl+Tab", "scroll current line into view"]
     ]
   },
   {
@@ -65,6 +66,7 @@ export const helpSections = [
       ["Alt+←/→", "seek media 10s / step TTS"],
       ["Media RW/FF", "seek media / step TTS"],
       ["Alt+r", "cycle playback / TTS speed"],
+      ["Ctrl/Cmd+,", "toggle settings"],
       ["F1 / ?", "toggle this help"]
     ]
   }

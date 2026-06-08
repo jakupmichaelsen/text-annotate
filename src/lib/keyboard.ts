@@ -30,9 +30,11 @@ export function isAppShortcutCandidate(
   event: KeyboardEvent,
   styleNumberForKey: (key: string) => number | null
 ) {
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key === ",") return true;
   if (event.metaKey) return false;
   if (isModeShortcut(event) || isAudioShortcut(event) || isAudioRateShortcut(event)) return true;
   if (event.ctrlKey && !event.altKey && (event.key === "z" || event.key === "y" || event.key === "Z")) return true;
+  if (event.ctrlKey && !event.altKey && event.key === "Tab") return true;
   if (event.altKey) return false;
   if (!event.ctrlKey && (event.key.toLowerCase() === "r" || styleNumberForKey(event.key) !== null || event.key === "Tab")) return true;
 
@@ -63,6 +65,7 @@ export type EditorKeymapHandlers = {
   setAnnotationColorOrStyle: (view: EditorViewType, style: number) => boolean;
   setMode: (mode: EditorMode) => boolean;
   toggleHelp: () => boolean;
+  toggleSettings: () => boolean;
   finishBlockquoteEditMode: (view: EditorViewType) => boolean;
   insertBlockquoteLineBreak: (view: EditorViewType) => boolean;
   insertBlockquoteLevel: (view: EditorViewType) => boolean;
@@ -80,6 +83,7 @@ export type EditorKeymapHandlers = {
   wrapSelectionOrWord: (view: EditorViewType, style: number) => boolean;
   currentStyle: () => number;
   handleEnterInAnnotationMode: (view: EditorViewType) => boolean;
+  scrollCurrentLineIntoView: (view: EditorViewType) => boolean;
   removeAnnotationOrDelete: (view: EditorViewType) => boolean;
   cycleAnnotationVariant: (view: EditorViewType, delta: 1 | -1) => boolean;
   toggleMediaPlayback: () => void;
@@ -149,6 +153,8 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       { key: "Escape", run: view => { handlers.setMode("normal"); return true; } },
       { key: "F2", run: view => { handlers.setMode(handlers.getEditorMode() === "insert" ? "normal" : "insert"); return true; } },
       { key: "F1", run: () => handlers.toggleHelp() },
+      { key: "Mod-,", run: () => handlers.toggleSettings() },
+      { key: "Ctrl-Tab", run: view => handlers.scrollCurrentLineIntoView(view) },
       { key: "Enter", run: view => handlers.finishBlockquoteEditMode(view) },
       { key: "Shift-Enter", run: view => handlers.insertBlockquoteLineBreak(view) },
       { key: "Alt-Enter", run: view => handlers.insertBlockquoteLineBreak(view) },

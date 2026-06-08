@@ -335,6 +335,11 @@
   $: activeSummaryFontSize = summaryFullscreen ? fontSize : clampedSummaryFontSize;
   $: activeSummaryMetaFontSize = summaryFullscreen ? Math.max(9, fontSize - 4) : summaryMetaFontSize;
   $: activeSummaryTimestampFontSize = summaryFullscreen ? Math.max(8, fontSize - 5) : summaryTimestampFontSize;
+  $: scrollBorderEstimatedLinePx = Math.max(1, fontSize * lineHeight);
+  $: scrollBorderLineLimit = editorViewportHeight > 1 ? Math.max(0, Math.floor((editorViewportHeight - 1) / scrollBorderEstimatedLinePx)) : 16;
+  $: scrollBorderEffectiveLines = Math.min(cursorScrollMarginLines, scrollBorderLineLimit);
+  $: scrollBorderViewportPercent = editorViewportHeight > 1 ? Math.round(Math.min(editorViewportHeight - 1, scrollBorderEffectiveLines * scrollBorderEstimatedLinePx) / editorViewportHeight * 100) : 0;
+  $: if (editorViewportHeight > 1 && cursorScrollMarginLines > scrollBorderLineLimit) cursorScrollMarginLines = scrollBorderLineLimit;
   function clearAudioTarget() {
     if (audioUrl) URL.revokeObjectURL(audioUrl);
     audioUrl = "";
@@ -824,7 +829,7 @@
     }
     if (event.defaultPrevented || isEditorEventTarget(event.target) || shouldDeferWindowShortcut(event)) return;
     handleAudioKeydown(event);
-    if (event.defaultPrevented || !view || !isAppShortcutCandidate(event)) return;
+    if (event.defaultPrevented || !view || !isAppShortcutCandidate(event, styleNumberForKey)) return;
     if (!runScopeHandlers(view, event, "editor")) return;
     event.preventDefault();
     event.stopPropagation();
@@ -1315,6 +1320,11 @@
     reconfigureTheme(themeMode === "nord" ? "gruvbox" : "nord");
   }
 
+  function toggleSettings() {
+    settingsOpen = !settingsOpen;
+    return true;
+  }
+
   function persistOpenAiApiKey() {
     if (typeof localStorage === "undefined") return;
     if (rememberOpenAiApiKey && openAiApiKey.trim()) {
@@ -1489,7 +1499,7 @@
   }
 
   function updateEditorViewportHeight() {
-    editorViewportHeight = editorEl?.clientHeight ?? 0;
+    editorViewportHeight = view?.scrollDOM.clientHeight ?? editorEl?.clientHeight ?? 0;
   }
 
   function clearActiveSaveTarget() {
@@ -3735,6 +3745,7 @@ ${body}
   function handleEnterInAnnotationMode(v: EditorView) {
     if (v.state.doc.lineAt(v.state.selection.main.head).text.startsWith(">")) return enterBlockquoteEditMode(v);
     if (toggleAnnotationEdit(v)) return true;
+    if (jumpFromCurrentTimestampLine(v)) return true;
     toggleAssociatedSrtPlayback(v);
     return true;
   }
@@ -3762,7 +3773,7 @@ ${body}
 
     v.dispatch({
       selection: EditorSelection.cursor(target),
-      scrollIntoView: true
+      effects: cursorScrollEffect(v, target)
     });
     return true;
   }
@@ -4396,6 +4407,12 @@ ${body}
     return EditorView.scrollIntoView(head, { y: "nearest", yMargin: cursorScrollMargin(v) });
   }
 
+  function scrollCurrentLineIntoView(v: EditorView) {
+    const head = v.state.selection.main.head;
+    v.dispatch({ effects: cursorScrollEffect(v, head) });
+    return true;
+  }
+
   const navigation = createNavigationCommands({
     cursorScrollEffect,
     isSrtTimestampLine,
@@ -4462,6 +4479,7 @@ ${body}
         setAnnotationColorOrStyle,
         setMode: mode => { setMode(mode); return true; },
         toggleHelp: () => { showHelp = !showHelp; return true; },
+        toggleSettings,
         finishBlockquoteEditMode,
         insertBlockquoteLineBreak,
         insertBlockquoteLevel,
@@ -4475,6 +4493,7 @@ ${body}
         wrapSelectionOrWord,
         currentStyle: () => currentStyle,
         handleEnterInAnnotationMode,
+        scrollCurrentLineIntoView,
         removeAnnotationOrDelete,
         cycleAnnotationVariant,
         toggleMediaPlayback,
@@ -4611,7 +4630,7 @@ ${body}
       bind:this={settingsPopoverEl}
       role="dialog"
       tabindex="-1"
-      aria-label="Settings"
+      aria-label="Settings (Ctrl/Cmd+,)"
       on:keydown={event => {
         if (event.key === "Escape") {
           event.preventDefault();
@@ -4821,8 +4840,8 @@ ${body}
             <label class="settings-range-row">
               <span class="settings-control-icon" aria-hidden="true">⇅</span>
               <span class="settings-range-label">Scroll border</span>
-              <input type="range" min="0" max="16" step="1" bind:value={cursorScrollMarginLines} class="slider" aria-label="Cursor scroll border in display lines" />
-              <span class="settings-range-value">{cursorScrollMarginLines}</span>
+              <input type="range" min="0" max={scrollBorderLineLimit} step="1" bind:value={cursorScrollMarginLines} class="slider" aria-label="Cursor scroll border in display lines" />
+              <span class="settings-range-value">{cursorScrollMarginLines} · {scrollBorderViewportPercent}%</span>
             </label>
           </section>
           <section class="settings-section">
@@ -4960,7 +4979,7 @@ ${body}
           class="sidebar-label load-btn sidebar-settings-btn"
           bind:this={settingsButtonEl}
           class:active={settingsOpen}
-          on:click={() => settingsOpen = !settingsOpen}
+          on:click={toggleSettings}
           aria-label="Settings"
           aria-expanded={settingsOpen}
         >SETTINGS</button>

@@ -14,7 +14,7 @@ export const gruvbox = {
   bgAlt: "#3c3836", border: "#504945", fg: "#ebdbb2",
   fgMuted: "#a89984", yellow: "#fabd2f", green: "#b8bb26",
   blue: "#83a598", aqua: "#8ec07c", orange: "#fe8019",
-  red: "#fb4934", purple: "#d3869b", selection: "#665c54",
+  red: "#fb4934", purple: "#d3869b", selection: "#7c6f64",
   activeLine: "#3c3836aa", gutterText: "#7c6f64",
   cursor: "#fe8019", comment: "#928374"
 };
@@ -47,7 +47,7 @@ export const themes: Record<ThemeMode, ThemePalette> = {
     bgAlt: "#e5e9f0", border: "#cfd7e3", fg: "#2e3440",
     fgMuted: "#4c566a", yellow: "#ebcb8b", green: "#a3be8c",
     blue: "#81a1c1", aqua: "#8fbcbb", orange: "#b65f4a",
-    red: "#bf616a", purple: "#b48ead", selection: "#d8dee9",
+    red: "#bf616a", purple: "#b48ead", selection: "#b8c2d4",
     activeLine: "transparent", gutterText: "#5e6472",
     cursor: "#5e81ac", comment: "#4c566a",
     searchMatch: "#d8dee9", searchMatchSelected: "#cfd7e3",
@@ -109,6 +109,8 @@ export function buildEditorTheme(theme: ThemePalette): Extension {
     ".cm-content": { textAlign: "left", padding: "1rem 1.25rem 4rem", minHeight: "100%", caretColor: theme.cursor, whiteSpace: "pre-wrap", wordBreak: "break-word" },
     ".cm-line": { textAlign: "left" },
     "&.cm-focused .cm-cursor": { borderLeftColor: theme.cursor },
+    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": { backgroundColor: theme.selection },
+    ".cm-content ::selection": { backgroundColor: theme.selection },
     "&.mode-normal .cm-content, &.mode-normal .cm-line": { caretColor: "transparent !important" },
     "&.mode-normal .cm-cursorLayer, &.mode-normal .cm-cursor, &.mode-normal .cm-cursor-primary, &.mode-normal .cm-cursor-secondary, &.mode-normal .cm-secondaryCursor, &.mode-normal .cm-dropCursor": {
       borderLeft: "0 !important",
