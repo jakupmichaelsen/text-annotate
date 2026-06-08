@@ -142,7 +142,8 @@ Annotate mode uses Vim-style movement plus arrow-key equivalents.
 | `Ctrl+Shift+a` / `Ctrl+Shift+d` | Select five words left / right |
 | Style keys | Select or recolor using the editable keys shown in the Annotation styles list. |
 | `0` | Use plain backtick annotation |
-| `z` / `v` | Previous / next annotation style |
+| `z` / `c` | Previous / next annotation style |
+| `v` / `V` | Next / previous annotation variant |
 | `n` | Start a blockquote note below and enter Edit mode |
 | `N` | Split the rest of the line into a blockquote note below |
 | `Space` | Wrap selection or current word as an annotation |
@@ -157,6 +158,7 @@ Annotate mode uses Vim-style movement plus arrow-key equivalents.
 | `Alt+Space` | Play / pause loaded media or TTS |
 | `Alt+a` / `Alt+d` | Seek loaded media 5 seconds or step TTS backward / forward |
 | `Alt+Left` / `Alt+Right` | Seek loaded media 10 seconds or step TTS backward / forward |
+| Media rewind / fast-forward | Seek loaded media or step TTS backward / forward |
 | `Alt+r` / `Alt+w` | Cycle playback / TTS speed |
 | `F1` / `?` | Toggle keyboard help |
 

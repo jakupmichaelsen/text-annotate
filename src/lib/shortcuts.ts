@@ -36,7 +36,8 @@ export const helpSections = [
       ["Space", "wrap word / selection"],
       ["Style keys", "select / recolor style"],
       ["0", "plain annotation"],
-      ["z / v", "style prev / next"],
+      ["z / c", "style prev / next"],
+      ["v / V", "variant next / prev"],
       ["n", "new blockquote below"],
       ["N", "split rest of line to blockquote"],
       ["Enter", "edit note / cue playback"],
@@ -62,6 +63,7 @@ export const helpSections = [
       ["Alt+a/d", "seek media 5s / step TTS"],
       ["Alt+w", "cycle playback / TTS speed"],
       ["Alt+←/→", "seek media 10s / step TTS"],
+      ["Media RW/FF", "seek media / step TTS"],
       ["Alt+r", "cycle playback / TTS speed"],
       ["F1 / ?", "toggle this help"]
     ]

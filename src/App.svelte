@@ -487,6 +487,14 @@
     playAudioIfNeeded();
   }
 
+  function seekMediaTransport(direction: 1 | -1, seconds = mediaSeekSeconds) {
+    if (!audioElement || !audioLoaded) {
+      stepTts(direction);
+      return;
+    }
+    seekAudio(direction * seconds);
+  }
+
   function jumpAudioToAndPlay(seconds: number) {
     jumpAudioTo(seconds);
     playAudioIfNeeded();
@@ -795,12 +803,15 @@
       return;
     }
 
-    const direction = key === "ArrowLeft" || key === "Left" || normalized === "a" ? -1 : 1;
-    if (!audioElement || !audioLoaded) {
-      stepTts(direction);
-      return;
-    }
-    seekAudio(direction * (normalized === "a" || normalized === "d" ? mediaShortcutSeekSeconds : mediaSeekSeconds));
+    const direction =
+      key === "ArrowLeft" ||
+      key === "Left" ||
+      normalized === "a" ||
+      normalized === "mediarewind" ||
+      normalized === "mediatrackprevious"
+        ? -1
+        : 1;
+    seekMediaTransport(direction, normalized === "a" || normalized === "d" ? mediaShortcutSeekSeconds : mediaSeekSeconds);
   }
 
   function handleWindowKeydown(event: KeyboardEvent) {
@@ -4502,6 +4513,18 @@ ${body}
     };
     window.addEventListener("keydown", onWindowKeydown);
     window.addEventListener("pointerdown", onWindowPointerDown);
+    const mediaSession = "mediaSession" in navigator ? navigator.mediaSession : null;
+    const setMediaAction = (action: MediaSessionAction, handler: MediaSessionActionHandler | null) => {
+      try {
+        mediaSession?.setActionHandler(action, handler);
+      } catch {
+        // Some browsers expose Media Session but do not support every action.
+      }
+    };
+    setMediaAction("seekbackward", details => seekMediaTransport(-1, details.seekOffset || mediaSeekSeconds));
+    setMediaAction("seekforward", details => seekMediaTransport(1, details.seekOffset || mediaSeekSeconds));
+    setMediaAction("previoustrack", () => seekMediaTransport(-1));
+    setMediaAction("nexttrack", () => seekMediaTransport(1));
     ttsAvailable = "speechSynthesis" in window && "SpeechSynthesisUtterance" in window;
     const synth = speechSynth();
     const onVoicesChanged = () => refreshTtsVoices();
@@ -4540,6 +4563,10 @@ ${body}
       finishSummaryResize?.();
       finishRightPaddingDrag?.();
       editorResizeObserver.disconnect();
+      setMediaAction("seekbackward", null);
+      setMediaAction("seekforward", null);
+      setMediaAction("previoustrack", null);
+      setMediaAction("nexttrack", null);
       clearAudioTarget();
       view?.destroy();
     };

@@ -1,7 +1,7 @@
 import { Prec, type Extension } from "@codemirror/state";
 import { EditorView, keymap, type EditorView as EditorViewType } from "@codemirror/view";
 
-export const reservedStyleKeys = new Set(["h", "j", "k", "l", "w", "a", "s", "d", "q", "e", "r", "f", "n", "u", "v", "x", "z", "?", " "]);
+export const reservedStyleKeys = new Set(["h", "j", "k", "l", "w", "a", "s", "d", "q", "e", "r", "f", "n", "u", "v", "x", "z", "c", "?", " "]);
 
 export function normalizeStyleKey(key: string) {
   if (key.length !== 1 || /\s/.test(key)) return "";
@@ -15,6 +15,8 @@ export function isModeShortcut(event: KeyboardEvent) {
 
 export function isAudioShortcut(event: KeyboardEvent) {
   const key = event.key.toLowerCase();
+  if (!event.altKey && !event.ctrlKey && !event.metaKey &&
+    (key === "mediarewind" || key === "mediafastforward" || key === "mediatrackprevious" || key === "mediatracknext")) return true;
   return event.altKey && !event.ctrlKey && !event.metaKey &&
     (event.key === " " || event.key === "ArrowLeft" || event.key === "Left" || event.key === "ArrowRight" || event.key === "Right" ||
       key === "a" || key === "d" || key === "s" || key === "w");
@@ -196,7 +198,9 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       { key: "Enter",  run: normal(view => handlers.handleEnterInAnnotationMode(view)) },
       { key: "x",      run: normal(view => handlers.removeAnnotationOrDelete(view)) },
       { key: "z",      run: normal(view => { if (!handlers.cycleAnnotationColor(view, -1)) handlers.cycleStyle(-1); return true; }) },
-      { key: "v",      run: normal(view => { if (!handlers.cycleAnnotationColor(view, +1)) handlers.cycleStyle(+1); return true; }) },
+      { key: "c",      run: normal(view => { if (!handlers.cycleAnnotationColor(view, +1)) handlers.cycleStyle(+1); return true; }) },
+      { key: "v",      run: normal(view => handlers.cycleAnnotationVariant(view, +1)) },
+      { key: "V",      run: normal(view => handlers.cycleAnnotationVariant(view, -1)) },
       { key: "f",      run: normal(() => { handlers.toggleMediaPlayback(); return true; }) },
       { key: "r",      run: normal(() => { handlers.handleMediaShortcut("r"); return true; }) },
       { key: "n",      run: normal(view => handlers.enterBlockquoteEditMode(view)) },
@@ -215,6 +219,10 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       { key: "Alt-Space",  run: () => { handlers.toggleMediaPlayback(); return true; } },
       { key: "Alt-ArrowLeft",  run: () => { handlers.seekAudio(-10); return true; } },
       { key: "Alt-ArrowRight", run: () => { handlers.seekAudio(10); return true; } },
+      { key: "MediaRewind", run: () => { handlers.handleMediaShortcut("MediaRewind"); return true; } },
+      { key: "MediaFastForward", run: () => { handlers.handleMediaShortcut("MediaFastForward"); return true; } },
+      { key: "MediaTrackPrevious", run: () => { handlers.handleMediaShortcut("MediaTrackPrevious"); return true; } },
+      { key: "MediaTrackNext", run: () => { handlers.handleMediaShortcut("MediaTrackNext"); return true; } },
       {
         any: (_view, event) =>
           handlers.getEditorMode() === "normal" &&
