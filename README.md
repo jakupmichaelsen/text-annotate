@@ -127,36 +127,41 @@ Annotate mode uses Vim-style movement plus arrow-key equivalents.
 
 | Key | Action |
 | --- | --- |
-| `h` / `l` | Move left / right |
+| `h` / `l`, `q` / `e` | Move left / right |
 | Arrow keys | Move left / down / up / right |
-| `Tab` | Center cursor in view |
+| `Tab` / `Shift+Tab` | Move right / left by the configured column stride |
 | `w` / `k` | Move one visual line up |
 | `s` / `j` | Move one visual line down |
 | `a` / `d` | Move one word left / right |
-| `Ctrl+h` / `Ctrl+a`, `Ctrl+l` / `Ctrl+d` | Move to display line start / end |
+| `Ctrl+h` / `Ctrl+l` | Move one word left / right |
 | `Ctrl+k` / `Ctrl+j` | Move to paragraph start / end |
 | `Ctrl+w` / `Ctrl+s` | Move to paragraph start / end |
-| CapsLock + `h` / `l`, CapsLock + `a` / `d` | Jump three words left / right |
-| CapsLock + `k` / `j`, CapsLock + `w` / `s` | Move/select visual lines up / down |
-| `f` | Toggle slow word-by-word follow mode |
+| `Ctrl+↑` / `Ctrl+↓` | Move to paragraph start / end |
+| `Ctrl+d` | Jump five words right |
 | `Shift` movement variants | Extend the current selection |
-| Style keys | Annotate or recolor using the current Styles order. Keys run `1`-`0`, then `z`, `x`, `c`, `v`, `b`. |
-| `q` / `i`, `e` / `o` | Previous / next annotation style |
+| `Ctrl+Shift+a` / `Ctrl+Shift+d` | Select five words left / right |
+| Style keys | Select or recolor using the editable keys shown in the Annotation styles list. |
+| `0` | Use plain backtick annotation |
+| `v` / `V` | Next / previous annotation variant |
+| `N` | Previous annotation style |
 | `n` | Start a blockquote note and enter Edit mode |
 | `Space` | Wrap selection or current word as an annotation |
 | `Enter` | Edit annotation note, or play the current SRT cue when no annotation is active |
-| `Delete` / `Backspace` | Remove annotation |
+| `x` | Remove annotation, or delete the selection / next character |
 | `u` / `U` | Undo / redo |
 | `Ctrl+Z` / `Ctrl+Y` | Undo / redo |
 | `F2` | Toggle Annotate / Edit mode |
 | `Esc` | Return to Annotate mode |
+| `f` | Play / pause loaded media or TTS |
+| `r` | Cycle playback / TTS speed |
 | `Alt+Space` | Play / pause loaded media or TTS |
-| `Alt+Left` / `Alt+Right` | Seek loaded media or step TTS backward / forward |
-| `Alt+r` | Cycle playback / TTS speed |
+| `Alt+a` / `Alt+d` | Seek loaded media 5 seconds or step TTS backward / forward |
+| `Alt+Left` / `Alt+Right` | Seek loaded media 10 seconds or step TTS backward / forward |
+| `Alt+r` / `Alt+w` | Cycle playback / TTS speed |
 | `F1` / `?` | Toggle keyboard help |
 
 The in-app help modal also lists the full movement and selection variants,
-including display-line, CapsLock, and paragraph jumps.
+including word, column-stride, and paragraph jumps.
 
 ## Project Structure
 

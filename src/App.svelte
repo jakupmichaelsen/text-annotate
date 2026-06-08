@@ -173,8 +173,8 @@
   let audioPlaying = false;
   let audioLoaded = false;
   let audioSourceFile: File | null = null;
-  let audioRateIndex = 0;
-  const audioRates = [1, 1.5, 2];
+  let audioRateIndex = 2;
+  const audioRates = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
   const mediaSeekSeconds = 10;
   const mediaShortcutSeekSeconds = 5;
   const manualPauseRewindSeconds = 3;
@@ -457,11 +457,8 @@
   }
 
   function audioRateLabel(index = audioRateIndex) {
-    return audioRates[index] === 1
-      ? "x1"
-      : audioRates[index] === 1.5
-        ? "x1½"
-        : "x2";
+    const rate = audioRates[index] ?? 1;
+    return `x${Number.isInteger(rate) ? rate.toFixed(0) : rate.toFixed(2)}`;
   }
 
   function playAudioIfNeeded() {
@@ -2161,12 +2158,18 @@
     newStyleName = colorName;
   }
 
+  function openAddStyleModal() {
+    newStyleKeyDraft = firstAvailableStyleKey();
+    addStyleModalOpen = true;
+  }
+
   function addCustomStyle() {
     const name = uniqueCustomStyleName(newStyleName);
     const colorName = normalizeNamedStyleColor(newStyleColorName);
+    const key = normalizeStyleKey(newStyleKeyDraft) || firstAvailableStyleKey();
     const nextStyle = { name, colorName, color: namedStyleColor(colorName), custom: true };
     persistCustomStyles([...customStyles, nextStyle]);
-    if (newStyleKeyDraft) persistStyleKey(name, newStyleKeyDraft);
+    if (key) persistStyleKey(name, key);
     currentStyle = baseHighlightStyles.length + customStyles.length;
     newStyleColorName = "steel";
     newStyleName = newStyleColorName;
@@ -4999,7 +5002,7 @@ ${body}
             </div>
           {/each}
         </div>
-        <button class="add-style-inline" type="button" on:click={() => addStyleModalOpen = true} aria-label="Add annotation style">+</button>
+        <button class="add-style-inline" type="button" on:click={openAddStyleModal} aria-label="Add annotation style">+</button>
       </div>
 
       <div class="sidebar-section sidebar-notes-section">

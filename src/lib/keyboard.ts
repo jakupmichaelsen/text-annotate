@@ -1,7 +1,7 @@
 import { Prec, type Extension } from "@codemirror/state";
 import { EditorView, keymap, type EditorView as EditorViewType } from "@codemirror/view";
 
-export const reservedStyleKeys = new Set(["h", "j", "k", "l", "w", "a", "s", "d", "c", "q", "r", "e", "n", "u", "x", "?", " "]);
+export const reservedStyleKeys = new Set(["h", "j", "k", "l", "w", "a", "s", "d", "q", "e", "r", "f", "n", "u", "v", "x", "?", " "]);
 
 export function normalizeStyleKey(key: string) {
   if (key.length !== 1 || /\s/.test(key)) return "";
@@ -32,7 +32,7 @@ export function isAppShortcutCandidate(
   if (isModeShortcut(event) || isAudioShortcut(event) || isAudioRateShortcut(event)) return true;
   if (event.ctrlKey && !event.altKey && (event.key === "z" || event.key === "y" || event.key === "Z")) return true;
   if (event.altKey) return false;
-  if (!event.ctrlKey && (styleNumberForKey(event.key) !== null || event.key === "Tab")) return true;
+  if (!event.ctrlKey && (event.key.toLowerCase() === "r" || styleNumberForKey(event.key) !== null || event.key === "Tab")) return true;
 
   if (event.ctrlKey) {
     if (event.key === "ArrowLeft" || event.key === "ArrowRight" || event.key === "ArrowUp" || event.key === "ArrowDown") return true;
@@ -47,7 +47,7 @@ export function isAppShortcutCandidate(
     event.key === "ArrowRight" ||
     event.key === "ArrowUp" ||
     event.key === "ArrowDown" ||
-    "hjklwasdcqrHJKLWASDCQRfxeqnNuU".includes(event.key);
+    "hjklwasdcqeHJKLWASDCQEfrxvVqnNuU".includes(event.key);
 }
 
 export type EditorMode = "normal" | "insert";
@@ -113,10 +113,10 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
 
       if (
         key === "arrowleft" || key === "arrowright" ||
-        key === "h" || key === "l" || key === "q" || key === "r" ||
+        key === "h" || key === "l" || key === "q" || key === "e" ||
         key === "a" || key === "d"
       ) {
-        const forward = key === "arrowright" || key === "l" || key === "r" || key === "d";
+        const forward = key === "arrowright" || key === "l" || key === "e" || key === "d";
         const useWordNavigation =
           key === "arrowleft" || key === "arrowright"
             ? handlers.useArrowWordNavigation()
@@ -129,8 +129,8 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       }
 
       let direction: "up" | "down" | null = null;
-      if (key === "arrowup" || key === "j" || key === "s") direction = "down";
-      else if (key === "arrowdown" || key === "k" || key === "w") direction = "up";
+      if (key === "arrowdown" || key === "j" || key === "s") direction = "down";
+      else if (key === "arrowup" || key === "k" || key === "w") direction = "up";
       else return false;
 
       event.preventDefault();
@@ -194,9 +194,10 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       { key: "Space",  run: normal(view => handlers.wrapSelectionOrWord(view, handlers.currentStyle())) },
       { key: "Enter",  run: normal(view => handlers.handleEnterInAnnotationMode(view)) },
       { key: "x",      run: normal(view => handlers.removeAnnotationOrDelete(view)) },
-      { key: "e",      run: normal(view => handlers.cycleAnnotationVariant(view, +1)) },
-      { key: "E",      run: normal(view => handlers.cycleAnnotationVariant(view, -1)) },
+      { key: "v",      run: normal(view => handlers.cycleAnnotationVariant(view, +1)) },
+      { key: "V",      run: normal(view => handlers.cycleAnnotationVariant(view, -1)) },
       { key: "f",      run: normal(() => { handlers.toggleMediaPlayback(); return true; }) },
+      { key: "r",      run: normal(() => { handlers.handleMediaShortcut("r"); return true; }) },
       { key: "n",      run: normal(view => handlers.enterBlockquoteEditMode(view)) },
       { key: "N",      run: normal(view => { if (!handlers.cycleAnnotationColor(view, -1)) handlers.cycleStyle(-1); return true; }) },
       { key: "u",      run: normal(view => handlers.undo(view)) },

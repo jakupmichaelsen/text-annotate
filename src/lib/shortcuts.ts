@@ -4,7 +4,7 @@ export const helpSections = [
     items: [
       ["h j k l", "left / down / up / right"],
       ["← ↓ ↑ →", "left / down / up / right"],
-      ["q r", "left / right"],
+      ["q e", "left / right"],
       ["w s", "line up / down"],
       ["a d", "word left / right"],
       ["Tab / Shift+Tab", "column stride right / left"],
@@ -19,7 +19,7 @@ export const helpSections = [
     title: "Selection",
     items: [
       ["⇧hjkl", "select by char / line"],
-      ["⇧q ⇧r", "select left / right"],
+      ["⇧q ⇧e", "select left / right"],
       ["⇧Arrows", "select by char / line"],
       ["⇧w ⇧s", "select by line"],
       ["⇧a ⇧d", "select by word"],
@@ -34,12 +34,14 @@ export const helpSections = [
     title: "Annotations",
     items: [
       ["Space", "wrap word / selection"],
-      ["e", "variant next"],
-      ["E", "variant prev"],
+      ["Style keys", "select / recolor style"],
+      ["0", "plain annotation"],
+      ["v", "variant next"],
+      ["V", "variant prev"],
       ["n", "new blockquote note"],
       ["N", "style prev"],
       ["Enter", "edit note / cue playback"],
-      ["x", "remove annotation"]
+      ["x", "remove annotation / delete"]
     ]
   },
   {
@@ -54,11 +56,13 @@ export const helpSections = [
     items: [
       ["F2", "enter Edit mode"],
       ["Esc", "return to Annotate mode"],
+      ["f", "play / pause media / TTS"],
+      ["r", "cycle playback / TTS speed"],
       ["Alt+Space", "play / pause media / TTS"],
       ["Alt+s", "play / pause media / TTS"],
       ["Alt+a/d", "seek media 5s / step TTS"],
       ["Alt+w", "cycle playback / TTS speed"],
-      ["Alt+←/→", "seek media / step TTS"],
+      ["Alt+←/→", "seek media 10s / step TTS"],
       ["Alt+r", "cycle playback / TTS speed"],
       ["F1 / ?", "toggle this help"]
     ]
