@@ -2215,6 +2215,11 @@
     view?.dispatch({});
   }
 
+  function knownStyleName(name: string) {
+    return baseHighlightStyles.some(style => style.name === name) ||
+      customStyles.some(style => style.name === name);
+  }
+
   function loadStyleTitles() {
     const stored = typeof localStorage === "undefined" ? null : localStorage.getItem(styleTitlesStorageKey);
     if (!stored) return {};
@@ -2226,7 +2231,7 @@
         Object.entries(parsed)
           .filter((entry): entry is [string, string] =>
             typeof entry[0] === "string" &&
-            highlightStyles.some(style => style.name === entry[0]) &&
+            knownStyleName(entry[0]) &&
             typeof entry[1] === "string" &&
             entry[1].trim().length > 0
           )
@@ -2250,7 +2255,7 @@
         Object.entries(parsed)
           .filter((entry): entry is [string, string] =>
             typeof entry[0] === "string" &&
-            highlightStyles.some(style => style.name === entry[0]) &&
+            knownStyleName(entry[0]) &&
             typeof entry[1] === "string"
           )
           .map(([name, key]) => [name, normalizeStyleKey(key)])
