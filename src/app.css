@@ -506,7 +506,7 @@
   }
 
   .summary-comment-action.has-comment {
-    color: var(--yellow);
+    color: var(--comment-fg);
   }
 
   .summary-comment-action:hover,
@@ -1622,6 +1622,28 @@
     background: rgba(250, 189, 47, 0.24);
     outline: 1px solid rgba(250, 189, 47, 0.75);
     pointer-events: auto;
+  }
+
+  .pdf-text-row-button.ignored {
+    background: rgba(191, 97, 106, 0.28);
+    outline: 1px solid rgba(191, 97, 106, 0.82);
+    box-shadow: inset 0 0 0 999px rgba(191, 97, 106, 0.08);
+    pointer-events: auto;
+  }
+
+  .pdf-text-row-button.ignored::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    border-top: 2px solid rgba(191, 97, 106, 0.9);
+  }
+
+  .pdf-preview-pane.ignore-marking .pdf-text-row-button.ignored:hover,
+  .pdf-preview-pane.ignore-marking .pdf-text-row-button.ignored:focus-visible {
+    background: rgba(191, 97, 106, 0.38);
+    outline-color: rgba(191, 97, 106, 1);
   }
 
   .load-confirm-btn:disabled {

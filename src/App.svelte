@@ -12,8 +12,6 @@
   import {
     defaultKeymap, history, historyKeymap, undo, redo,
     cursorLineStart, cursorLineEnd,
-    cursorCharLeft, cursorCharRight,
-    selectCharLeft, selectCharRight,
     selectLineStart, selectLineEnd
   } from "@codemirror/commands";
   import { searchKeymap } from "@codemirror/search";
@@ -47,6 +45,7 @@
     formatSrtTimestampLabel,
     formatSrtTranscript,
     isSrtTimestampLine,
+    parseSrtTimestampLine,
     parseTimestampToSeconds,
     srtLineExitPosition,
     srtPattern,
@@ -119,7 +118,8 @@
   let padTop = initialLayoutSettings.padTop ?? 16;
   let padBottom = initialLayoutSettings.padBottom ?? 64;
   let editorViewportHeight = 0;
-  let cursorScrollMarginLines = initialLayoutSettings.cursorScrollMarginLines ?? 4;
+  let cursorScrollMarginTopLines = initialLayoutSettings.cursorScrollMarginTopLines ?? initialLayoutSettings.cursorScrollMarginLines ?? 4;
+  let cursorScrollMarginBottomLines = initialLayoutSettings.cursorScrollMarginBottomLines ?? initialLayoutSettings.cursorScrollMarginLines ?? 4;
   let lineHeight = initialLayoutSettings.lineHeight ?? 1.6;
   let fontSize = initialLayoutSettings.fontSize ?? 14;
   let paragraphSpacing = initialLayoutSettings.paragraphSpacing ?? 0;
@@ -302,7 +302,8 @@
     padRight;
     padTop;
     padBottom;
-    cursorScrollMarginLines;
+    cursorScrollMarginTopLines;
+    cursorScrollMarginBottomLines;
     lineHeight;
     fontSize;
     paragraphSpacing;
@@ -340,9 +341,12 @@
   $: activeSummaryTimestampFontSize = summaryFullscreen ? Math.max(8, fontSize - 5) : summaryTimestampFontSize;
   $: scrollBorderEstimatedLinePx = Math.max(1, fontSize * lineHeight);
   $: scrollBorderLineLimit = editorViewportHeight > 1 ? Math.max(0, Math.floor((editorViewportHeight - 1) / scrollBorderEstimatedLinePx)) : 16;
-  $: scrollBorderEffectiveLines = Math.min(cursorScrollMarginLines, scrollBorderLineLimit);
-  $: scrollBorderViewportPercent = editorViewportHeight > 1 ? Math.round(Math.min(editorViewportHeight - 1, scrollBorderEffectiveLines * scrollBorderEstimatedLinePx) / editorViewportHeight * 100) : 0;
-  $: if (editorViewportHeight > 1 && cursorScrollMarginLines > scrollBorderLineLimit) cursorScrollMarginLines = scrollBorderLineLimit;
+  $: scrollBorderTopEffectiveLines = Math.min(cursorScrollMarginTopLines, scrollBorderLineLimit);
+  $: scrollBorderBottomEffectiveLines = Math.min(cursorScrollMarginBottomLines, scrollBorderLineLimit);
+  $: scrollBorderTopViewportPercent = editorViewportHeight > 1 ? Math.round(Math.min(editorViewportHeight - 1, scrollBorderTopEffectiveLines * scrollBorderEstimatedLinePx) / editorViewportHeight * 100) : 0;
+  $: scrollBorderBottomViewportPercent = editorViewportHeight > 1 ? Math.round(Math.min(editorViewportHeight - 1, scrollBorderBottomEffectiveLines * scrollBorderEstimatedLinePx) / editorViewportHeight * 100) : 0;
+  $: if (editorViewportHeight > 1 && cursorScrollMarginTopLines > scrollBorderLineLimit) cursorScrollMarginTopLines = scrollBorderLineLimit;
+  $: if (editorViewportHeight > 1 && cursorScrollMarginBottomLines > scrollBorderLineLimit) cursorScrollMarginBottomLines = scrollBorderLineLimit;
   function clearAudioTarget() {
     if (audioUrl) URL.revokeObjectURL(audioUrl);
     audioUrl = "";
@@ -1112,7 +1116,9 @@
     padRight: number;
     padTop: number;
     padBottom: number;
-    cursorScrollMarginLines: number;
+    cursorScrollMarginLines?: number;
+    cursorScrollMarginTopLines: number;
+    cursorScrollMarginBottomLines: number;
     lineHeight: number;
     fontSize: number;
     paragraphSpacing: number;
@@ -1189,6 +1195,8 @@
       padTop: numberOr("padTop", 16, 0, 400),
       padBottom: numberOr("padBottom", 64, 0, 9999),
       cursorScrollMarginLines: Math.round(numberOr("cursorScrollMarginLines", 4, 0, 16)),
+      cursorScrollMarginTopLines: Math.round(numberOr("cursorScrollMarginTopLines", numberOr("cursorScrollMarginLines", 4, 0, 16), 0, 16)),
+      cursorScrollMarginBottomLines: Math.round(numberOr("cursorScrollMarginBottomLines", numberOr("cursorScrollMarginLines", 4, 0, 16), 0, 16)),
       lineHeight: Math.round(numberOr("lineHeight", 1.6, 1, 3) * 100) / 100,
       fontSize: Math.round(numberOr("fontSize", 14, 10, 28)),
       paragraphSpacing: Math.round(numberOr("paragraphSpacing", 0, 0, 2) * 100) / 100,
@@ -1233,7 +1241,8 @@
       padRight,
       padTop,
       padBottom,
-      cursorScrollMarginLines,
+      cursorScrollMarginTopLines,
+      cursorScrollMarginBottomLines,
       lineHeight,
       fontSize,
       paragraphSpacing,
@@ -1272,7 +1281,8 @@
     padRight = settings.padRight ?? padRight;
     padTop = settings.padTop ?? padTop;
     padBottom = settings.padBottom ?? padBottom;
-    cursorScrollMarginLines = settings.cursorScrollMarginLines ?? cursorScrollMarginLines;
+    cursorScrollMarginTopLines = settings.cursorScrollMarginTopLines ?? settings.cursorScrollMarginLines ?? cursorScrollMarginTopLines;
+    cursorScrollMarginBottomLines = settings.cursorScrollMarginBottomLines ?? settings.cursorScrollMarginLines ?? cursorScrollMarginBottomLines;
     lineHeight = settings.lineHeight ?? lineHeight;
     fontSize = settings.fontSize ?? fontSize;
     paragraphSpacing = settings.paragraphSpacing ?? paragraphSpacing;
@@ -2510,7 +2520,6 @@ The quick brown fox jumps over the ${bt}lazy${bt}<!-- red fill, ${t0}: "" --> do
 ## The Fox
 
 The fox was neither ${bt}quick${bt}<!-- green underline, ${t1}: "Check spelling" --> nor particularly brown - more of a ${bt}tawny${bt}<!-- callout box, ${t2}: "Too informal" --> amber, with a white-tipped tail that flickered like a candle in the undergrowth. She had been awake since before dawn, padding silently along the ridge above the farm.
-
 - She was **bold** by nature
 - She was *cautious* by experience
 - She was, above all, ${bt}hungry${bt}<!-- red bars, ${t3}: "" -->
@@ -3519,14 +3528,14 @@ ${body}
             create() {
               const dom = document.createElement("div");
               dom.className = "cm-annotation-bubble";
-              dom.style.cssText = `background:${gruvbox.bgAlt};border:1px solid ${gruvbox.border};border-left:3px solid ${color};border-radius:4px;padding:4px 10px;font-size:11px;color:${gruvbox.fg};line-height:1.6;white-space:nowrap;pointer-events:none;`;
+              dom.style.cssText = `background:${activeTheme.bgAlt};border:1px solid ${activeTheme.border};border-left:3px solid ${color};border-radius:4px;padding:4px 10px;font-size:11px;color:${activeTheme.fg};line-height:1.6;white-space:nowrap;pointer-events:none;`;
               const meta = document.createElement("div");
-              meta.style.color = gruvbox.fgMuted;
+              meta.style.color = activeTheme.fgMuted;
               meta.textContent = `${colorName}  ${timestamp}`;
               dom.appendChild(meta);
               const line2 = document.createElement("div");
               line2.textContent = comment || "Enter to add note";
-              if (!comment) line2.style.color = gruvbox.fgMuted;
+              line2.style.color = comment ? activeTheme.blockquoteFg : activeTheme.fgMuted;
               dom.appendChild(line2);
               return { dom };
             }
@@ -3561,7 +3570,7 @@ ${body}
       input.type = "text";
       input.value = this.comment;
       input.placeholder = "add note…";
-      input.style.cssText = `background:transparent;border:none;outline:none;color:${gruvbox.fg};font-family:inherit;font-size:inherit;width:${Math.max(this.comment.length || 8, 8)}ch;min-width:8ch;`;
+      input.style.cssText = `background:transparent;border:none;outline:none;color:${activeTheme.blockquoteFg};font-family:inherit;font-size:inherit;width:${Math.max(this.comment.length || 8, 8)}ch;min-width:8ch;`;
       const save = () => {
         editingSpan = null;
         const full = this.editorView.state.doc.sliceString(this.spanStart, this.spanEnd);
@@ -3677,8 +3686,6 @@ ${body}
     update: (markers, tr) => tr.docChanged ? buildSrtGutterMarkers(tr.state) : markers,
     provide: field => lineNumberMarkers.from(field)
   });
-
-
   function formatEditorLineNumber(lineNumber: number, state: EditorState) {
     const hasSrt = documentHasSrtTimestamps(state);
     if (lineNumber > state.doc.lines) return hasSrt ? "00:00 → 00:00" : String(lineNumber);
@@ -3714,12 +3721,9 @@ ${body}
 
   function jumpFromCurrentTimestampLine(v: EditorView) {
     const lineText = v.state.doc.lineAt(v.state.selection.main.head).text;
-    srtPattern.lastIndex = 0;
-    const match = srtPattern.exec(lineText);
-    if (!match) return false;
-    const startSeconds = parseTimestampToSeconds(match[1]);
-    if (startSeconds === null) return false;
-    jumpAudioToAndPlay(startSeconds);
+    const timestamp = parseSrtTimestampLine(lineText);
+    if (!timestamp) return false;
+    jumpAudioToAndPlay(timestamp.startSeconds);
     return true;
   }
 
@@ -3727,9 +3731,8 @@ ${body}
     let line = v.state.doc.lineAt(v.state.selection.main.head);
 
     for (let i = 0; i < 50; i += 1) {
-      srtPattern.lastIndex = 0;
-      const match = srtPattern.exec(line.text);
-      if (match) return parseTimestampToSeconds(match[1]);
+      const timestamp = parseSrtTimestampLine(line.text);
+      if (timestamp) return timestamp.startSeconds;
       if (line.number <= 1) break;
       line = v.state.doc.line(line.number - 1);
     }
@@ -4196,7 +4199,19 @@ ${body}
         stickySelectionActive = false;
         visualLineSelectionState = null;
       }
-      else if (u.selectionSet) refreshAnnotationPreviewForSelection(u.view);
+      else if (u.selectionSet) {
+        const range = u.state.selection.main;
+        if ((stickySelectionActive || visualLineSelectionState) && !range.empty) {
+          annotationPreview = {
+            from: Math.min(range.from, range.to),
+            to: Math.max(range.from, range.to),
+            style: currentStyle,
+            variant: currentAnnotationVariant
+          };
+        } else {
+          refreshAnnotationPreviewForSelection(u.view);
+        }
+      }
       if (u.docChanged || u.selectionSet || u.focusChanged || u.viewportChanged)
         updateStatusFromView(u.view);
       if (u.docChanged) {
@@ -4397,12 +4412,25 @@ ${body}
     }
   });
 
-  function cursorScrollMargin(v: EditorView) {
-    const linePx = lineHeightPx(v);
+  function scrollBorderPx(v: EditorView, lines: number) {
     const viewportHeight = v.scrollDOM.clientHeight;
     if (viewportHeight <= 1) return 0;
-    const preferred = linePx * cursorScrollMarginLines;
-    return Math.min(Math.max(0, viewportHeight - 1), Math.max(0, preferred));
+    return Math.min(Math.max(0, viewportHeight - 1), Math.max(0, lineHeightPx(v) * lines));
+  }
+
+  function scrollPositionIntoActiveViewport(v: EditorView, head = v.state.selection.main.head) {
+    requestAnimationFrame(() => {
+      const coords = v.coordsAtPos(Math.max(0, Math.min(v.state.doc.length, head)));
+      if (!coords) return;
+      const scroller = v.scrollDOM;
+      const scrollerRect = scroller.getBoundingClientRect();
+      const topBorder = scrollBorderPx(v, cursorScrollMarginTopLines);
+      const bottomBorder = scrollBorderPx(v, cursorScrollMarginBottomLines);
+      const activeTop = scrollerRect.top + topBorder;
+      const activeBottom = scrollerRect.bottom - bottomBorder;
+      if (coords.top < activeTop) scroller.scrollTop -= activeTop - coords.top;
+      else if (coords.bottom > activeBottom) scroller.scrollTop += coords.bottom - activeBottom;
+    });
   }
 
   function lineHeightPx(v: EditorView) {
@@ -4415,7 +4443,8 @@ ${body}
   }
 
   function cursorScrollEffect(v: EditorView, head = v.state.selection.main.head) {
-    return EditorView.scrollIntoView(head, { y: "nearest", yMargin: cursorScrollMargin(v) });
+    scrollPositionIntoActiveViewport(v, head);
+    return EditorView.scrollIntoView(head, { y: "nearest" });
   }
 
   function visualLineBlockAt(v: EditorView, pos: number) {
@@ -4490,6 +4519,26 @@ ${body}
     v.dispatch({ effects: cursorScrollEffect(v, head) });
     return true;
   }
+
+  function moveCharWithinLine(v: EditorView, direction: 1 | -1, extend = false) {
+    const selection = v.state.selection.main;
+    const head = selection.head;
+    const line = v.state.doc.lineAt(head);
+    const target = direction > 0
+      ? Math.min(line.to, head + 1)
+      : Math.max(line.from, head - 1);
+    if (target === head) return true;
+    v.dispatch({
+      selection: extend ? EditorSelection.range(selection.anchor, target) : EditorSelection.cursor(target),
+      effects: cursorScrollEffect(v, target)
+    });
+    return true;
+  }
+
+  function cursorCharLeft(v: EditorView) { return moveCharWithinLine(v, -1); }
+  function cursorCharRight(v: EditorView) { return moveCharWithinLine(v, 1); }
+  function selectCharLeft(v: EditorView) { return moveCharWithinLine(v, -1, true); }
+  function selectCharRight(v: EditorView) { return moveCharWithinLine(v, 1, true); }
 
   const navigation = createNavigationCommands({
     cursorScrollEffect,
@@ -4691,6 +4740,7 @@ ${body}
     --internal-border: transparent;
     --fg-muted: ${activeTheme.fgMuted}; --yellow: ${activeTheme.yellow}; --green: ${activeTheme.green};
     --blue: ${activeTheme.blue}; --orange: ${activeTheme.orange}; --selection: ${activeTheme.selection};
+    --comment-fg: ${activeTheme.blockquoteFg};
     --active-style-color: ${currentStyleColor};
     --active-line-opacity-percent: ${Math.round(currentLineHighlightOpacity * 100)}%;
     --active-line-annotate: color-mix(in srgb, var(--active-style-color) var(--active-line-opacity-percent), transparent);
@@ -4921,10 +4971,16 @@ ${body}
               <span class="settings-range-value">{padBottom}</span>
             </label>
             <label class="settings-range-row">
-              <span class="settings-control-icon" aria-hidden="true">⇅</span>
-              <span class="settings-range-label">Scroll border</span>
-              <input type="range" min="0" max={scrollBorderLineLimit} step="1" bind:value={cursorScrollMarginLines} class="slider" aria-label="Cursor scroll border in display lines" />
-              <span class="settings-range-value">{cursorScrollMarginLines} · {scrollBorderViewportPercent}%</span>
+              <span class="settings-control-icon" aria-hidden="true">⇡</span>
+              <span class="settings-range-label">Top scroll border</span>
+              <input type="range" min="0" max={scrollBorderLineLimit} step="1" bind:value={cursorScrollMarginTopLines} class="slider" aria-label="Top cursor scroll border in display lines" />
+              <span class="settings-range-value">{cursorScrollMarginTopLines} · {scrollBorderTopViewportPercent}%</span>
+            </label>
+            <label class="settings-range-row">
+              <span class="settings-control-icon" aria-hidden="true">⇣</span>
+              <span class="settings-range-label">Bottom scroll border</span>
+              <input type="range" min="0" max={scrollBorderLineLimit} step="1" bind:value={cursorScrollMarginBottomLines} class="slider" aria-label="Bottom cursor scroll border in display lines" />
+              <span class="settings-range-value">{cursorScrollMarginBottomLines} · {scrollBorderBottomViewportPercent}%</span>
             </label>
           </section>
           <section class="settings-section">

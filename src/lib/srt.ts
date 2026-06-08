@@ -1,6 +1,9 @@
 import type { EditorState, Text } from "@codemirror/state";
 
-export const srtPattern = /\[\s*([0-9:.]+)\s*-->\s*([0-9:.]+)\s*\]/g;
+const timestampRangeLinePattern = /^\[?\s*(\d+(?::\d{2}){1,2}(?:[.,]\d+)?)\s*-->\s*(\d+(?::\d{2}){1,2}(?:[.,]\d+)?)\s*\]?$/;
+const timestampOnlyLinePattern = /^\[?\s*(\d+(?::\d{2}){1,2}(?:[.,]\d+)?)\s*\]?$/;
+
+export const srtPattern = /\[\s*(\d+(?::\d{2}){1,2}(?:[.,]\d+)?)\s*-->\s*(\d+(?::\d{2}){1,2}(?:[.,]\d+)?)\s*\]/g;
 
 export function formatSrtTranscript(text: string) {
   const cues = text
@@ -45,12 +48,34 @@ function normalizeSrtTimestamp(timestamp: string) {
   return timestamp.trim().replace(",", ".");
 }
 
+export function parseSrtTimestampLine(text: string) {
+  const trimmed = text.trim();
+  const range = timestampRangeLinePattern.exec(trimmed);
+  if (range) {
+    const startSeconds = parseTimestampToSeconds(range[1]);
+    if (startSeconds === null) return null;
+    return {
+      label: shortenTimestamp(range[1]) + " → " + shortenTimestamp(range[2]),
+      start: normalizeSrtTimestamp(range[1]),
+      end: normalizeSrtTimestamp(range[2]),
+      startSeconds
+    };
+  }
+
+  const single = timestampOnlyLinePattern.exec(trimmed);
+  if (!single) return null;
+  const startSeconds = parseTimestampToSeconds(single[1]);
+  if (startSeconds === null) return null;
+  return {
+    label: shortenTimestamp(single[1]),
+    start: normalizeSrtTimestamp(single[1]),
+    end: null,
+    startSeconds
+  };
+}
+
 export function formatSrtTimestampLabel(matchText: string) {
-  const parsed = /^\[\s*([0-9:.]+)\s*-->\s*([0-9:.]+)\s*\]$/.exec(matchText.trim());
-  if (!parsed) return matchText;
-  const start = shortenTimestamp(parsed[1]);
-  const end = shortenTimestamp(parsed[2]);
-  return `${start} → ${end}`;
+  return parseSrtTimestampLine(matchText)?.label ?? matchText;
 }
 
 function shortenTimestamp(timestamp: string) {
@@ -84,24 +109,18 @@ export function parseTimestampToSeconds(timestamp: string) {
 }
 
 export function isSrtTimestampLine(text: string) {
-  return /^\[\s*[0-9:.]+\s*-->\s*[0-9:.]+\s*\]$/.test(text.trim());
+  return parseSrtTimestampLine(text) !== null;
 }
 
 export function documentHasSrtTimestamps(state: EditorState) {
-  return /^\[\s*[0-9:.]+\s*-->\s*[0-9:.]+\s*\]$/m.test(state.doc.toString());
+  return state.doc.toString().split("\n").some(isSrtTimestampLine);
 }
 
 export function srtTimestampForTranscriptLine(state: EditorState, lineNumber: number) {
   if (lineNumber <= 1 || lineNumber > state.doc.lines) return null;
   const previousLine = state.doc.line(lineNumber - 1);
   if (!isSrtTimestampLine(previousLine.text)) return null;
-  srtPattern.lastIndex = 0;
-  const match = srtPattern.exec(previousLine.text);
-  if (!match) return null;
-  return {
-    label: formatSrtTimestampLabel(match[0]),
-    startSeconds: parseTimestampToSeconds(match[1])
-  };
+  return parseSrtTimestampLine(previousLine.text);
 }
 
 export function srtLineExitPosition(doc: Text, lineNumber: number, direction: "left" | "right") {

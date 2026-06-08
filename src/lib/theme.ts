@@ -49,7 +49,7 @@ export const themes: Record<ThemeMode, ThemePalette> = {
     blue: "#81a1c1", aqua: "#8fbcbb", orange: "#b65f4a",
     red: "#bf616a", purple: "#b48ead", selection: "#b8c2d4",
     activeLine: "transparent", gutterText: "#5e6472",
-    cursor: "#5e81ac", comment: "#616e88",
+    cursor: "#5e81ac", comment: "#4c566a",
     searchMatch: "#d8dee9", searchMatchSelected: "#cfd7e3",
     blockquoteBg: "#e5e9f0", blockquoteFg: "#5e81ac",
     plainCodeBg: "#e5e9f0"

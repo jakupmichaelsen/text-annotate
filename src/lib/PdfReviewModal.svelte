@@ -583,7 +583,7 @@
                     type="button"
                     style={`top: ${row.top}px; left: ${row.left}px; width: ${row.width}px; height: ${row.height}px`}
                     title={row.text}
-                    aria-label={pdfRowMarkMode === "ignore" ? `Ignore ${row.text}` : `Mark paragraph break before ${row.text}`}
+                    aria-label={pdfRowMarkMode === "ignore" ? `${isPdfRowIgnored(row) ? "Stop ignoring" : "Ignore"} ${row.text}` : `Mark paragraph break before ${row.text}`}
                     tabindex={pdfRowMarkMode !== "none" ? 0 : -1}
                     on:click={() => handlePdfRowClick(row)}
                   ></button>
