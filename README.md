@@ -142,9 +142,9 @@ Annotate mode uses Vim-style movement plus arrow-key equivalents.
 | `Ctrl+Shift+a` / `Ctrl+Shift+d` | Select five words left / right |
 | Style keys | Select or recolor using the editable keys shown in the Annotation styles list. |
 | `0` | Use plain backtick annotation |
-| `v` / `V` | Next / previous annotation variant |
-| `N` | Previous annotation style |
-| `n` | Start a blockquote note and enter Edit mode |
+| `z` / `v` | Previous / next annotation style |
+| `n` | Start a blockquote note below and enter Edit mode |
+| `N` | Split the rest of the line into a blockquote note below |
 | `Space` | Wrap selection or current word as an annotation |
 | `Enter` | Edit annotation note, or play the current SRT cue when no annotation is active |
 | `x` | Remove annotation, or delete the selection / next character |

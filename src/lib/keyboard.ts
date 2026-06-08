@@ -1,7 +1,7 @@
 import { Prec, type Extension } from "@codemirror/state";
 import { EditorView, keymap, type EditorView as EditorViewType } from "@codemirror/view";
 
-export const reservedStyleKeys = new Set(["h", "j", "k", "l", "w", "a", "s", "d", "q", "e", "r", "f", "n", "u", "v", "x", "?", " "]);
+export const reservedStyleKeys = new Set(["h", "j", "k", "l", "w", "a", "s", "d", "q", "e", "r", "f", "n", "u", "v", "x", "z", "?", " "]);
 
 export function normalizeStyleKey(key: string) {
   if (key.length !== 1 || /\s/.test(key)) return "";
@@ -47,7 +47,7 @@ export function isAppShortcutCandidate(
     event.key === "ArrowRight" ||
     event.key === "ArrowUp" ||
     event.key === "ArrowDown" ||
-    "hjklwasdcqeHJKLWASDCQEfrxvVqnNuU".includes(event.key);
+    "hjklwasdcqeHJKLWASDCQEfrxvznNuU".includes(event.key);
 }
 
 export type EditorMode = "normal" | "insert";
@@ -82,6 +82,7 @@ export type EditorKeymapHandlers = {
   cycleAnnotationVariant: (view: EditorViewType, delta: 1 | -1) => boolean;
   toggleMediaPlayback: () => void;
   enterBlockquoteEditMode: (view: EditorViewType) => boolean;
+  splitLineEndToBlockquote: (view: EditorViewType) => boolean;
   cycleAnnotationColor: (view: EditorViewType, delta: 1 | -1) => boolean;
   cycleStyle: (delta: 1 | -1) => void;
   undo: (view: EditorViewType) => boolean;
@@ -194,12 +195,12 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       { key: "Space",  run: normal(view => handlers.wrapSelectionOrWord(view, handlers.currentStyle())) },
       { key: "Enter",  run: normal(view => handlers.handleEnterInAnnotationMode(view)) },
       { key: "x",      run: normal(view => handlers.removeAnnotationOrDelete(view)) },
-      { key: "v",      run: normal(view => handlers.cycleAnnotationVariant(view, +1)) },
-      { key: "V",      run: normal(view => handlers.cycleAnnotationVariant(view, -1)) },
+      { key: "z",      run: normal(view => { if (!handlers.cycleAnnotationColor(view, -1)) handlers.cycleStyle(-1); return true; }) },
+      { key: "v",      run: normal(view => { if (!handlers.cycleAnnotationColor(view, +1)) handlers.cycleStyle(+1); return true; }) },
       { key: "f",      run: normal(() => { handlers.toggleMediaPlayback(); return true; }) },
       { key: "r",      run: normal(() => { handlers.handleMediaShortcut("r"); return true; }) },
       { key: "n",      run: normal(view => handlers.enterBlockquoteEditMode(view)) },
-      { key: "N",      run: normal(view => { if (!handlers.cycleAnnotationColor(view, -1)) handlers.cycleStyle(-1); return true; }) },
+      { key: "N",      run: normal(view => handlers.splitLineEndToBlockquote(view)) },
       { key: "u",      run: normal(view => handlers.undo(view)) },
       { key: "U",      run: normal(view => handlers.redo(view)) },
       { key: "Ctrl-z", run: view => handlers.undo(view) },

@@ -131,12 +131,17 @@
   }
 
   .sidebar-header {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
     min-height: 38px;
     padding: 0 8px 0 12px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    border-bottom: 1px solid var(--internal-border);
+    margin-top: auto;
+    border-top: 1px solid var(--internal-border);
+    background: var(--bg-hard);
   }
 
   .sidebar.collapsed .sidebar-header {
@@ -1326,6 +1331,13 @@
 
   .style-key-input:focus {
     border-color: var(--yellow);
+  }
+
+  .style-key-status,
+  .style-modal-status {
+    color: var(--yellow);
+    font-size: 10px;
+    line-height: 1.3;
   }
 
   .style-remove-button {

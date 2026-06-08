@@ -232,6 +232,7 @@
   let newStyleColorName = "steel";
   let newStyleName = newStyleColorName;
   let newStyleKeyDraft = "";
+  let newStyleKeyError = "";
   let annotationMode: AnnotationMode = initialAppSettings.annotationMode;
   let blockquoteAlign = initialLayoutSettings.blockquoteAlign ?? 0;
   let blockquoteBgWidth = 100;
@@ -274,6 +275,7 @@
   let styleTitleInput: HTMLInputElement | null = null;
   let editingStyleKeyName: string | null = null;
   let styleKeyDraft = "";
+  let styleKeyError = "";
   let styleKeyInput: HTMLInputElement | null = null;
   let resizingSummarySidebar = false;
   let finishSummaryResize: (() => void) | null = null;
@@ -2160,13 +2162,15 @@
 
   function openAddStyleModal() {
     newStyleKeyDraft = firstAvailableStyleKey();
+    newStyleKeyError = "";
     addStyleModalOpen = true;
   }
 
   function addCustomStyle() {
     const name = uniqueCustomStyleName(newStyleName);
     const colorName = normalizeNamedStyleColor(newStyleColorName);
-    const key = normalizeStyleKey(newStyleKeyDraft) || firstAvailableStyleKey();
+    const keyResult = captureStyleKey(newStyleKeyDraft);
+    const key = keyResult.key || firstAvailableStyleKey();
     const nextStyle = { name, colorName, color: namedStyleColor(colorName), custom: true };
     persistCustomStyles([...customStyles, nextStyle]);
     if (key) persistStyleKey(name, key);
@@ -2174,6 +2178,7 @@
     newStyleColorName = "steel";
     newStyleName = newStyleColorName;
     newStyleKeyDraft = "";
+    newStyleKeyError = "";
     addStyleModalOpen = false;
     view?.dispatch({});
     view?.focus();
@@ -2239,7 +2244,7 @@
           )
           .map(([name, key]) => [name, normalizeStyleKey(key)])
           .filter(([, key]) => {
-            if (!key || used.has(key)) return false;
+            if (!key || key === "0" || used.has(key)) return false;
             used.add(key);
             return true;
           })
@@ -2312,6 +2317,7 @@
     event.stopPropagation();
     editingStyleKeyName = name;
     styleKeyDraft = styleKeyForName(name);
+    styleKeyError = "";
     void focusStyleKeyInput();
   }
 
@@ -2325,10 +2331,12 @@
     const name = editingStyleKeyName;
     editingStyleKeyName = null;
     persistStyleKey(name, styleKeyDraft);
+    styleKeyError = "";
   }
 
   function persistStyleKey(name: string, key: string) {
-    const normalized = normalizeStyleKey(key) || defaultStyleKeyForName(name);
+    const captured = captureStyleKey(key, name);
+    const normalized = captured.key || defaultStyleKeyForName(name);
     const oldKey = styleKeyForName(name);
     if (!normalized) return;
 
@@ -2345,6 +2353,26 @@
     nextKeys[name] = normalized;
     persistStyleKeys(nextKeys);
     view?.dispatch({});
+  }
+
+  function captureStyleKey(key: string, ignoreName = "") {
+    if (key.length !== 1 || /\s/.test(key)) {
+      return { key: "", error: "Press one letter or number." };
+    }
+    const normalized = key.toLowerCase();
+    if (normalized === "0") {
+      return { key: "", error: "0 is reserved for plain text." };
+    }
+    if (reservedStyleKeys.has(normalized)) {
+      return { key: "", error: `${normalized} is reserved.` };
+    }
+    const conflict = highlightStyles.find(style =>
+      style.name !== ignoreName && styleKeyForName(style.name) === normalized
+    );
+    return {
+      key: normalized,
+      error: conflict ? `Will swap with ${styleDisplayTitle(conflict.name)}.` : ""
+    };
   }
 
   function firstAvailableStyleKey(excluded = new Set<string>(), ignoreName = "") {
@@ -2376,13 +2404,14 @@
     if (event.key === "Backspace" || event.key === "Delete") {
       event.preventDefault();
       newStyleKeyDraft = "";
+      newStyleKeyError = "";
       return;
     }
     if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
-      const key = normalizeStyleKey(event.key);
-      if (!key) return;
       event.preventDefault();
-      newStyleKeyDraft = key;
+      const result = captureStyleKey(event.key);
+      newStyleKeyError = result.error;
+      if (result.key) newStyleKeyDraft = result.key;
     }
   }
 
@@ -2405,13 +2434,16 @@
     if (event.key === "Backspace" || event.key === "Delete") {
       event.preventDefault();
       styleKeyDraft = "";
+      styleKeyError = "";
       return;
     }
     if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
-      const key = normalizeStyleKey(event.key);
-      if (!key) return;
       event.preventDefault();
-      styleKeyDraft = key;
+      if (!editingStyleKeyName) return;
+      const result = captureStyleKey(event.key, editingStyleKeyName);
+      styleKeyError = result.error;
+      if (!result.key) return;
+      styleKeyDraft = result.key;
       saveStyleKey();
     }
   }
@@ -3353,6 +3385,34 @@ ${body}
       });
     }
 
+    setMode("insert");
+    return true;
+  }
+
+  function splitLineEndToBlockquote(v: EditorView) {
+    const selection = v.state.selection.main;
+    const head = selection.head;
+    const line = v.state.doc.lineAt(head);
+    const from = Math.min(selection.from, selection.to);
+    const to = Math.max(selection.from, selection.to);
+    const selectedText = selection.empty
+      ? v.state.doc.sliceString(head, line.to)
+      : v.state.doc.sliceString(from, to);
+    const quotedText = selectedText.replace(/\r\n?/g, "\n")
+      .split("\n")
+      .map((text, index) => `${index === 0 ? text.trimStart() : text}`.replace(/^> ?/, ""))
+      .map(text => `> ${text}`)
+      .join("\n");
+    const insert = `\n${quotedText || "> "}`;
+    const changeFrom = selection.empty ? head : from;
+    const changeTo = selection.empty ? line.to : to;
+    const cursor = changeFrom + insert.length;
+
+    blockquoteEditReturnAnchor = head;
+    v.dispatch({
+      changes: { from: changeFrom, to: changeTo, insert },
+      selection: EditorSelection.cursor(cursor)
+    });
     setMode("insert");
     return true;
   }
@@ -4403,6 +4463,7 @@ ${body}
         cycleAnnotationVariant,
         toggleMediaPlayback,
         enterBlockquoteEditMode,
+        splitLineEndToBlockquote,
         cycleAnnotationColor,
         cycleStyle,
         undo,
@@ -4855,11 +4916,6 @@ ${body}
     `}
   >
     <div class="sidebar" class:collapsed={leftSidebarCollapsed}>
-      <div class="sidebar-header">
-        <button class="summary-icon-btn sidebar-collapse-btn" type="button" title={leftSidebarCollapsed ? "Show controls" : "Hide controls"} aria-label={leftSidebarCollapsed ? "Show controls" : "Hide controls"} on:click={() => leftSidebarCollapsed = !leftSidebarCollapsed}>
-          {leftSidebarCollapsed ? "›" : "‹"}
-        </button>
-      </div>
       {#if !leftSidebarCollapsed}
       <div class="sidebar-section">
         <input type="file" accept=".srt,.txt,.md,.docx,.pdf,.mp3,.wav,.m4a,.ogg,.oga,.webm,.aac,.flac,.mp4,.mov,.mkv" multiple style="display:none" bind:this={fileInput} on:change={loadFile} />
@@ -4952,7 +5008,14 @@ ${body}
                   bind:this={styleKeyInput}
                   bind:value={styleKeyDraft}
                   aria-label={`Shortcut key for ${styleDisplayTitle(style.name)}`}
+                  title={styleKeyError || "Press a key"}
+                  readonly
                   on:click={event => event.stopPropagation()}
+                  on:input={event => {
+                    const result = captureStyleKey((event.target as HTMLInputElement).value.slice(-1), style.name);
+                    styleKeyError = result.error;
+                    if (result.key) styleKeyDraft = result.key;
+                  }}
                   on:blur={saveStyleKey}
                   on:keydown={handleStyleKeyKeydown}
                 />
@@ -5002,6 +5065,9 @@ ${body}
             </div>
           {/each}
         </div>
+        {#if styleKeyError}
+          <div class="sidebar-hint style-key-status">{styleKeyError}</div>
+        {/if}
         <button class="add-style-inline" type="button" on:click={openAddStyleModal} aria-label="Add annotation style">+</button>
       </div>
 
@@ -5029,6 +5095,11 @@ ${body}
         {/if}
       </div>
       {/if}
+      <div class="sidebar-header">
+        <button class="summary-icon-btn sidebar-collapse-btn" type="button" title={leftSidebarCollapsed ? "Show controls" : "Hide controls"} aria-label={leftSidebarCollapsed ? "Show controls" : "Hide controls"} on:click={() => leftSidebarCollapsed = !leftSidebarCollapsed}>
+          {leftSidebarCollapsed ? "›" : "‹"}
+        </button>
+      </div>
 
     </div>
 
@@ -5425,14 +5496,20 @@ ${body}
             class="style-modal-input"
             bind:value={newStyleKeyDraft}
             aria-label="New annotation style hotkey"
+            title={newStyleKeyError || "Press a key"}
             placeholder="Press a key"
+            readonly
             on:keydown={handleNewStyleKeyKeydown}
             on:input={event => {
-              const key = normalizeStyleKey((event.target as HTMLInputElement).value.slice(-1));
-              newStyleKeyDraft = key;
+              const result = captureStyleKey((event.target as HTMLInputElement).value.slice(-1));
+              newStyleKeyError = result.error;
+              if (result.key) newStyleKeyDraft = result.key;
             }}
           />
         </label>
+        {#if newStyleKeyError}
+          <div class="style-modal-status">{newStyleKeyError}</div>
+        {/if}
         <div class="style-modal-actions">
           <button type="button" on:click={() => addStyleModalOpen = false}>Cancel</button>
           <button type="button" class="primary" on:click={addCustomStyle}>Add</button>

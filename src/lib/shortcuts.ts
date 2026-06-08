@@ -36,10 +36,9 @@ export const helpSections = [
       ["Space", "wrap word / selection"],
       ["Style keys", "select / recolor style"],
       ["0", "plain annotation"],
-      ["v", "variant next"],
-      ["V", "variant prev"],
-      ["n", "new blockquote note"],
-      ["N", "style prev"],
+      ["z / v", "style prev / next"],
+      ["n", "new blockquote below"],
+      ["N", "split rest of line to blockquote"],
       ["Enter", "edit note / cue playback"],
       ["x", "remove annotation / delete"]
     ]
