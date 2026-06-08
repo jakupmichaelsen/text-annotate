@@ -238,6 +238,9 @@
   let blockquoteBgWidth = 100;
   let blockquoteEditReturnAnchor: number | null = null;
   let editorMode: "normal" | "insert" = "normal";
+  let stickySelectionActive = false;
+  type VisualLineSelectionState = { anchorFrom: number; anchorTo: number; headFrom: number; headTo: number };
+  let visualLineSelectionState: VisualLineSelectionState | null = null;
   let line = 1;
   let column = 1;
   let selectionInfo = "0 selected";
@@ -1847,6 +1850,8 @@
   function setMode(mode: "normal" | "insert") {
     const selection = view?.state.selection;
     editorMode = mode;
+    stickySelectionActive = false;
+    visualLineSelectionState = null;
     if (mode === "normal") blockquoteEditReturnAnchor = null;
     if (view) {
       view.dispatch(selection ? { selection } : {});  // trigger keymap/decoration rebuild
@@ -4077,7 +4082,9 @@ ${body}
   }
 
   function setAnnotationColorOrStyle(v: EditorView, style: number) {
-    if (setAnnotationPreview(v, style, currentAnnotationVariant)) return true;
+    const variant = annotationVariants[0];
+    currentAnnotationVariant = variant;
+    if (setAnnotationPreview(v, style, variant)) return true;
 
     const cursor = v.state.selection.main.head;
     const docText = v.state.doc.toString();
@@ -4096,7 +4103,6 @@ ${body}
           return true;
         }
         const newName = styleName(style);
-        const { variant } = annotationStyleParts(m[2]);
         const updated = m[0].replace(/^`([^`]+)`<!--\s*\w+(?:\s+\w+)?,/, `\`$1\`<!-- ${annotationStyleToken(newName, variant)},`);
         currentStyle = style;
         v.dispatch({
@@ -4108,6 +4114,7 @@ ${body}
     }
 
     currentStyle = style;
+    currentAnnotationVariant = variant;
     return true;
   }
 
@@ -4184,7 +4191,11 @@ ${body}
     constructor(v: EditorView) { applyEditorModeClasses(v); updateStatusFromView(v); }
     update(u: ViewUpdate) {
       applyEditorModeClasses(u.view);
-      if (u.docChanged) annotationPreview = null;
+      if (u.docChanged) {
+        annotationPreview = null;
+        stickySelectionActive = false;
+        visualLineSelectionState = null;
+      }
       else if (u.selectionSet) refreshAnnotationPreviewForSelection(u.view);
       if (u.docChanged || u.selectionSet || u.focusChanged || u.viewportChanged)
         updateStatusFromView(u.view);
@@ -4407,6 +4418,73 @@ ${body}
     return EditorView.scrollIntoView(head, { y: "nearest", yMargin: cursorScrollMargin(v) });
   }
 
+  function visualLineBlockAt(v: EditorView, pos: number) {
+    const getter = (v as unknown as { visualLineAt?: (pos: number) => { from: number; to: number } }).visualLineAt;
+    return typeof getter === "function" ? getter.call(v, pos) : v.lineBlockAt(pos);
+  }
+
+  function visualLineRangeAt(v: EditorView, pos: number) {
+    const block = visualLineBlockAt(v, Math.max(0, Math.min(v.state.doc.length, pos)));
+    return { from: block.from, to: block.to };
+  }
+
+  function visualLineSelectionRange(state: VisualLineSelectionState) {
+    return {
+      from: Math.min(state.anchorFrom, state.headFrom),
+      to: Math.max(state.anchorTo, state.headTo)
+    };
+  }
+
+  function adjacentVisualLineRange(v: EditorView, range: { from: number; to: number }, direction: "up" | "down") {
+    const doc = v.state.doc;
+    let pos = direction === "down" ? range.to + 1 : range.from - 1;
+    for (let attempts = 0; attempts < 500 && pos >= 0 && pos <= doc.length; attempts += 1) {
+      const next = visualLineRangeAt(v, pos);
+      if (next.from === range.from && next.to === range.to) {
+        pos += direction === "down" ? 1 : -1;
+        continue;
+      }
+      const line = doc.lineAt(next.from);
+      if (!isSrtTimestampLine(line.text)) return next;
+      pos = direction === "down" ? next.to + 1 : next.from - 1;
+    }
+    return null;
+  }
+
+  function dispatchVisualLineSelection(v: EditorView, state: VisualLineSelectionState) {
+    const range = visualLineSelectionRange(state);
+    const head = state.headTo;
+    v.dispatch({
+      selection: EditorSelection.range(range.from, range.to),
+      effects: cursorScrollEffect(v, head)
+    });
+  }
+
+  function startVisualLineSelection(v: EditorView) {
+    const range = visualLineRangeAt(v, v.state.selection.main.head);
+    visualLineSelectionState = { anchorFrom: range.from, anchorTo: range.to, headFrom: range.from, headTo: range.to };
+    stickySelectionActive = false;
+    dispatchVisualLineSelection(v, visualLineSelectionState);
+    return true;
+  }
+
+  function extendVisualLineSelection(v: EditorView, direction: "up" | "down") {
+    if (!visualLineSelectionState) return startVisualLineSelection(v);
+    const currentHead = { from: visualLineSelectionState.headFrom, to: visualLineSelectionState.headTo };
+    const next = adjacentVisualLineRange(v, currentHead, direction);
+    if (!next) return true;
+    visualLineSelectionState = { ...visualLineSelectionState, headFrom: next.from, headTo: next.to };
+    dispatchVisualLineSelection(v, visualLineSelectionState);
+    return true;
+  }
+
+  function toggleStickySelection(v: EditorView) {
+    stickySelectionActive = !stickySelectionActive;
+    if (stickySelectionActive) visualLineSelectionState = null;
+    v.dispatch({});
+    return true;
+  }
+
   function scrollCurrentLineIntoView(v: EditorView) {
     const head = v.state.selection.main.head;
     v.dispatch({ effects: cursorScrollEffect(v, head) });
@@ -4493,6 +4571,11 @@ ${body}
         wrapSelectionOrWord,
         currentStyle: () => currentStyle,
         handleEnterInAnnotationMode,
+        isStickySelectionActive: () => stickySelectionActive,
+        toggleStickySelection,
+        isVisualLineSelectionActive: () => visualLineSelectionState !== null,
+        startVisualLineSelection,
+        extendVisualLineSelection,
         scrollCurrentLineIntoView,
         removeAnnotationOrDelete,
         cycleAnnotationVariant,
@@ -5049,7 +5132,7 @@ ${body}
                 class:variant-bars={currentStyle === index + 1 && currentAnnotationVariant === "bars"}
                 style={`--swatch-color: ${style.color}; --swatch-text: ${annotationTextColorForStyle(style.name, style.color)}`}
                 type="button"
-                title={`Use ${styleDisplayTitle(style.name)}${currentStyle === index + 1 ? ` (${currentAnnotationVariant})` : ""}`}
+                title={`Use ${styleDisplayTitle(style.name)}${currentStyle === index + 1 ? `, ${currentAnnotationVariant}` : ""}`}
                 aria-label={`Use ${styleDisplayTitle(style.name)}${currentStyle === index + 1 ? `, ${currentAnnotationVariant} variant` : ""}`}
                 on:click={() => { currentStyle = index + 1; view?.focus(); }}
               ></button>
@@ -5101,7 +5184,7 @@ ${body}
                   on:click={event => startStyleTitleEdit(event, style.name)}
                   on:keydown={event => event.stopPropagation()}
                 >
-                  {styleDisplayTitle(style.name)}{currentStyle === index + 1 ? ` (${annotationVariantLabel(currentAnnotationVariant)})` : ""}
+                  {styleDisplayTitle(style.name)}
                 </button>
               {/if}
               {#if style.custom}

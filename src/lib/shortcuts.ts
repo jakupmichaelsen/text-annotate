@@ -28,7 +28,9 @@ export const helpSections = [
       ["Ctrl+⇧k/j", "select to paragraph start / end"],
       ["Ctrl+⇧w/s", "select to paragraph start / end"],
       ["Ctrl+⇧↑/↓", "select to paragraph start / end"],
-      ["Ctrl+Shift+a/d", "select 5 words left / right"]
+      ["Ctrl+Shift+a/d", "select 5 words left / right"],
+      ["v", "toggle sticky selection"],
+      ["V", "visual-line selection"]
     ]
   },
   {
@@ -38,7 +40,7 @@ export const helpSections = [
       ["Style keys", "select / recolor style"],
       ["0", "plain annotation"],
       ["z / c", "style prev / next"],
-      ["v / V", "variant next / prev"],
+      ["f", "variant next"],
       ["n", "new blockquote below"],
       ["N", "split rest of line to blockquote"],
       ["Enter", "edit note / cue playback"],
@@ -57,7 +59,6 @@ export const helpSections = [
     items: [
       ["F2", "enter Edit mode"],
       ["Esc", "return to Annotate mode"],
-      ["f", "play / pause media / TTS"],
       ["r", "cycle playback / TTS speed"],
       ["Alt+Space", "play / pause media / TTS"],
       ["Alt+s", "play / pause media / TTS"],

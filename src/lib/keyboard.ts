@@ -83,6 +83,11 @@ export type EditorKeymapHandlers = {
   wrapSelectionOrWord: (view: EditorViewType, style: number) => boolean;
   currentStyle: () => number;
   handleEnterInAnnotationMode: (view: EditorViewType) => boolean;
+  isStickySelectionActive: () => boolean;
+  toggleStickySelection: (view: EditorViewType) => boolean;
+  isVisualLineSelectionActive: () => boolean;
+  startVisualLineSelection: (view: EditorViewType) => boolean;
+  extendVisualLineSelection: (view: EditorViewType, direction: "up" | "down") => boolean;
   scrollCurrentLineIntoView: (view: EditorViewType) => boolean;
   removeAnnotationOrDelete: (view: EditorViewType) => boolean;
   cycleAnnotationVariant: (view: EditorViewType, delta: 1 | -1) => boolean;
@@ -116,13 +121,19 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       if (event.ctrlKey || event.metaKey || event.altKey) return false;
 
       const key = event.key.toLowerCase();
-      const extend = event.shiftKey;
+      const visualLineSelection = handlers.isVisualLineSelectionActive();
+      const extend = event.shiftKey || handlers.isStickySelectionActive();
 
       if (
         key === "arrowleft" || key === "arrowright" ||
         key === "h" || key === "l" || key === "q" || key === "e" ||
         key === "a" || key === "d"
       ) {
+        if (visualLineSelection) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          return true;
+        }
         const forward = key === "arrowright" || key === "l" || key === "e" || key === "d";
         const useWordNavigation =
           key === "arrowleft" || key === "arrowright"
@@ -142,6 +153,7 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
 
       event.preventDefault();
       event.stopImmediatePropagation();
+      if (visualLineSelection) return handlers.extendVisualLineSelection(view, direction);
       return handlers.navigation.moveLineSkippingSrt(view, direction, extend);
     }
   });
@@ -205,9 +217,9 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       { key: "x",      run: normal(view => handlers.removeAnnotationOrDelete(view)) },
       { key: "z",      run: normal(view => { if (!handlers.cycleAnnotationColor(view, -1)) handlers.cycleStyle(-1); return true; }) },
       { key: "c",      run: normal(view => { if (!handlers.cycleAnnotationColor(view, +1)) handlers.cycleStyle(+1); return true; }) },
-      { key: "v",      run: normal(view => handlers.cycleAnnotationVariant(view, +1)) },
-      { key: "V",      run: normal(view => handlers.cycleAnnotationVariant(view, -1)) },
-      { key: "f",      run: normal(() => { handlers.toggleMediaPlayback(); return true; }) },
+      { key: "f",      run: normal(view => handlers.cycleAnnotationVariant(view, +1)) },
+      { key: "v",      run: normal(view => handlers.toggleStickySelection(view)) },
+      { key: "V",      run: normal(view => handlers.startVisualLineSelection(view)) },
       { key: "r",      run: normal(() => { handlers.handleMediaShortcut("r"); return true; }) },
       { key: "n",      run: normal(view => handlers.enterBlockquoteEditMode(view)) },
       { key: "N",      run: normal(view => handlers.splitLineEndToBlockquote(view)) },

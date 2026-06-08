@@ -1,11 +1,4 @@
 import type { BlockInfo, EditorView } from "@codemirror/view";
-import {
-  cursorLineUp,
-  cursorLineDown,
-  selectLineUp,
-  selectLineDown
-} from "@codemirror/commands";
-
 type EditorCommand = (view: EditorView) => boolean;
 type CursorScrollEffect = (view: EditorView, head?: number) => unknown;
 
@@ -155,31 +148,15 @@ export function createNavigationCommands({
   }
 
   function moveLineSkippingSrt(v: EditorView, direction: "up" | "down", extend = false) {
-    const move = direction === "up"
-      ? (extend ? selectLineUp : cursorLineUp)
-      : (extend ? selectLineDown : cursorLineDown);
     const selection = v.state.selection.main;
     const doc = v.state.doc;
     const currentLine = doc.lineAt(selection.head);
     const step = direction === "up" ? -1 : 1;
-    const adjacentNumber = currentLine.number + step;
 
-    if (adjacentNumber < 1 || adjacentNumber > doc.lines) {
-      runWithCursorScroll(v, move);
-      return true;
-    }
-
-    const adjacentLine = doc.line(adjacentNumber);
-    if (!isSrtTimestampLine(adjacentLine.text)) {
-      runWithCursorScroll(v, move);
-      return true;
-    }
-
-    const column = selection.head - currentLine.from;
-    for (let lineNumber = adjacentNumber + step; lineNumber >= 1 && lineNumber <= doc.lines; lineNumber += step) {
+    for (let lineNumber = currentLine.number + step; lineNumber >= 1 && lineNumber <= doc.lines; lineNumber += step) {
       const line = doc.line(lineNumber);
-      if (isSrtTimestampLine(line.text) || !line.text.trim()) continue;
-      const head = line.from + Math.min(column, line.length);
+      if (isSrtTimestampLine(line.text)) continue;
+      const head = line.from;
       v.dispatch({
         selection: { anchor: extend ? selection.anchor : head, head },
         effects: cursorScrollEffect(v, head)
@@ -187,6 +164,11 @@ export function createNavigationCommands({
       return true;
     }
 
+    const head = direction === "up" ? 0 : doc.length;
+    v.dispatch({
+      selection: { anchor: extend ? selection.anchor : head, head },
+      effects: cursorScrollEffect(v, head)
+    });
     return true;
   }
 
