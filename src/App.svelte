@@ -4201,7 +4201,14 @@ ${body}
       }
       else if (u.selectionSet) {
         const range = u.state.selection.main;
-        if ((stickySelectionActive || visualLineSelectionState) && !range.empty) {
+        if (!range.empty && currentStyle > 0) {
+          annotationPreview = {
+            from: Math.min(range.from, range.to),
+            to: Math.max(range.from, range.to),
+            style: currentStyle,
+            variant: currentAnnotationVariant
+          };
+        } else if ((stickySelectionActive || visualLineSelectionState) && !range.empty) {
           annotationPreview = {
             from: Math.min(range.from, range.to),
             to: Math.max(range.from, range.to),
