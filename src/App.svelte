@@ -1771,39 +1771,6 @@
     }
   }
 
-  function layoutStepperValue(kind:
-    | "lineHeight"
-    | "fontSize"
-    | "paragraphSpacing"
-    | "columnStride"
-    | "currentLineHighlightOpacity"
-    | "columnGuideThickness"
-    | "padTop"
-    | "padBottom"
-    | "padLeft"
-    | "padRight"
-    | "cursorScrollMarginTopLines"
-    | "cursorScrollMarginBottomLines"
-    | "blockquoteAlign"
-    | "blockquoteBgWidth"
-  ) {
-    if (kind === "lineHeight") return lineHeight.toFixed(2);
-    if (kind === "fontSize") return `${fontSize}px`;
-    if (kind === "paragraphSpacing") return paragraphSpacing.toFixed(2);
-    if (kind === "columnStride") return `${columnStride}`;
-    if (kind === "currentLineHighlightOpacity") return `${Math.round(currentLineHighlightOpacity * 100)}%`;
-    if (kind === "columnGuideThickness") return `${columnGuideThickness}px`;
-    if (kind === "padTop") return `${padTop}px`;
-    if (kind === "padBottom") return `${padBottom}px`;
-    if (kind === "padLeft") return `${padLeft}px`;
-    if (kind === "padRight") return `${padRight}px`;
-    if (kind === "cursorScrollMarginTopLines") return `${cursorScrollMarginTopLines}`;
-    if (kind === "cursorScrollMarginBottomLines") return `${cursorScrollMarginBottomLines}`;
-    if (kind === "blockquoteAlign") return `${blockquoteAlign}`;
-    if (kind === "blockquoteBgWidth") return `${blockquoteBgWidth}`;
-    return "";
-  }
-
   function setRightPaddingFromClientX(clientX: number) {
     if (!editorEl) return;
     const rect = editorEl.getBoundingClientRect();
@@ -5307,7 +5274,7 @@ ${body}
               <div class="layout-stepper">
                 <span class="layout-control-icon" aria-hidden="true">↕</span>
                 <span class="layout-stepper-label">Line height</span>
-                <span class="layout-stepper-value">{layoutStepperValue("lineHeight")}</span>
+                <span class="layout-stepper-value">{lineHeight.toFixed(2)}</span>
                 <span class="layout-stepper-buttons">
                   <button type="button" on:click={() => adjustLayoutValue("lineHeight", -1)} aria-label="Decrease line height">−</button>
                   <button type="button" on:click={() => adjustLayoutValue("lineHeight", 1)} aria-label="Increase line height">+</button>
@@ -5316,7 +5283,7 @@ ${body}
               <div class="layout-stepper">
                 <span class="layout-control-icon" aria-hidden="true">T</span>
                 <span class="layout-stepper-label">Font size</span>
-                <span class="layout-stepper-value">{layoutStepperValue("fontSize")}</span>
+                <span class="layout-stepper-value">{fontSize}px</span>
                 <span class="layout-stepper-buttons">
                   <button type="button" on:click={() => adjustLayoutValue("fontSize", -1)} aria-label="Decrease font size">−</button>
                   <button type="button" on:click={() => adjustLayoutValue("fontSize", 1)} aria-label="Increase font size">+</button>
@@ -5325,7 +5292,7 @@ ${body}
               <div class="layout-stepper">
                 <span class="layout-control-icon" aria-hidden="true">¶</span>
                 <span class="layout-stepper-label">Paragraph spacing</span>
-                <span class="layout-stepper-value">{layoutStepperValue("paragraphSpacing")}</span>
+                <span class="layout-stepper-value">{paragraphSpacing.toFixed(2)}</span>
                 <span class="layout-stepper-buttons">
                   <button type="button" on:click={() => adjustLayoutValue("paragraphSpacing", -1)} aria-label="Decrease paragraph spacing">−</button>
                   <button type="button" on:click={() => adjustLayoutValue("paragraphSpacing", 1)} aria-label="Increase paragraph spacing">+</button>
@@ -5347,7 +5314,7 @@ ${body}
               <div class="layout-stepper">
                 <span class="layout-control-icon" aria-hidden="true">%</span>
                 <span class="layout-stepper-label">Highlight opacity</span>
-                <span class="layout-stepper-value">{layoutStepperValue("currentLineHighlightOpacity")}</span>
+                <span class="layout-stepper-value">{Math.round(currentLineHighlightOpacity * 100)}%</span>
                 <span class="layout-stepper-buttons">
                   <button type="button" on:click={() => adjustLayoutValue("currentLineHighlightOpacity", -1)} aria-label="Decrease highlight opacity">−</button>
                   <button type="button" on:click={() => adjustLayoutValue("currentLineHighlightOpacity", 1)} aria-label="Increase highlight opacity">+</button>
@@ -5356,7 +5323,7 @@ ${body}
               <div class="layout-stepper">
                 <span class="layout-control-icon" aria-hidden="true">│</span>
                 <span class="layout-stepper-label">Column guide</span>
-                <span class="layout-stepper-value">{layoutStepperValue("columnGuideThickness")}</span>
+                <span class="layout-stepper-value">{columnGuideThickness}px</span>
                 <span class="layout-stepper-buttons">
                   <button type="button" on:click={() => adjustLayoutValue("columnGuideThickness", -1)} aria-label="Decrease column guide thickness">−</button>
                   <button type="button" on:click={() => adjustLayoutValue("columnGuideThickness", 1)} aria-label="Increase column guide thickness">+</button>
@@ -5367,7 +5334,7 @@ ${body}
               <div class="layout-stepper">
                 <span class="layout-control-icon" aria-hidden="true">↥</span>
                 <span class="layout-stepper-label">Top</span>
-                <span class="layout-stepper-value">{layoutStepperValue("padTop")}</span>
+                <span class="layout-stepper-value">{padTop}px</span>
                 <span class="layout-stepper-buttons">
                   <button type="button" on:click={() => adjustLayoutValue("padTop", -1)} aria-label="Decrease top padding">−</button>
                   <button type="button" on:click={() => adjustLayoutValue("padTop", 1)} aria-label="Increase top padding">+</button>
@@ -5376,7 +5343,7 @@ ${body}
               <div class="layout-stepper">
                 <span class="layout-control-icon" aria-hidden="true">↧</span>
                 <span class="layout-stepper-label">Bottom</span>
-                <span class="layout-stepper-value">{layoutStepperValue("padBottom")}</span>
+                <span class="layout-stepper-value">{padBottom}px</span>
                 <span class="layout-stepper-buttons">
                   <button type="button" on:click={() => adjustLayoutValue("padBottom", -1)} aria-label="Decrease bottom padding">−</button>
                   <button type="button" on:click={() => adjustLayoutValue("padBottom", 1)} aria-label="Increase bottom padding">+</button>
@@ -5385,7 +5352,7 @@ ${body}
               <div class="layout-stepper">
                 <span class="layout-control-icon" aria-hidden="true">↤</span>
                 <span class="layout-stepper-label">Left</span>
-                <span class="layout-stepper-value">{layoutStepperValue("padLeft")}</span>
+                <span class="layout-stepper-value">{padLeft}px</span>
                 <span class="layout-stepper-buttons">
                   <button type="button" on:click={() => adjustLayoutValue("padLeft", -1)} aria-label="Decrease left padding">−</button>
                   <button type="button" on:click={() => adjustLayoutValue("padLeft", 1)} aria-label="Increase left padding">+</button>
@@ -5394,7 +5361,7 @@ ${body}
               <div class="layout-stepper">
                 <span class="layout-control-icon" aria-hidden="true">↦</span>
                 <span class="layout-stepper-label">Right</span>
-                <span class="layout-stepper-value">{layoutStepperValue("padRight")}</span>
+                <span class="layout-stepper-value">{padRight}px</span>
                 <span class="layout-stepper-buttons">
                   <button type="button" on:click={() => adjustLayoutValue("padRight", -1)} aria-label="Decrease right padding">−</button>
                   <button type="button" on:click={() => adjustLayoutValue("padRight", 1)} aria-label="Increase right padding">+</button>
@@ -5428,7 +5395,7 @@ ${body}
               <div class="layout-stepper">
                 <span class="layout-control-icon" aria-hidden="true">A</span>
                 <span class="layout-stepper-label">Alignment</span>
-                <span class="layout-stepper-value">{layoutStepperValue("blockquoteAlign")}</span>
+                <span class="layout-stepper-value">{blockquoteAlign}</span>
                 <span class="layout-stepper-buttons">
                   <button type="button" on:click={() => adjustLayoutValue("blockquoteAlign", -1)} aria-label="Decrease notes alignment">−</button>
                   <button type="button" on:click={() => adjustLayoutValue("blockquoteAlign", 1)} aria-label="Increase notes alignment">+</button>
@@ -5437,7 +5404,7 @@ ${body}
               <div class="layout-stepper">
                 <span class="layout-control-icon" aria-hidden="true">W</span>
                 <span class="layout-stepper-label">Width</span>
-                <span class="layout-stepper-value">{layoutStepperValue("blockquoteBgWidth")}</span>
+                <span class="layout-stepper-value">{blockquoteBgWidth}</span>
                 <span class="layout-stepper-buttons">
                   <button type="button" on:click={() => adjustLayoutValue("blockquoteBgWidth", -1)} aria-label="Decrease notes width">−</button>
                   <button type="button" on:click={() => adjustLayoutValue("blockquoteBgWidth", 1)} aria-label="Increase notes width">+</button>
@@ -5454,7 +5421,7 @@ ${body}
               <div class="layout-stepper">
                 <span class="layout-control-icon" aria-hidden="true">↔</span>
                 <span class="layout-stepper-label">Column stride</span>
-                <span class="layout-stepper-value">{layoutStepperValue("columnStride")}</span>
+                <span class="layout-stepper-value">{columnStride}</span>
                 <span class="layout-stepper-buttons">
                   <button type="button" on:click={() => adjustLayoutValue("columnStride", -1)} aria-label="Decrease column stride">−</button>
                   <button type="button" on:click={() => adjustLayoutValue("columnStride", 1)} aria-label="Increase column stride">+</button>
