@@ -116,6 +116,8 @@
   const customShortcutDefinitions: Array<{ action: CustomShortcutAction; label: string; icon: string; defaultValue: string }> = [
     { action: "stridePrevious", label: "Stride previous", icon: "←", defaultValue: "Shift+Tab" },
     { action: "strideNext", label: "Stride next", icon: "→", defaultValue: "Tab" },
+    { action: "annotationPrevious", label: "Annotation previous", icon: "[", defaultValue: "[" },
+    { action: "annotationNext", label: "Annotation next", icon: "]", defaultValue: "]" },
     { action: "stylePrevious", label: "Style previous", icon: "z", defaultValue: "z" },
     { action: "styleNext", label: "Style next", icon: "c", defaultValue: "c" },
     { action: "variantPrevious", label: "Variation previous", icon: "F", defaultValue: "Shift+F" },
@@ -2170,6 +2172,8 @@
   function handleCustomShortcut(action: CustomShortcutAction, v: EditorView) {
     if (action === "stridePrevious") return moveCursorByColumnStride(v, -1);
     if (action === "strideNext") return moveCursorByColumnStride(v, 1);
+    if (action === "annotationPrevious") return jumpToAdjacentAnnotation(v, -1);
+    if (action === "annotationNext") return jumpToAdjacentAnnotation(v, 1);
     if (action === "stylePrevious") {
       if (!cycleAnnotationColor(v, -1)) cycleStyle(-1);
       return true;
@@ -2181,6 +2185,18 @@
     if (action === "variantPrevious") return cycleAnnotationVariant(v, -1);
     if (action === "variantNext") return cycleAnnotationVariant(v, +1);
     return false;
+  }
+
+  function jumpToAdjacentAnnotation(v: EditorView, direction: 1 | -1) {
+    const annotations = summaryItems.filter(isSummaryAnnotationItem);
+    if (!annotations.length) return false;
+    const head = v.state.selection.main.head;
+    const target =
+      direction > 0
+        ? annotations.find(item => item.spanStart > head) ?? annotations[0]
+        : [...annotations].reverse().find(item => item.spanStart < head) ?? annotations[annotations.length - 1];
+    jumpToSummaryItem(target);
+    return true;
   }
 
   function applyEditorModeClasses(v = view) {

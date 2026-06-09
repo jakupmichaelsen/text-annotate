@@ -6,6 +6,8 @@ export const reservedStyleKeys = new Set(["h", "j", "k", "l", "w", "a", "s", "d"
 export const customShortcutActions = [
   "stridePrevious",
   "strideNext",
+  "annotationPrevious",
+  "annotationNext",
   "stylePrevious",
   "styleNext",
   "variantPrevious",

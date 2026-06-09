@@ -32,6 +32,7 @@ markdown instead of a proprietary document format.
   reordering styles.
 - **Inline note editing** - double-click or press `Enter` on an annotation to
   edit its stored comment.
+- **Annotation navigation** - jump to the previous or next annotation with `[` / `]`.
 - **Summary sidebar** - groups annotations and blockquote notes, jumps back to
   the source text, opens annotation comments for editing, lets you rename
   annotation titles inline, and lets you reorder annotation categories with a

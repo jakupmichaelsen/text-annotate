@@ -37,6 +37,7 @@ export const helpSections = [
     title: "Annotations",
     items: [
       ["Space", "wrap word / selection"],
+      ["[ / ]", "previous / next annotation"],
       ["Style keys", "select / recolor style"],
       ["0", "plain annotation"],
       ["z / c", "style prev / next"],
