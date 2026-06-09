@@ -1009,6 +1009,60 @@
     outline: none;
   }
 
+  .padding-stepper-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 5px;
+    min-width: 0;
+  }
+
+  .padding-stepper {
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr) 34px auto;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    color: var(--fg-muted);
+    font-size: 11px;
+  }
+
+  .padding-stepper-label {
+    min-width: 0;
+    color: var(--fg);
+  }
+
+  .padding-stepper-value {
+    color: var(--fg-muted);
+    font-size: 10px;
+    text-align: right;
+  }
+
+  .padding-stepper-buttons {
+    display: grid;
+    gap: 2px;
+  }
+
+  .padding-stepper-buttons button {
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: var(--bg-alt);
+    color: var(--fg-muted);
+    font: inherit;
+    font-size: 10px;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .padding-stepper-buttons button:hover,
+  .padding-stepper-buttons button:focus-visible {
+    border-color: var(--orange);
+    color: var(--orange);
+    outline: none;
+  }
+
   .settings-range-row {
     display: grid;
     grid-template-columns: 18px minmax(68px, 0.8fr) minmax(0, 1fr) 40px;

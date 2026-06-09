@@ -1552,6 +1552,16 @@
     }
   }
 
+  function adjustPaddingValue(kind: "padLeft" | "padRight" | "padTop" | "padBottom", delta: number) {
+    const step = 4;
+    const maxBottom = Math.max(0, editorViewportHeight - 48);
+    const max = kind === "padBottom" ? maxBottom : 400;
+    if (kind === "padLeft") padLeft = Math.round(clampNumber(padLeft + delta * step, 0, max));
+    else if (kind === "padRight") padRight = Math.round(clampNumber(padRight + delta * step, 0, max));
+    else if (kind === "padTop") padTop = Math.round(clampNumber(padTop + delta * step, 0, max));
+    else padBottom = Math.round(clampNumber(padBottom + delta * step, 0, max));
+  }
+
   function setRightPaddingFromClientX(clientX: number) {
     if (!editorEl) return;
     const rect = editorEl.getBoundingClientRect();
@@ -5034,30 +5044,44 @@ ${body}
                 on:change={event => hjklWordNavigation = (event.target as HTMLInputElement).checked}
               />
             </label>
-            <label class="settings-range-row">
-              <span class="settings-control-icon" aria-hidden="true">L</span>
-              <span class="settings-range-label">Left padding</span>
-              <input type="range" min="0" max="400" step="4" bind:value={padLeft} class="slider" aria-label="Left padding" />
-              <span class="settings-range-value">{padLeft}</span>
-            </label>
-            <label class="settings-range-row">
-              <span class="settings-control-icon" aria-hidden="true">R</span>
-              <span class="settings-range-label">Right padding</span>
-              <input type="range" min="0" max="400" step="4" bind:value={padRight} class="slider" aria-label="Right padding" />
-              <span class="settings-range-value">{padRight}</span>
-            </label>
-            <label class="settings-range-row">
-              <span class="settings-control-icon" aria-hidden="true">T</span>
-              <span class="settings-range-label">Top padding</span>
-              <input type="range" min="0" max="400" step="4" bind:value={padTop} class="slider" aria-label="Top padding" />
-              <span class="settings-range-value">{padTop}</span>
-            </label>
-            <label class="settings-range-row">
-              <span class="settings-control-icon" aria-hidden="true">B</span>
-              <span class="settings-range-label">Bottom padding</span>
-              <input type="range" min="0" max={Math.max(0, editorViewportHeight - 48)} step="4" bind:value={padBottom} class="slider" aria-label="Bottom padding" />
-              <span class="settings-range-value">{padBottom}</span>
-            </label>
+            <div class="padding-stepper-grid" aria-label="Editor padding">
+              <div class="padding-stepper">
+                <span class="settings-control-icon" aria-hidden="true">L</span>
+                <span class="padding-stepper-label">Left</span>
+                <span class="padding-stepper-value">{padLeft}</span>
+                <span class="padding-stepper-buttons">
+                  <button type="button" on:click={() => adjustPaddingValue("padLeft", 1)} aria-label="Increase left padding">▲</button>
+                  <button type="button" on:click={() => adjustPaddingValue("padLeft", -1)} aria-label="Decrease left padding">▼</button>
+                </span>
+              </div>
+              <div class="padding-stepper">
+                <span class="settings-control-icon" aria-hidden="true">R</span>
+                <span class="padding-stepper-label">Right</span>
+                <span class="padding-stepper-value">{padRight}</span>
+                <span class="padding-stepper-buttons">
+                  <button type="button" on:click={() => adjustPaddingValue("padRight", 1)} aria-label="Increase right padding">▲</button>
+                  <button type="button" on:click={() => adjustPaddingValue("padRight", -1)} aria-label="Decrease right padding">▼</button>
+                </span>
+              </div>
+              <div class="padding-stepper">
+                <span class="settings-control-icon" aria-hidden="true">T</span>
+                <span class="padding-stepper-label">Top</span>
+                <span class="padding-stepper-value">{padTop}</span>
+                <span class="padding-stepper-buttons">
+                  <button type="button" on:click={() => adjustPaddingValue("padTop", 1)} aria-label="Increase top padding">▲</button>
+                  <button type="button" on:click={() => adjustPaddingValue("padTop", -1)} aria-label="Decrease top padding">▼</button>
+                </span>
+              </div>
+              <div class="padding-stepper">
+                <span class="settings-control-icon" aria-hidden="true">B</span>
+                <span class="padding-stepper-label">Bottom</span>
+                <span class="padding-stepper-value">{padBottom}</span>
+                <span class="padding-stepper-buttons">
+                  <button type="button" on:click={() => adjustPaddingValue("padBottom", 1)} aria-label="Increase bottom padding">▲</button>
+                  <button type="button" on:click={() => adjustPaddingValue("padBottom", -1)} aria-label="Decrease bottom padding">▼</button>
+                </span>
+              </div>
+            </div>
             <label class="settings-range-row">
               <span class="settings-control-icon" aria-hidden="true">⇡</span>
               <span class="settings-range-label">Top scroll border</span>
