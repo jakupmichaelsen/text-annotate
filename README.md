@@ -32,7 +32,7 @@ markdown instead of a proprietary document format.
   reordering styles.
 - **Inline note editing** - double-click or press `Enter` on an annotation to
   edit its stored comment.
-- **Annotation navigation** - jump to the previous or next annotation with `[` / `]`.
+- **Annotation navigation** - jump to the previous or next annotation with `n` / `N`.
 - **Summary sidebar** - groups annotations and blockquote notes, jumps back to
   the source text, opens annotation comments for editing, lets you rename
   annotation titles inline, and lets you reorder annotation categories with a
@@ -146,8 +146,8 @@ Annotate mode uses Vim-style movement plus arrow-key equivalents.
 | `0` | Use plain backtick annotation |
 | `z` / `c` | Previous / next annotation style |
 | `v` / `V` | Next / previous annotation variant |
-| `n` | Start a blockquote note below and enter Edit mode |
-| `N` | Split the rest of the line into a blockquote note below |
+| `<` | Start a blockquote note below and enter Edit mode |
+| `>` | Split the rest of the line into a blockquote note below |
 | `Space` | Wrap selection or current word as an annotation |
 | `Enter` | Edit annotation note, or play the current SRT cue when no annotation is active |
 | `x` | Remove annotation, or delete the selection / next character |

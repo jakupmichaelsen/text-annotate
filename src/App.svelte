@@ -116,8 +116,8 @@
   const customShortcutDefinitions: Array<{ action: CustomShortcutAction; label: string; icon: string; defaultValue: string }> = [
     { action: "stridePrevious", label: "Stride previous", icon: "←", defaultValue: "Shift+Tab" },
     { action: "strideNext", label: "Stride next", icon: "→", defaultValue: "Tab" },
-    { action: "annotationPrevious", label: "Annotation previous", icon: "[", defaultValue: "[" },
-    { action: "annotationNext", label: "Annotation next", icon: "]", defaultValue: "]" },
+    { action: "annotationPrevious", label: "Annotation previous", icon: "n", defaultValue: "n" },
+    { action: "annotationNext", label: "Annotation next", icon: "N", defaultValue: "N" },
     { action: "stylePrevious", label: "Style previous", icon: "z", defaultValue: "z" },
     { action: "styleNext", label: "Style next", icon: "c", defaultValue: "c" },
     { action: "variantPrevious", label: "Variation previous", icon: "F", defaultValue: "Shift+F" },

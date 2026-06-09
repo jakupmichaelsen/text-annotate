@@ -37,13 +37,13 @@ export const helpSections = [
     title: "Annotations",
     items: [
       ["Space", "wrap word / selection"],
-      ["[ / ]", "previous / next annotation"],
+      ["n / N", "previous / next annotation"],
       ["Style keys", "select / recolor style"],
       ["0", "plain annotation"],
       ["z / c", "style prev / next"],
       ["f", "variant next"],
-      ["n", "new blockquote below"],
-      ["N", "split rest of line to blockquote"],
+      ["<", "new blockquote below"],
+      [">", "split rest of line to blockquote"],
       ["Enter", "edit note / cue playback"],
       ["x", "remove annotation / delete"]
     ]
