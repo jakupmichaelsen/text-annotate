@@ -12,7 +12,7 @@ markdown instead of a proprietary document format.
 
 ## Core Workflow
 
-1. Paste text or load a `.srt`, `.txt`, `.md`, `.docx`, or `.pdf` file.
+1. Paste text or load a `.srt`, `.txt`, `.md`, `.docx`, `.odt`, or `.pdf` file.
 2. Use Annotate mode for fast keyboard navigation and phrase marking.
 3. Switch to Edit mode when you want normal text entry.
 4. Optionally load a matching media file and use gutter timestamps for playback.
@@ -39,7 +39,7 @@ markdown instead of a proprietary document format.
   fullscreen.
 - **Blockquote note controls** - adjust feedback-note alignment and background
   width while preserving those settings in markdown comments.
-- **File loading** - supports `.srt`, `.txt`, `.md`, `.docx`, and `.pdf` input.
+- **File loading** - supports `.srt`, `.txt`, `.md`, `.docx`, `.odt`, and `.pdf` input.
 - **SRT transcript view** - drops cue IDs, normalizes timestamps, strips simple
   subtitle tags, collapses raw timestamp source lines, and shows clickable cue
   timestamps in the line-number gutter beside transcript lines.
@@ -106,6 +106,7 @@ markdown editors and rendered comments stay hidden in normal markdown output.
 | `.srt` | Converts cues to hidden timestamp source lines plus transcript text, with cue labels shown in the gutter. |
 | `.txt` / `.md` | Loads text directly into the editor and clears any previous media session unless new media is selected too. |
 | `.docx` | Extracts raw text with `mammoth` and clears any previous media session unless new media is selected too. |
+| `.odt` | Extracts text from OpenDocument `content.xml` and clears any previous media session unless new media is selected too. |
 | `.pdf` | Extracts text with `pdfjs-dist`, opens the review modal before loading, and clears any previous media session unless new media is selected too. |
 | Media | Loads `.mp3`, `.wav`, `.m4a`, `.ogg`, `.oga`, `.webm`, `.aac`, `.flac`, `.mp4`, `.mov`, or `.mkv` for transcript playback. |
 

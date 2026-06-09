@@ -21,6 +21,7 @@
     syntaxHighlighting
   } from "@codemirror/language";
   import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+  import JSZip from "jszip";
   import * as pdfjsLib from "pdfjs-dist";
   import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
   import {
@@ -1013,6 +1014,9 @@
       const result = await mammoth.extractRawText({ arrayBuffer: buffer });
       return { file, type: "DOCX", text: stripEmptyLines(result.value), preserveLineBreaks: false };
     }
+    if (isOdtFile(file)) {
+      return { file, type: "ODT", text: await extractOdtText(file), preserveLineBreaks: false };
+    }
     return {
       file,
       type: file.name.split(".").pop()?.toUpperCase() || "TEXT",
@@ -1023,6 +1027,56 @@
 
   function isPdfFile(file: File) {
     return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+  }
+
+  function isOdtFile(file: File) {
+    return file.type === "application/vnd.oasis.opendocument.text" || file.name.toLowerCase().endsWith(".odt");
+  }
+
+  async function extractOdtText(file: File) {
+    const zip = await JSZip.loadAsync(await file.arrayBuffer());
+    const contentFile = zip.file("content.xml");
+    if (!contentFile) throw new Error("ODT file is missing content.xml.");
+
+    const xml = await contentFile.async("string");
+    const document = new DOMParser().parseFromString(xml, "application/xml");
+    if (document.getElementsByTagName("parsererror").length) {
+      throw new Error("Could not parse ODT document text.");
+    }
+
+    const textRoot =
+      Array.from(document.getElementsByTagNameNS("*", "text"))[0] ??
+      document.documentElement;
+    const blocks: string[] = [];
+
+    function textFromNode(node: Node): string {
+      if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
+      if (node.nodeType !== Node.ELEMENT_NODE) return "";
+
+      const element = node as Element;
+      if (element.localName === "s") {
+        const count = Number(element.getAttribute("text:c") ?? element.getAttribute("c") ?? "1");
+        return " ".repeat(Number.isFinite(count) && count > 0 ? count : 1);
+      }
+      if (element.localName === "tab") return "\t";
+      if (element.localName === "line-break") return "\n";
+
+      return Array.from(element.childNodes).map(textFromNode).join("");
+    }
+
+    function collectBlocks(node: Node) {
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+      const element = node as Element;
+      if (element.localName === "p" || element.localName === "h") {
+        const text = textFromNode(element).replace(/[ \t]+\n/g, "\n").trim();
+        if (text) blocks.push(text);
+        return;
+      }
+      for (const child of Array.from(element.childNodes)) collectBlocks(child);
+    }
+
+    collectBlocks(textRoot);
+    return stripEmptyLines(blocks.join("\n\n"));
   }
 
   function isMediaFile(file: File) {
@@ -5115,7 +5169,7 @@ ${body}
     <div class="sidebar" class:collapsed={leftSidebarCollapsed}>
       {#if !leftSidebarCollapsed}
       <div class="sidebar-section">
-        <input type="file" accept=".srt,.txt,.md,.docx,.pdf,.mp3,.wav,.m4a,.ogg,.oga,.webm,.aac,.flac,.mp4,.mov,.mkv" multiple style="display:none" bind:this={fileInput} on:change={loadFile} />
+        <input type="file" accept=".srt,.txt,.md,.docx,.odt,.pdf,.mp3,.wav,.m4a,.ogg,.oga,.webm,.aac,.flac,.mp4,.mov,.mkv" multiple style="display:none" bind:this={fileInput} on:change={loadFile} />
         <button class="sidebar-label load-btn sidebar-load-btn" on:click={() => fileInput.click()}>LOAD</button>
         <div class="file-actions">
           <button class="sidebar-label load-btn" on:click={saveDocument}>SAVE</button>
