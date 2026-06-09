@@ -64,6 +64,7 @@ export type EditorKeymapHandlers = {
   handleVariantPickerKey: (view: EditorViewType, event: KeyboardEvent) => boolean;
   setAnnotationColorOrStyle: (view: EditorViewType, style: number) => boolean;
   setMode: (mode: EditorMode) => boolean;
+  handleEscape: () => boolean;
   toggleHelp: () => boolean;
   toggleSettings: () => boolean;
   finishBlockquoteEditMode: (view: EditorViewType) => boolean;
@@ -172,7 +173,7 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
     normalNavigationBehavior,
     Prec.high(keymap.of([
       { any: (view, event) => handlers.getEditorMode() === "normal" && handlers.handleVariantPickerKey(view, event) },
-      { key: "Escape", run: view => { handlers.setMode("normal"); return true; } },
+      { key: "Escape", run: () => handlers.handleEscape() },
       { key: "F2", run: view => { handlers.setMode(handlers.getEditorMode() === "insert" ? "normal" : "insert"); return true; } },
       { key: "F1", run: () => handlers.toggleHelp() },
       { key: "Mod-,", run: () => handlers.toggleSettings() },

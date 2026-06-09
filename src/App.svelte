@@ -1396,6 +1396,16 @@
     return true;
   }
 
+  function handleEscape() {
+    if (settingsOpen) {
+      settingsOpen = false;
+      view?.focus();
+      return true;
+    }
+    setMode("normal");
+    return true;
+  }
+
   function persistOpenAiApiKey() {
     if (typeof localStorage === "undefined") return;
     if (rememberOpenAiApiKey && openAiApiKey.trim()) {
@@ -4682,6 +4692,7 @@ ${body}
         handleVariantPickerKey,
         setAnnotationColorOrStyle,
         setMode: mode => { setMode(mode); return true; },
+        handleEscape,
         toggleHelp: () => { showHelp = !showHelp; return true; },
         toggleSettings,
         finishBlockquoteEditMode,
