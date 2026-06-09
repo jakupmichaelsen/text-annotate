@@ -5229,9 +5229,9 @@ ${body}
       }}
     >
       <div class="settings-tabs" role="tablist" aria-label="Settings sections">
-        <button type="button" class:active={settingsTab === "layout"} on:click={() => settingsTab = "layout"}>Layout</button>
-        <button type="button" class:active={settingsTab === "shortcuts"} on:click={() => settingsTab = "shortcuts"}>Hotkeys</button>
-        <button type="button" class:active={settingsTab === "import"} on:click={() => settingsTab = "import"}>Import</button>
+        <button type="button" class:active={settingsTab === "layout"} on:click={() => settingsTab = "layout"}>layout</button>
+        <button type="button" class:active={settingsTab === "shortcuts"} on:click={() => settingsTab = "shortcuts"}>hotkeys</button>
+        <button type="button" class:active={settingsTab === "import"} on:click={() => settingsTab = "import"}>import</button>
       </div>
 
       {#if settingsTab === "layout"}
@@ -5508,7 +5508,7 @@ ${body}
                     title={`Reset ${shortcut.label}`}
                     aria-label={`Reset ${shortcut.label}`}
                     on:click={() => customShortcuts = { ...customShortcuts, [shortcut.action]: shortcut.defaultValue }}
-                  >Reset</button>
+                  >reset</button>
                 </div>
               {/each}
             </div>

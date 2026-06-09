@@ -738,9 +738,8 @@
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 4px;
     background: var(--bg-hard);
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.36);
     overflow: hidden;
   }
 
@@ -748,21 +747,21 @@
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     border-bottom: 1px solid var(--border);
-    background: var(--bg-alt);
+    background: var(--bg-hard);
   }
 
   .settings-tabs button {
-    height: 32px;
+    height: 30px;
     border: none;
-    border-right: 1px solid var(--border);
     background: transparent;
     color: var(--fg-muted);
     font: inherit;
     font-size: 10px;
     font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: none;
+    letter-spacing: 0;
     cursor: pointer;
+    border-bottom: 1px solid transparent;
   }
 
   .settings-tabs button:last-child {
@@ -773,16 +772,16 @@
   .settings-tabs button:hover,
   .settings-tabs button:focus-visible {
     color: var(--orange);
-    background: var(--bg-hard);
+    border-bottom-color: var(--orange);
     outline: none;
   }
 
   .settings-panel {
     display: grid;
-    gap: 12px;
+    gap: 10px;
     min-height: 0;
     overflow: auto;
-    padding: 12px;
+    padding: 10px 12px 12px;
   }
 
   .settings-radio-group {
@@ -792,7 +791,7 @@
 
   .settings-section {
     display: grid;
-    gap: 6px;
+    gap: 5px;
   }
 
   .settings-section-heading {
@@ -803,7 +802,8 @@
     font-size: 11px;
     font-weight: 700;
     line-height: 1.1;
-    text-transform: uppercase;
+    text-transform: none;
+    letter-spacing: 0;
   }
 
   .settings-section-icon,
@@ -821,8 +821,8 @@
   .settings-section-icon {
     width: 18px;
     height: 18px;
-    border: 1px solid color-mix(in srgb, var(--orange) 42%, transparent);
-    border-radius: 4px;
+    border: 1px solid color-mix(in srgb, var(--orange) 34%, transparent);
+    border-radius: 3px;
     color: var(--orange);
     font-size: 10px;
   }
@@ -869,20 +869,23 @@
   }
 
   .settings-mini-button {
-    height: 22px;
-    padding: 0 7px;
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    background: var(--bg-alt);
+    height: 20px;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
     color: var(--fg-muted);
     font: inherit;
     font-size: 10px;
+    text-transform: lowercase;
+    letter-spacing: 0;
     cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
   }
 
   .settings-mini-button:hover,
   .settings-mini-button:focus-visible {
-    border-color: var(--orange);
     color: var(--orange);
     outline: none;
   }
@@ -909,20 +912,21 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 3px 7px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--bg-alt);
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
     color: var(--fg-muted);
     font: inherit;
     font-size: 10px;
     cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
   }
 
   .font-favorite-chip.active,
   .font-favorite-chip:hover,
   .font-favorite-chip:focus-visible {
-    border-color: var(--orange);
     color: var(--orange);
     outline: none;
   }
@@ -931,26 +935,25 @@
     width: 28px;
     height: 28px;
     padding: 0;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--bg-alt);
+    border: none;
+    border-radius: 0;
+    background: transparent;
     color: var(--fg-muted);
     font-family: var(--app-font-family);
     font-size: 13px;
     font-weight: 700;
     line-height: 1;
     cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
   }
 
   .settings-icon-button[aria-pressed="true"] {
     color: var(--orange);
-    border-color: var(--orange);
-    background: color-mix(in srgb, var(--orange) 14%, var(--bg-alt));
   }
 
   .settings-icon-button:hover,
   .settings-icon-button:focus-visible {
-    border-color: var(--orange);
     color: var(--orange);
     outline: none;
   }
@@ -964,11 +967,12 @@
     width: 100%;
     min-width: 0;
     box-sizing: border-box;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--bg);
+    border: none;
+    border-bottom: 1px solid var(--border);
+    border-radius: 0;
+    background: transparent;
     color: var(--fg);
-    padding: 6px 8px;
+    padding: 4px 0 5px;
     font-family: inherit;
     font-size: 11px;
     line-height: 1.35;
@@ -976,7 +980,7 @@
   }
 
   .settings-input:focus {
-    border-color: var(--orange);
+    border-bottom-color: var(--orange);
   }
 
   .settings-textarea {
@@ -1012,27 +1016,29 @@
 
   .layout-stepper-buttons {
     display: flex;
-    gap: 2px;
+    gap: 8px;
   }
 
   .layout-stepper-buttons button {
-    width: 20px;
-    height: 20px;
+    width: auto;
+    min-width: 12px;
+    height: 18px;
     padding: 0;
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    background: var(--bg-alt);
+    border: none;
+    border-radius: 0;
+    background: transparent;
     color: var(--fg-muted);
     font: inherit;
-    font-size: 12px;
+    font-size: 14px;
     font-weight: 700;
     line-height: 1;
     cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
   }
 
   .layout-stepper-buttons button:hover,
   .layout-stepper-buttons button:focus-visible {
-    border-color: var(--orange);
     color: var(--orange);
     outline: none;
   }
@@ -1059,20 +1065,21 @@
 
   .shortcut-binding {
     min-width: 0;
-    padding: 5px 8px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--bg-alt);
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
     color: var(--fg-muted);
     font: inherit;
     font-size: 11px;
     text-align: left;
     cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
   }
 
   .shortcut-binding:hover,
   .shortcut-binding:focus-visible {
-    border-color: var(--orange);
     color: var(--orange);
     outline: none;
   }
