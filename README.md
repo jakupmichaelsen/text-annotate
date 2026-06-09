@@ -145,6 +145,7 @@ Annotate mode uses Vim-style movement plus arrow-key equivalents.
 | Style keys | Select or recolor using the editable keys shown in the Annotation styles list. |
 | `0` | Use plain backtick annotation |
 | `z` / `c` | Previous / next annotation style |
+| `n` / `N` | Previous / next annotation |
 | `v` / `V` | Next / previous annotation variant |
 | `<` | Start a blockquote note below and enter Edit mode |
 | `>` | Split the rest of the line into a blockquote note below |

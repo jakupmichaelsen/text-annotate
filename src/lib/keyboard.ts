@@ -247,6 +247,17 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
     }
   });
 
+  const normalPrintableKeyBehavior = EditorView.domEventHandlers({
+    keydown(event) {
+      if (handlers.getEditorMode() !== "normal") return false;
+      if (event.ctrlKey || event.metaKey || event.altKey) return false;
+      if (event.key.length !== 1) return false;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return true;
+    }
+  });
+
   const customShortcutBehavior = EditorView.domEventHandlers({
     keydown(event, view) {
       if (handlers.getEditorMode() !== "normal") return false;
@@ -263,6 +274,7 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
   return [
     customShortcutBehavior,
     normalNavigationBehavior,
+    normalPrintableKeyBehavior,
     Prec.high(keymap.of([
       { any: (view, event) => handlers.getEditorMode() === "normal" && handlers.handleVariantPickerKey(view, event) },
       { key: "Escape", run: () => handlers.handleEscape() },
