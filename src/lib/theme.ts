@@ -121,7 +121,7 @@ export function buildEditorTheme(theme: ThemePalette): Extension {
     },
     ".cm-gutters": { backgroundColor: theme.bgHard, color: theme.gutterText, borderRight: "none" },
     ".cm-activeLine": { backgroundColor: theme.activeLine },
-    ".cm-activeLineGutter": { color: theme.gutterText, backgroundColor: theme.bgHard },
+    ".cm-activeLineGutter": { color: theme.gutterText, backgroundColor: theme.bg },
     ".cm-panels": { backgroundColor: theme.bgSoft, color: theme.fg },
     ".cm-searchMatch": { backgroundColor: theme.searchMatch, outline: `1px solid ${theme.yellow}` },
     ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: theme.searchMatchSelected },
