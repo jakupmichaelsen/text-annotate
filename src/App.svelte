@@ -153,7 +153,7 @@
   let settingsButtonEl: HTMLButtonElement | null = null;
   let settingsPopoverEl: HTMLDivElement | null = null;
   type SettingsTab = "layout" | "shortcuts" | "import";
-  type AnnotationMode = "clean" | "raw" | "all";
+  type AnnotationMode = "clean" | "raw" | "all" | "sticky" | "superscript" | "subscript";
   type AppSettings = {
     annotationMode: AnnotationMode;
     settingsTab: SettingsTab;
@@ -1179,7 +1179,14 @@
     if (!settings) return defaults;
 
     return {
-      annotationMode: settings.annotationMode === "raw" || settings.annotationMode === "all" ? settings.annotationMode : "clean",
+      annotationMode:
+        settings.annotationMode === "raw" ||
+        settings.annotationMode === "all" ||
+        settings.annotationMode === "sticky" ||
+        settings.annotationMode === "superscript" ||
+        settings.annotationMode === "subscript"
+          ? settings.annotationMode
+          : "clean",
       settingsTab: normalizeSettingsTab(settings.settingsTab),
       rememberOpenAiApiKey: typeof settings.rememberOpenAiApiKey === "boolean" ? settings.rememberOpenAiApiKey : false,
       transcriptionModel: typeof settings.transcriptionModel === "string" && settings.transcriptionModel.trim()
@@ -1448,6 +1455,14 @@
     rememberOpenAiApiKey = settings.rememberOpenAiApiKey;
     transcriptionModel = settings.transcriptionModel;
     transcriptionPrompt = settings.transcriptionPrompt;
+  }
+
+  function annotationModeUsesRawMarkup(mode = annotationMode) {
+    return mode === "raw" || mode === "all";
+  }
+
+  function annotationModeUsesInlineComments(mode = annotationMode) {
+    return mode === "sticky" || mode === "superscript" || mode === "subscript";
   }
 
   function restorePersistedSettings() {
@@ -3804,7 +3819,7 @@ ${body}
   const annotationTooltipField = StateField.define<readonly Tooltip[]>({
     create: () => [],
     update(tooltips, tr) {
-      if (annotationMode !== "clean") return [];
+      if (annotationModeUsesRawMarkup()) return [];
       const cursor = tr.state.selection.main.head;
       const docText = tr.state.doc.toString();
       annotationPattern.lastIndex = 0;
@@ -3884,6 +3899,36 @@ ${body}
       setTimeout(() => input.focus(), 0);
       return wrap;
     }
+    ignoreEvent() { return true; }
+  }
+
+  class AnnotationCommentWidget extends WidgetType {
+    private comment: string;
+    private color: string;
+    private mode: "sticky" | "superscript" | "subscript";
+
+    constructor(comment: string, color: string, mode: "sticky" | "superscript" | "subscript") {
+      super();
+      this.comment = comment;
+      this.color = color;
+      this.mode = mode;
+    }
+
+    toDOM() {
+      const span = document.createElement("span");
+      span.className = `cm-annotation-comment cm-annotation-comment-${this.mode}`;
+      span.title = this.comment;
+      span.textContent = this.comment;
+      if (this.mode === "sticky") {
+        span.style.cssText = `display:inline-block;vertical-align:baseline;margin-left:3px;padding:0 4px;border:1px solid color-mix(in srgb, ${this.color} 58%, var(--border));border-radius:3px;background:color-mix(in srgb, ${this.color} 16%, transparent);color:${activeTheme.fg};font-size:10px;line-height:1.35;white-space:nowrap;pointer-events:none;`;
+      } else if (this.mode === "superscript") {
+        span.style.cssText = `display:inline-block;vertical-align:super;margin-left:2px;color:${this.color};font-size:0.72em;line-height:1;white-space:nowrap;pointer-events:none;`;
+      } else {
+        span.style.cssText = `display:inline-block;vertical-align:sub;margin-left:2px;color:${this.color};font-size:0.72em;line-height:1;white-space:nowrap;pointer-events:none;`;
+      }
+      return span;
+    }
+
     ignoreEvent() { return true; }
   }
 
@@ -4137,7 +4182,7 @@ ${body}
             const cursorInside = cursor >= spanStart && cursor <= spanEnd;
             const isEditing = editingSpan === spanStart;
 
-            if (mode === "raw" || mode === "all") {
+            if (annotationModeUsesRawMarkup(mode)) {
               if (mode === "all" || cursorInside) {
                 builder.add(spanStart, spanEnd, Decoration.mark({ attributes: { style: `background-color:color-mix(in srgb, ${color} 18%, transparent);border-radius:3px;` } }));
               } else {
@@ -4151,6 +4196,11 @@ ${body}
             builder.add(wordStart, wordEnd, Decoration.mark({ attributes: { style: annotationMarkCss(colorName, variant, color, theme) } }));
             if (isEditing) {
               builder.add(wordEnd, spanEnd, Decoration.replace({ widget: new EditWidget(color, comment, spanStart, spanEnd, v) }));
+            } else if (annotationModeUsesInlineComments(mode) && comment.trim()) {
+              builder.add(wordEnd, spanEnd, Decoration.replace({
+                widget: new AnnotationCommentWidget(comment, color, mode),
+                inclusive: false
+              }));
             } else {
               builder.add(wordEnd, spanEnd, Decoration.replace({ widget: new EmptyWidget() }));
             }
@@ -4260,7 +4310,7 @@ ${body}
     }, { decorations: v => v.decorations });
 
     const snapFilter = EditorState.transactionFilter.of(tr => {
-      if (!tr.selection || annotationMode !== "clean") return tr;
+      if (!tr.selection || annotationModeUsesRawMarkup()) return tr;
       const docText = tr.newDoc.toString();
       annotationPattern.lastIndex = 0;
       let m: RegExpExecArray | null;
@@ -4646,7 +4696,7 @@ ${body}
 
   function visualLineMeasureTarget(state: EditorState) {
     const head = state.selection.main.head;
-    if (annotationMode !== "clean") return { pos: head, side: 1 };
+    if (annotationModeUsesRawMarkup()) return { pos: head, side: 1 };
 
     const docText = state.doc.toString();
     annotationPattern.lastIndex = 0;
@@ -4868,7 +4918,7 @@ ${body}
       const pos = v.posAtCoords({ x: event.clientX, y: event.clientY });
       if (pos === null) return false;
       const docText = v.state.doc.toString();
-      if (annotationMode === "clean") {
+      if (!annotationModeUsesRawMarkup()) {
         annotationPattern.lastIndex = 0;
         let m: RegExpExecArray | null;
         while ((m = annotationPattern.exec(docText)) !== null) {
@@ -5100,29 +5150,17 @@ ${body}
         <div class="settings-panel">
           <section class="settings-section">
             <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">`</span><span>Markup Visibility</span></div>
-            <div class="settings-radio-group" aria-label="Markup visibility">
-              <label class="settings-choice-row">
-                <span class="settings-control-icon" aria-hidden="true">✓</span>
-                <span>Clean</span>
-                <input type="radio" name="annotationMode" value="clean"
-                  checked={annotationMode === "clean"}
-                  on:change={() => { annotationMode = "clean"; view?.dispatch({}); view?.focus(); }} />
-              </label>
-              <label class="settings-choice-row">
-                <span class="settings-control-icon" aria-hidden="true">•</span>
-                <span>Raw (current)</span>
-                <input type="radio" name="annotationMode" value="raw"
-                  checked={annotationMode === "raw"}
-                  on:change={() => { annotationMode = "raw"; view?.dispatch({}); view?.focus(); }} />
-              </label>
-              <label class="settings-choice-row">
-                <span class="settings-control-icon" aria-hidden="true">≡</span>
-                <span>Raw (all)</span>
-                <input type="radio" name="annotationMode" value="all"
-                  checked={annotationMode === "all"}
-                  on:change={() => { annotationMode = "all"; view?.dispatch({}); view?.focus(); }} />
-              </label>
-            </div>
+            <label class="settings-field">
+              <span class="settings-field-label">Markup display</span>
+              <select class="settings-input" bind:value={annotationMode} aria-label="Markup display" on:change={() => { view?.dispatch({}); view?.focus(); }}>
+                <option value="clean">Clean</option>
+                <option value="raw">Raw (current)</option>
+                <option value="all">Raw (all)</option>
+                <option value="sticky">Sticky comments</option>
+                <option value="superscript">Superscript comments</option>
+                <option value="subscript">Subscript comments</option>
+              </select>
+            </label>
           </section>
           <section class="settings-section">
             <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">Aa</span><span>Typography</span></div>
