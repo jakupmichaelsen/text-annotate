@@ -129,6 +129,10 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
         key === "h" || key === "l" || key === "q" || key === "e" ||
         key === "a" || key === "d"
       ) {
+        const useWasdNavigation = key === "a" || key === "d";
+        const useHjklNavigation = key === "h" || key === "l" || key === "q" || key === "e";
+        if (useWasdNavigation && !handlers.useWasdWordNavigation()) return false;
+        if (useHjklNavigation && !handlers.useHjklWordNavigation()) return false;
         if (visualLineSelection) {
           event.preventDefault();
           event.stopImmediatePropagation();
@@ -150,6 +154,12 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       if (key === "arrowdown" || key === "j" || key === "s") direction = "down";
       else if (key === "arrowup" || key === "k" || key === "w") direction = "up";
       else return false;
+
+      if (key === "j" || key === "k") {
+        if (!handlers.useHjklWordNavigation()) return false;
+      } else if (key === "w" || key === "s") {
+        if (!handlers.useWasdWordNavigation()) return false;
+      }
 
       event.preventDefault();
       event.stopImmediatePropagation();
