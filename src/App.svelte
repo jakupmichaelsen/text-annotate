@@ -4143,10 +4143,6 @@ ${body}
   }
 
   function setAnnotationColorOrStyle(v: EditorView, style: number) {
-    const variant = annotationVariants[0];
-    currentAnnotationVariant = variant;
-    if (setAnnotationPreview(v, style, variant)) return true;
-
     const cursor = v.state.selection.main.head;
     const docText = v.state.doc.toString();
     annotationPattern.lastIndex = 0;
@@ -4154,6 +4150,7 @@ ${body}
     while ((m = annotationPattern.exec(docText)) !== null) {
       const spanStart = m.index, spanEnd = spanStart + m[0].length;
       if (cursor >= spanStart && cursor <= spanEnd) {
+        const { variant } = annotationStyleParts(m[2]);
         if (style === 0) {
           const updated = `\`${m[1]}\``;
           currentStyle = 0;
@@ -4166,6 +4163,7 @@ ${body}
         const newName = styleName(style);
         const updated = m[0].replace(/^`([^`]+)`<!--\s*\w+(?:\s+\w+)?,/, `\`$1\`<!-- ${annotationStyleToken(newName, variant)},`);
         currentStyle = style;
+        currentAnnotationVariant = variant;
         v.dispatch({
           changes: { from: spanStart, to: spanEnd, insert: updated },
           selection: { anchor: spanStart + 1 + m[1].length }
@@ -4174,6 +4172,9 @@ ${body}
       }
     }
 
+    const variant = annotationVariants[0];
+    currentAnnotationVariant = variant;
+    if (setAnnotationPreview(v, style, variant)) return true;
     currentStyle = style;
     currentAnnotationVariant = variant;
     return true;
