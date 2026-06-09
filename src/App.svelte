@@ -258,6 +258,7 @@
   let blockquoteEditReturnAnchor: number | null = null;
   let editorMode: "normal" | "insert" = "normal";
   let stickySelectionActive = false;
+  let shiftSelectionActive = false;
   type VisualLineSelectionState = { anchorFrom: number; anchorTo: number; headFrom: number; headTo: number };
   let visualLineSelectionState: VisualLineSelectionState | null = null;
   let line = 1;
@@ -2156,6 +2157,7 @@
     const selection = view?.state.selection;
     editorMode = mode;
     stickySelectionActive = false;
+    shiftSelectionActive = false;
     visualLineSelectionState = null;
     if (mode === "normal") blockquoteEditReturnAnchor = null;
     if (view) {
@@ -4526,6 +4528,18 @@ ${body}
     return removeAnnotation(v) || deleteSelectionOrNextChar(v);
   }
 
+  function deleteCurrentLine(v: EditorView) {
+    const selection = v.state.selection.main;
+    const line = v.state.doc.lineAt(selection.head);
+    const from = line.from;
+    const to = line.number < v.state.doc.lines ? v.state.doc.line(line.number + 1).from : line.to;
+    v.dispatch({
+      changes: { from, to, insert: "" },
+      selection: { anchor: from }
+    });
+    return true;
+  }
+
   function toggleAnnotationEdit(v: EditorView) {
     const cursor = v.state.selection.main.head;
     const docText = v.state.doc.toString();
@@ -4555,10 +4569,12 @@ ${body}
       if (u.docChanged) {
         annotationPreview = null;
         stickySelectionActive = false;
+        shiftSelectionActive = false;
         visualLineSelectionState = null;
       }
       else if (u.selectionSet) {
         const range = u.state.selection.main;
+        if (range.empty) shiftSelectionActive = false;
         if (!range.empty && currentStyle > 0) {
           annotationPreview = {
             from: Math.min(range.from, range.to),
@@ -4566,7 +4582,7 @@ ${body}
             style: currentStyle,
             variant: currentAnnotationVariant
           };
-        } else if ((stickySelectionActive || visualLineSelectionState) && !range.empty) {
+        } else if ((stickySelectionActive || shiftSelectionActive || visualLineSelectionState) && !range.empty) {
           annotationPreview = {
             from: Math.min(range.from, range.to),
             to: Math.max(range.from, range.to),
@@ -4879,6 +4895,10 @@ ${body}
     return true;
   }
 
+  function setShiftSelectionActive(active: boolean) {
+    shiftSelectionActive = active;
+  }
+
   function scrollCurrentLineIntoView(v: EditorView) {
     const head = v.state.selection.main.head;
     v.dispatch({ effects: cursorScrollEffect(v, head) });
@@ -4990,11 +5010,13 @@ ${body}
         handleEnterInAnnotationMode,
         isStickySelectionActive: () => stickySelectionActive,
         toggleStickySelection,
+        setShiftSelectionActive,
         isVisualLineSelectionActive: () => visualLineSelectionState !== null,
         startVisualLineSelection,
         extendVisualLineSelection,
         scrollCurrentLineIntoView,
         removeAnnotationOrDelete,
+        deleteCurrentLine,
         cycleAnnotationVariant,
         toggleMediaPlayback,
         enterBlockquoteEditMode,

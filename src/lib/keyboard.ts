@@ -159,11 +159,13 @@ export type EditorKeymapHandlers = {
   handleEnterInAnnotationMode: (view: EditorViewType) => boolean;
   isStickySelectionActive: () => boolean;
   toggleStickySelection: (view: EditorViewType) => boolean;
+  setShiftSelectionActive: (active: boolean) => void;
   isVisualLineSelectionActive: () => boolean;
   startVisualLineSelection: (view: EditorViewType) => boolean;
   extendVisualLineSelection: (view: EditorViewType, direction: "up" | "down") => boolean;
   scrollCurrentLineIntoView: (view: EditorViewType) => boolean;
   removeAnnotationOrDelete: (view: EditorViewType) => boolean;
+  deleteCurrentLine: (view: EditorViewType) => boolean;
   cycleAnnotationVariant: (view: EditorViewType, delta: 1 | -1) => boolean;
   toggleMediaPlayback: () => void;
   enterBlockquoteEditMode: (view: EditorViewType) => boolean;
@@ -237,6 +239,7 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
 
       event.preventDefault();
       event.stopImmediatePropagation();
+      handlers.setShiftSelectionActive(event.shiftKey);
       if (visualLineSelection) return handlers.extendVisualLineSelection(view, direction);
       return handlers.navigation.moveLineSkippingSrt(view, direction, extend);
     }
@@ -313,6 +316,9 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       { key: "Space",  run: normal(view => handlers.wrapSelectionOrWord(view, handlers.currentStyle())) },
       { key: "Enter",  run: normal(view => handlers.handleEnterInAnnotationMode(view)) },
       { key: "x",      run: normal(view => handlers.removeAnnotationOrDelete(view)) },
+      { key: "Backspace", run: normal(() => true) },
+      { key: "Delete",    run: normal(() => true) },
+      { key: "X",      run: normal(view => handlers.deleteCurrentLine(view)) },
       { key: "v",      run: normal(view => handlers.toggleStickySelection(view)) },
       { key: "V",      run: normal(view => handlers.startVisualLineSelection(view)) },
       { key: "r",      run: normal(() => { handlers.handleMediaShortcut("r"); return true; }) },
