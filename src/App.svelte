@@ -59,7 +59,10 @@
     isAppShortcutCandidate,
     isModeShortcut,
     normalizeStyleKey,
-    reservedStyleKeys
+    normalizeShortcutBinding,
+    reservedStyleKeys,
+    shortcutBindingFromEvent,
+    type CustomShortcutAction
   } from "./lib/keyboard";
   import PdfReviewModal from "./lib/PdfReviewModal.svelte";
 
@@ -109,6 +112,15 @@
     { name: "Typori", css: '"Typori", sans-serif' }
   ] as const;
   const defaultFontFamilyName = "Calling Code";
+  const defaultFontFavorites: string[] = [];
+  const customShortcutDefinitions: Array<{ action: CustomShortcutAction; label: string; icon: string; defaultValue: string }> = [
+    { action: "stridePrevious", label: "Stride previous", icon: "←", defaultValue: "Shift+Tab" },
+    { action: "strideNext", label: "Stride next", icon: "→", defaultValue: "Tab" },
+    { action: "stylePrevious", label: "Style previous", icon: "z", defaultValue: "z" },
+    { action: "styleNext", label: "Style next", icon: "c", defaultValue: "c" },
+    { action: "variantPrevious", label: "Variation previous", icon: "F", defaultValue: "Shift+F" },
+    { action: "variantNext", label: "Variation next", icon: "f", defaultValue: "f" }
+  ];
 
   let editorEl: HTMLDivElement;
   let view: EditorView;
@@ -132,6 +144,7 @@
   let wasdWordNavigation = initialLayoutSettings.wasdWordNavigation ?? initialLayoutSettings.wordNavigation ?? false;
   let hjklWordNavigation = initialLayoutSettings.hjklWordNavigation ?? initialLayoutSettings.wordNavigation ?? false;
   let layoutFontFamilyName = initialLayoutSettings.fontFamilyName ?? defaultFontFamilyName;
+  let layoutFontFavorites = initialLayoutSettings.fontFavorites ?? defaultFontFavorites;
   let randomizeFontOnLoad = initialLayoutSettings.randomizeFontOnLoad ?? false;
   let rotateFontOnLoad = initialLayoutSettings.rotateFontOnLoad ?? false;
   let showHelp = false;
@@ -139,7 +152,7 @@
   let settingsPersistenceReady = false;
   let settingsButtonEl: HTMLButtonElement | null = null;
   let settingsPopoverEl: HTMLDivElement | null = null;
-  type SettingsTab = "annotation" | "editor" | "import";
+  type SettingsTab = "annotation" | "editor" | "shortcuts" | "import";
   type AnnotationMode = "clean" | "raw" | "all";
   type AppSettings = {
     annotationMode: AnnotationMode;
@@ -202,6 +215,10 @@
   let themeMode = loadThemeMode();
   let loadedFileType = "Markdown";
   let loadedFileName = "Untitled";
+  let customShortcuts = initialLayoutSettings.customShortcuts ?? {};
+  let shortcutEditAction: CustomShortcutAction | null = null;
+  let shortcutEditDraft = "";
+  let shortcutEditError = "";
   $: if (audioElement) audioElement.playbackRate = audioRates[audioRateIndex];
   $: audioRateText = audioRateLabel(audioRateIndex);
   $: showTtsWidget = ttsAvailable && !audioUrl && loadedFileType !== "SRT";
@@ -310,6 +327,7 @@
     fontSize;
     paragraphSpacing;
     layoutFontFamilyName;
+    layoutFontFavorites;
     randomizeFontOnLoad;
     rotateFontOnLoad;
     currentLineHighlightStyle;
@@ -319,6 +337,7 @@
     arrowWordNavigation;
     wasdWordNavigation;
     hjklWordNavigation;
+    customShortcuts;
     blockquoteAlign;
     blockquoteBgWidth;
     importLineMode;
@@ -1140,9 +1159,10 @@
   }
 
   function normalizeSettingsTab(value: unknown): SettingsTab {
-    if (value === "annotation" || value === "editor" || value === "import") return value;
+    if (value === "annotation" || value === "editor" || value === "shortcuts" || value === "import") return value;
     if (value === "markup") return "annotation";
     if (value === "layout") return "editor";
+    if (value === "hotkeys") return "shortcuts";
     if (value === "transcribe") return "import";
     return "annotation";
   }
@@ -1190,6 +1210,8 @@
     arrowWordNavigation: boolean;
     wasdWordNavigation: boolean;
     hjklWordNavigation: boolean;
+    fontFavorites: string[];
+    customShortcuts: Record<CustomShortcutAction, string>;
     blockquoteAlign: number;
     blockquoteBgWidth: number;
     importLineMode: ImportLineMode;
@@ -1200,6 +1222,39 @@
   function normalizeLayoutFontFamilyName(value: string) {
     const normalized = value.trim();
     return fontFamilyOptions.some(option => option.name === normalized) ? normalized : defaultFontFamilyName;
+  }
+
+  function normalizeFontFavorites(value: unknown) {
+    if (!Array.isArray(value)) return defaultFontFavorites.slice();
+    const seen = new Set<string>();
+    const favorites = value
+      .filter((item): item is string => typeof item === "string")
+      .map(name => normalizeLayoutFontFamilyName(name))
+      .filter(name => {
+        if (seen.has(name)) return false;
+        seen.add(name);
+        return true;
+      });
+    return favorites.length ? favorites : defaultFontFavorites.slice();
+  }
+
+  function preferredFontFamilyNames() {
+    const favorites = layoutFontFavorites.filter(name => fontFamilyOptions.some(option => option.name === name));
+    return favorites.length ? favorites : fontFamilyOptions.map(option => option.name);
+  }
+
+  function defaultCustomShortcutBindings() {
+    return Object.fromEntries(customShortcutDefinitions.map(definition => [definition.action, definition.defaultValue])) as Record<CustomShortcutAction, string>;
+  }
+
+  function normalizeCustomShortcuts(value: unknown) {
+    const defaults = defaultCustomShortcutBindings();
+    if (!value || typeof value !== "object" || Array.isArray(value)) return defaults;
+    const parsed = value as Record<string, unknown>;
+    return Object.fromEntries(customShortcutDefinitions.map(definition => {
+      const raw = typeof parsed[definition.action] === "string" ? parsed[definition.action] as string : definition.defaultValue;
+      return [definition.action, normalizeShortcutBinding(raw) || definition.defaultValue];
+    })) as Record<CustomShortcutAction, string>;
   }
 
   function fontFamilyCssForName(name: string) {
@@ -1214,21 +1269,43 @@
   }
 
   function rotateLayoutFontFamily() {
-    const nextIndex = (fontFamilyIndex(layoutFontFamilyName) + 1) % fontFamilyOptions.length;
-    layoutFontFamilyName = fontFamilyOptions[nextIndex].name;
+    const pool = preferredFontFamilyNames();
+    const currentIndex = pool.indexOf(layoutFontFamilyName);
+    const nextIndex = (currentIndex + 1) % pool.length;
+    layoutFontFamilyName = pool[nextIndex];
   }
 
   function randomizeLayoutFontFamily() {
-    if (fontFamilyOptions.length <= 1) return;
-    const currentIndex = fontFamilyIndex(layoutFontFamilyName);
-    let nextIndex = Math.floor(Math.random() * fontFamilyOptions.length);
-    if (nextIndex === currentIndex) nextIndex = (nextIndex + 1) % fontFamilyOptions.length;
-    layoutFontFamilyName = fontFamilyOptions[nextIndex].name;
+    const pool = preferredFontFamilyNames();
+    if (pool.length <= 1) return;
+    const currentIndex = pool.indexOf(layoutFontFamilyName);
+    let nextIndex = Math.floor(Math.random() * pool.length);
+    if (nextIndex === currentIndex) nextIndex = (nextIndex + 1) % pool.length;
+    layoutFontFamilyName = pool[nextIndex];
   }
 
   function applyDocumentLoadFontPreference() {
     if (randomizeFontOnLoad) randomizeLayoutFontFamily();
     else if (rotateFontOnLoad) rotateLayoutFontFamily();
+  }
+
+  function isFavoriteFont(name: string) {
+    return layoutFontFavorites.includes(name);
+  }
+
+  function toggleFontFavorite(name: string) {
+    const normalized = normalizeLayoutFontFamilyName(name);
+    if (!normalized) return;
+    const next = isFavoriteFont(normalized)
+      ? layoutFontFavorites.filter(font => font !== normalized)
+      : [...layoutFontFavorites, normalized];
+    layoutFontFavorites = next.length ? next : defaultFontFavorites.slice();
+  }
+
+  function orderedFontFamilyOptions() {
+    const favorites = layoutFontFavorites.filter(name => fontFamilyOptions.some(option => option.name === name));
+    const nonFavorites = fontFamilyOptions.filter(option => !favorites.includes(option.name));
+    return [...favorites.map(name => fontFamilyOptions.find(option => option.name === name)!), ...nonFavorites];
   }
 
   function loadLayoutSettings(): Partial<LayoutSettings> {
@@ -1283,6 +1360,8 @@
           : typeof settings.wordNavigation === "boolean"
             ? settings.wordNavigation
             : undefined,
+      fontFavorites: normalizeFontFavorites(settings.fontFavorites),
+      customShortcuts: normalizeCustomShortcuts(settings.customShortcuts),
       blockquoteAlign: Math.round(numberOr("blockquoteAlign", 0, 0, 100)),
       blockquoteBgWidth: Math.round(numberOr("blockquoteBgWidth", 100, 0, 100)),
       importLineMode: settings.importLineMode === "original" || settings.importLineMode === "sentences" || settings.importLineMode === "reflow"
@@ -1314,6 +1393,8 @@
       arrowWordNavigation,
       wasdWordNavigation,
       hjklWordNavigation,
+      fontFavorites: layoutFontFavorites,
+      customShortcuts,
       blockquoteAlign,
       blockquoteBgWidth,
       importLineMode,
@@ -1354,6 +1435,8 @@
     arrowWordNavigation = settings.arrowWordNavigation ?? arrowWordNavigation;
     wasdWordNavigation = settings.wasdWordNavigation ?? wasdWordNavigation;
     hjklWordNavigation = settings.hjklWordNavigation ?? hjklWordNavigation;
+    layoutFontFavorites = settings.fontFavorites ?? layoutFontFavorites;
+    customShortcuts = settings.customShortcuts ?? customShortcuts;
     blockquoteAlign = settings.blockquoteAlign ?? blockquoteAlign;
     blockquoteBgWidth = settings.blockquoteBgWidth ?? blockquoteBgWidth;
     importLineMode = settings.importLineMode ?? (settings.divideImportSentences === false ? "original" : importLineMode);
@@ -1394,6 +1477,63 @@
   function toggleSettings() {
     settingsOpen = !settingsOpen;
     return true;
+  }
+
+  function shortcutBindingFor(action: CustomShortcutAction) {
+    return normalizeShortcutBinding(customShortcuts[action] ?? defaultCustomShortcutBindings()[action]) || defaultCustomShortcutBindings()[action];
+  }
+
+  function startShortcutEdit(action: CustomShortcutAction) {
+    shortcutEditAction = action;
+    shortcutEditDraft = shortcutBindingFor(action);
+    shortcutEditError = "";
+  }
+
+  function saveShortcutEdit() {
+    if (!shortcutEditAction) return;
+    const action = shortcutEditAction;
+    const normalized = normalizeShortcutBinding(shortcutEditDraft) || defaultCustomShortcutBindings()[action];
+    const conflict = customShortcutDefinitions.find(definition =>
+      definition.action !== action && shortcutBindingFor(definition.action) === normalized
+    );
+    if (conflict) {
+      shortcutEditError = `${conflict.label} already uses that shortcut.`;
+      return;
+    }
+    customShortcuts = { ...customShortcuts, [action]: normalized };
+    shortcutEditAction = null;
+    shortcutEditError = "";
+  }
+
+  function cancelShortcutEdit() {
+    shortcutEditAction = null;
+    shortcutEditError = "";
+  }
+
+  function handleShortcutKeydown(event: KeyboardEvent) {
+    event.stopPropagation();
+    if (!shortcutEditAction) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancelShortcutEdit();
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      saveShortcutEdit();
+      return;
+    }
+    if (event.key === "Backspace" || event.key === "Delete") {
+      event.preventDefault();
+      shortcutEditDraft = "";
+      shortcutEditError = "";
+      return;
+    }
+    if (event.key.length === 1 || event.key === "Tab" || event.key === "Spacebar" || event.key.startsWith("Arrow") || event.key === "F1" || event.key === "F2") {
+      event.preventDefault();
+      shortcutEditDraft = shortcutBindingFromEvent(event);
+      shortcutEditError = "";
+    }
   }
 
   function handleEscape() {
@@ -1946,6 +2086,22 @@
       applyEditorModeClasses(view);
       requestAnimationFrame(() => view?.focus());
     }
+  }
+
+  function handleCustomShortcut(action: CustomShortcutAction, v: EditorView) {
+    if (action === "stridePrevious") return moveCursorByColumnStride(v, -1);
+    if (action === "strideNext") return moveCursorByColumnStride(v, 1);
+    if (action === "stylePrevious") {
+      if (!cycleAnnotationColor(v, -1)) cycleStyle(-1);
+      return true;
+    }
+    if (action === "styleNext") {
+      if (!cycleAnnotationColor(v, +1)) cycleStyle(+1);
+      return true;
+    }
+    if (action === "variantPrevious") return cycleAnnotationVariant(v, -1);
+    if (action === "variantNext") return cycleAnnotationVariant(v, +1);
+    return false;
   }
 
   function applyEditorModeClasses(v = view) {
@@ -4699,6 +4855,8 @@ ${body}
         useArrowWordNavigation: () => arrowWordNavigation,
         useWasdWordNavigation: () => wasdWordNavigation,
         useHjklWordNavigation: () => hjklWordNavigation,
+        getCustomShortcut: action => customShortcuts[action] ?? defaultCustomShortcutBindings()[action],
+        handleCustomShortcut,
         handleVariantPickerKey,
         setAnnotationColorOrStyle,
         setMode: mode => { setMode(mode); return true; },
@@ -4873,6 +5031,7 @@ ${body}
       <div class="settings-tabs" role="tablist" aria-label="Settings sections">
         <button type="button" class:active={settingsTab === "annotation"} on:click={() => settingsTab = "annotation"}>Annotation</button>
         <button type="button" class:active={settingsTab === "editor"} on:click={() => settingsTab = "editor"}>Editor</button>
+        <button type="button" class:active={settingsTab === "shortcuts"} on:click={() => settingsTab = "shortcuts"}>Hotkeys</button>
         <button type="button" class:active={settingsTab === "import"} on:click={() => settingsTab = "import"}>Import</button>
       </div>
 
@@ -4913,7 +5072,7 @@ ${body}
               <span class="settings-field-label">Font face</span>
               <span class="layout-font-controls">
                 <select class="settings-input" bind:value={layoutFontFamilyName}>
-                  {#each fontFamilyOptions as font}
+                  {#each orderedFontFamilyOptions() as font}
                     <option value={font.name}>{font.name}</option>
                   {/each}
                 </select>
@@ -4933,8 +5092,33 @@ ${body}
                   aria-pressed={rotateFontOnLoad}
                   on:click={() => { rotateFontOnLoad = !rotateFontOnLoad; if (rotateFontOnLoad) randomizeFontOnLoad = false; }}
                 >↻</button>
+                <button
+                  class="settings-icon-button"
+                  type="button"
+                  aria-label={isFavoriteFont(layoutFontFamilyName) ? `Remove ${layoutFontFamilyName} from font favorites` : `Add ${layoutFontFamilyName} to font favorites`}
+                  title={isFavoriteFont(layoutFontFamilyName) ? "Favorite font: on" : "Favorite font: off"}
+                  aria-pressed={isFavoriteFont(layoutFontFamilyName)}
+                  on:click={() => toggleFontFavorite(layoutFontFamilyName)}
+                >★</button>
               </span>
             </label>
+            {#if layoutFontFavorites.length}
+              <div class="font-favorite-list" aria-label="Favorite fonts">
+                {#each layoutFontFavorites as fontName}
+                  <button
+                    class="font-favorite-chip"
+                    type="button"
+                    class:active={layoutFontFamilyName === fontName}
+                    title={`Use ${fontName}`}
+                    aria-label={`Use ${fontName}`}
+                    on:click={() => { layoutFontFamilyName = fontName; }}
+                  >
+                    <span aria-hidden="true">★</span>
+                    <span>{fontName}</span>
+                  </button>
+                {/each}
+              </div>
+            {/if}
             <div class="layout-stepper-grid">
               <div class="layout-stepper">
                 <span class="layout-control-icon" aria-hidden="true">↕</span>
@@ -5002,47 +5186,6 @@ ${body}
                 aria-label="Column guide thickness"
               />
               <span class="settings-range-value">{columnGuideThickness}px</span>
-            </label>
-            <label class="settings-range-row">
-              <span class="settings-control-icon" aria-hidden="true">↔</span>
-              <span class="settings-range-label">Column stride</span>
-              <input
-                type="range"
-                min="4"
-                max="120"
-                step="2"
-                bind:value={columnStride}
-                class="slider"
-                aria-label="Column movement stride"
-              />
-              <span class="settings-range-value">{columnStride}</span>
-            </label>
-            <label class="settings-toggle-row">
-              <span class="settings-control-icon" aria-hidden="true">↔</span>
-              <span>Arrow keys word navigation</span>
-              <input
-                type="checkbox"
-                checked={arrowWordNavigation}
-                on:change={event => arrowWordNavigation = (event.target as HTMLInputElement).checked}
-              />
-            </label>
-            <label class="settings-toggle-row">
-              <span class="settings-control-icon" aria-hidden="true">W</span>
-              <span>WASD word navigation</span>
-              <input
-                type="checkbox"
-                checked={wasdWordNavigation}
-                on:change={event => wasdWordNavigation = (event.target as HTMLInputElement).checked}
-              />
-            </label>
-            <label class="settings-toggle-row">
-              <span class="settings-control-icon" aria-hidden="true">H</span>
-              <span>HJKL word navigation</span>
-              <input
-                type="checkbox"
-                checked={hjklWordNavigation}
-                on:change={event => hjklWordNavigation = (event.target as HTMLInputElement).checked}
-              />
             </label>
             <div class="padding-stepper-grid" aria-label="Editor padding">
               <div class="padding-stepper">
@@ -5125,6 +5268,80 @@ ${body}
               />
               <span class="settings-range-value">{blockquoteBgWidth}</span>
             </label>
+          </section>
+        </div>
+      {:else if settingsTab === "shortcuts"}
+        <div class="settings-panel">
+          <section class="settings-section">
+            <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">⌘</span><span>Hotkeys</span></div>
+            <label class="settings-range-row">
+              <span class="settings-control-icon" aria-hidden="true">↔</span>
+              <span class="settings-range-label">Column stride</span>
+              <input
+                type="range"
+                min="4"
+                max="120"
+                step="2"
+                bind:value={columnStride}
+                class="slider"
+                aria-label="Column movement stride"
+              />
+              <span class="settings-range-value">{columnStride}</span>
+            </label>
+            <label class="settings-toggle-row">
+              <span class="settings-control-icon" aria-hidden="true">↔</span>
+              <span>Arrow keys word navigation</span>
+              <input type="checkbox" checked={arrowWordNavigation} on:change={event => arrowWordNavigation = (event.target as HTMLInputElement).checked} />
+            </label>
+            <label class="settings-toggle-row">
+              <span class="settings-control-icon" aria-hidden="true">W</span>
+              <span>WASD word navigation</span>
+              <input type="checkbox" checked={wasdWordNavigation} on:change={event => wasdWordNavigation = (event.target as HTMLInputElement).checked} />
+            </label>
+            <label class="settings-toggle-row">
+              <span class="settings-control-icon" aria-hidden="true">H</span>
+              <span>HJKL word navigation</span>
+              <input type="checkbox" checked={hjklWordNavigation} on:change={event => hjklWordNavigation = (event.target as HTMLInputElement).checked} />
+            </label>
+            <div class="shortcut-grid" aria-label="Custom hotkeys">
+              {#each customShortcutDefinitions as shortcut}
+                <div class="shortcut-row">
+                  <span class="settings-control-icon" aria-hidden="true">{shortcut.icon}</span>
+                  <span class="shortcut-label">{shortcut.label}</span>
+                  {#if shortcutEditAction === shortcut.action}
+                    <input
+                      class="settings-input shortcut-input"
+                      readonly
+                      bind:value={shortcutEditDraft}
+                      aria-label={shortcut.label}
+                      title={shortcutEditError || "Press a key"}
+                      on:keydown={handleShortcutKeydown}
+                      on:blur={saveShortcutEdit}
+                    />
+                  {:else}
+                    <button
+                      class="shortcut-binding"
+                      type="button"
+                      title={`Edit ${shortcut.label}`}
+                      aria-label={`Edit ${shortcut.label}`}
+                      on:click={() => startShortcutEdit(shortcut.action)}
+                    >
+                      {shortcutBindingFor(shortcut.action)}
+                    </button>
+                  {/if}
+                  <button
+                    class="settings-mini-button"
+                    type="button"
+                    title={`Reset ${shortcut.label}`}
+                    aria-label={`Reset ${shortcut.label}`}
+                    on:click={() => customShortcuts = { ...customShortcuts, [shortcut.action]: shortcut.defaultValue }}
+                  >Reset</button>
+                </div>
+              {/each}
+            </div>
+            {#if shortcutEditError}
+              <div class="transcribe-inline-status error">{shortcutEditError}</div>
+            {/if}
           </section>
         </div>
       {:else if settingsTab === "import"}

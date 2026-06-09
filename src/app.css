@@ -894,9 +894,37 @@
 
   .layout-font-controls {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 28px 28px;
+    grid-template-columns: minmax(0, 1fr) 28px 28px 28px;
     gap: 5px;
     align-items: center;
+  }
+
+  .font-favorite-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .font-favorite-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 7px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-alt);
+    color: var(--fg-muted);
+    font: inherit;
+    font-size: 10px;
+    cursor: pointer;
+  }
+
+  .font-favorite-chip.active,
+  .font-favorite-chip:hover,
+  .font-favorite-chip:focus-visible {
+    border-color: var(--orange);
+    color: var(--orange);
+    outline: none;
   }
 
   .settings-icon-button {
@@ -1007,6 +1035,51 @@
     border-color: var(--orange);
     color: var(--orange);
     outline: none;
+  }
+
+  .shortcut-grid {
+    display: grid;
+    gap: 5px;
+  }
+
+  .shortcut-row {
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr) minmax(120px, 1fr) auto;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    color: var(--fg-muted);
+    font-size: 11px;
+  }
+
+  .shortcut-label {
+    min-width: 0;
+    color: var(--fg);
+  }
+
+  .shortcut-binding {
+    min-width: 0;
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-alt);
+    color: var(--fg-muted);
+    font: inherit;
+    font-size: 11px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .shortcut-binding:hover,
+  .shortcut-binding:focus-visible {
+    border-color: var(--orange);
+    color: var(--orange);
+    outline: none;
+  }
+
+  .shortcut-input {
+    font-family: var(--app-font-family);
+    font-size: 11px;
   }
 
   .padding-stepper-grid {

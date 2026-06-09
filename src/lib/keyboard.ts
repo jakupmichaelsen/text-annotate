@@ -3,6 +3,17 @@ import { EditorView, keymap, type EditorView as EditorViewType } from "@codemirr
 
 export const reservedStyleKeys = new Set(["h", "j", "k", "l", "w", "a", "s", "d", "q", "e", "r", "f", "n", "u", "v", "x", "z", "c", "?", " "]);
 
+export const customShortcutActions = [
+  "stridePrevious",
+  "strideNext",
+  "stylePrevious",
+  "styleNext",
+  "variantPrevious",
+  "variantNext"
+] as const;
+
+export type CustomShortcutAction = typeof customShortcutActions[number];
+
 export function normalizeStyleKey(key: string) {
   if (key.length !== 1 || /\s/.test(key)) return "";
   const normalized = key.toLowerCase();
@@ -24,6 +35,66 @@ export function isAudioShortcut(event: KeyboardEvent) {
 
 export function isAudioRateShortcut(event: KeyboardEvent) {
   return event.altKey && !event.ctrlKey && !event.metaKey && (event.key.toLowerCase() === "r" || event.key.toLowerCase() === "w");
+}
+
+function normalizeShortcutKey(key: string) {
+  if (key === " ") return "Space";
+  return key;
+}
+
+function shortcutKeyForEvent(event: KeyboardEvent) {
+  if (event.key === " ") return "Space";
+  if (event.key.length === 1) return event.shiftKey ? event.key.toUpperCase() : event.key.toLowerCase();
+  return normalizeShortcutKey(event.key);
+}
+
+function parseShortcutBinding(binding: string) {
+  const parts = binding.split("+").map(part => part.trim()).filter(Boolean);
+  if (!parts.length) return null;
+
+  const parsed = { ctrl: false, meta: false, alt: false, shift: false, key: "" };
+  for (const part of parts) {
+    const normalized = part.toLowerCase();
+    if (normalized === "ctrl" || normalized === "control") parsed.ctrl = true;
+    else if (normalized === "meta" || normalized === "cmd" || normalized === "mod") parsed.meta = true;
+    else if (normalized === "alt" || normalized === "option") parsed.alt = true;
+    else if (normalized === "shift") parsed.shift = true;
+    else parsed.key = normalizeShortcutKey(part);
+  }
+  return parsed.key ? parsed : null;
+}
+
+export function normalizeShortcutBinding(value: string) {
+  const parsed = parseShortcutBinding(value.trim());
+  if (!parsed) return "";
+  const parts: string[] = [];
+  if (parsed.ctrl) parts.push("Ctrl");
+  if (parsed.meta) parts.push("Meta");
+  if (parsed.alt) parts.push("Alt");
+  if (parsed.shift) parts.push("Shift");
+  parts.push(parsed.key.length === 1 ? parsed.key.toLowerCase() : parsed.key);
+  return parts.join("+");
+}
+
+export function shortcutBindingFromEvent(event: KeyboardEvent) {
+  const parts: string[] = [];
+  if (event.ctrlKey) parts.push("Ctrl");
+  if (event.metaKey) parts.push("Meta");
+  if (event.altKey) parts.push("Alt");
+  if (event.shiftKey && event.key !== "Shift") parts.push("Shift");
+  const key = shortcutKeyForEvent(event);
+  parts.push(key.length === 1 ? key.toLowerCase() : key);
+  return parts.join("+");
+}
+
+export function shortcutBindingMatchesEvent(event: KeyboardEvent, binding: string) {
+  const parsed = parseShortcutBinding(binding);
+  if (!parsed) return false;
+  return parsed.ctrl === event.ctrlKey &&
+    parsed.meta === event.metaKey &&
+    parsed.alt === event.altKey &&
+    parsed.shift === event.shiftKey &&
+    parsed.key.toLowerCase() === shortcutKeyForEvent(event).toLowerCase();
 }
 
 export function isAppShortcutCandidate(
@@ -61,6 +132,8 @@ export type EditorKeymapHandlers = {
   useArrowWordNavigation: () => boolean;
   useWasdWordNavigation: () => boolean;
   useHjklWordNavigation: () => boolean;
+  getCustomShortcut: (action: CustomShortcutAction) => string;
+  handleCustomShortcut: (action: CustomShortcutAction, view: EditorViewType) => boolean;
   handleVariantPickerKey: (view: EditorViewType, event: KeyboardEvent) => boolean;
   setAnnotationColorOrStyle: (view: EditorViewType, style: number) => boolean;
   setMode: (mode: EditorMode) => boolean;
@@ -169,7 +242,21 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
     }
   });
 
+  const customShortcutBehavior = EditorView.domEventHandlers({
+    keydown(event, view) {
+      if (handlers.getEditorMode() !== "normal") return false;
+      for (const action of customShortcutActions) {
+        if (!shortcutBindingMatchesEvent(event, handlers.getCustomShortcut(action))) continue;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return handlers.handleCustomShortcut(action, view);
+      }
+      return false;
+    }
+  });
+
   return [
+    customShortcutBehavior,
     normalNavigationBehavior,
     Prec.high(keymap.of([
       { any: (view, event) => handlers.getEditorMode() === "normal" && handlers.handleVariantPickerKey(view, event) },
@@ -226,9 +313,6 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       { key: "Space",  run: normal(view => handlers.wrapSelectionOrWord(view, handlers.currentStyle())) },
       { key: "Enter",  run: normal(view => handlers.handleEnterInAnnotationMode(view)) },
       { key: "x",      run: normal(view => handlers.removeAnnotationOrDelete(view)) },
-      { key: "z",      run: normal(view => { if (!handlers.cycleAnnotationColor(view, -1)) handlers.cycleStyle(-1); return true; }) },
-      { key: "c",      run: normal(view => { if (!handlers.cycleAnnotationColor(view, +1)) handlers.cycleStyle(+1); return true; }) },
-      { key: "f",      run: normal(view => handlers.cycleAnnotationVariant(view, +1)) },
       { key: "v",      run: normal(view => handlers.toggleStickySelection(view)) },
       { key: "V",      run: normal(view => handlers.startVisualLineSelection(view)) },
       { key: "r",      run: normal(() => { handlers.handleMediaShortcut("r"); return true; }) },
@@ -251,15 +335,7 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       { key: "MediaRewind", run: () => { handlers.handleMediaShortcut("MediaRewind"); return true; } },
       { key: "MediaFastForward", run: () => { handlers.handleMediaShortcut("MediaFastForward"); return true; } },
       { key: "MediaTrackPrevious", run: () => { handlers.handleMediaShortcut("MediaTrackPrevious"); return true; } },
-      { key: "MediaTrackNext", run: () => { handlers.handleMediaShortcut("MediaTrackNext"); return true; } },
-      {
-        any: (_view, event) =>
-          handlers.getEditorMode() === "normal" &&
-          event.key.length === 1 &&
-          !event.ctrlKey &&
-          !event.metaKey &&
-          !event.altKey
-      },
+      { key: "MediaTrackNext", run: () => { handlers.handleMediaShortcut("MediaTrackNext"); return true; } }
     ]))
   ];
 }
