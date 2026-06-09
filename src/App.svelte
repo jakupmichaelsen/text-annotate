@@ -201,6 +201,7 @@
   let transcriptionError = "";
   let themeMode = loadThemeMode();
   let loadedFileType = "Markdown";
+  let loadedFileName = "Untitled";
   $: if (audioElement) audioElement.playbackRate = audioRates[audioRateIndex];
   $: audioRateText = audioRateLabel(audioRateIndex);
   $: showTtsWidget = ttsAvailable && !audioUrl && loadedFileType !== "SRT";
@@ -439,6 +440,7 @@
     audioSourceFile = file;
     audioUrl = URL.createObjectURL(file);
     audioFileName = file.name;
+    loadedFileName = file.name;
     loadedFileType = file.name.split(".").pop()?.toUpperCase() || "MP3";
     if (audioElement) {
       audioElement.src = audioUrl;
@@ -986,6 +988,7 @@
     if (!documentFiles.length) return;
 
     if (documentFiles.length === 1 && isPdfFile(documentFiles[0])) {
+      loadedFileName = documentFiles[0].name;
       loadedFileType = "PDF";
       await openPdfModal(documentFiles[0]);
       return;
@@ -993,6 +996,7 @@
 
     const documents = await Promise.all(documentFiles.map(documentTextFromFile));
     const multiple = documents.length > 1;
+    loadedFileName = multiple ? documentFiles.map(file => file.name).join(", ") : documentFiles[0]?.name ?? "Untitled";
     const combined = documents
       .map(document => multiple ? `# ${document.file.name}\n\n${document.text}` : document.text)
       .join("\n\n");
@@ -5644,7 +5648,7 @@ ${body}
       <div class="status-center" class:empty={!audioUrl && !showTtsWidget}>
         {#if audioUrl}
           <div class="audio-widget">
-            <span class="audio-name">{audioFileName}</span>
+            <span class="audio-name">MP3</span>
             <span class="audio-sep">|</span>
             <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(-mediaSeekSeconds)} title={`Back ${mediaSeekSeconds} seconds`} aria-label={`Back ${mediaSeekSeconds} seconds`}>&lt;&lt;</button>
             <button class="audio-glyph play" type="button" on:click={toggleMediaPlayback} title="Play / pause" aria-label="Play / pause">{audioPlaying ? "⏸" : "▶"}</button>
@@ -5673,7 +5677,7 @@ ${body}
         <span class="status-item">{wordCountInfo}</span>
         <span class="status-item">Ln {line}</span>
         <span class="status-item">Col {column}</span>
-        <span class="status-file">{loadedFileType}</span>
+        <span class="status-file">{loadedFileName}</span>
       </div>
     </div>
   {/if}
