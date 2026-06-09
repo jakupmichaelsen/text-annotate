@@ -3920,7 +3920,7 @@ ${body}
       span.title = this.comment;
       span.textContent = this.comment;
       if (this.mode === "sticky") {
-        span.style.cssText = `display:inline-flex;align-items:center;background:${this.color}22;border-radius:3px;padding:0 4px;margin:0 1px;color:${activeTheme.blockquoteFg};font-family:inherit;font-size:inherit;line-height:inherit;white-space:nowrap;pointer-events:none;`;
+        span.style.cssText = `display:inline-flex;align-items:center;background:${this.color}22;border-radius:3px;padding:0 4px;margin:0 1px;color:${activeTheme.blockquoteFg};line-height:1;white-space:nowrap;pointer-events:none;`;
       } else if (this.mode === "superscript") {
         span.style.cssText = `display:inline-block;vertical-align:super;margin-left:2px;color:${this.color};opacity:0.72;font-size:0.72em;line-height:1;white-space:nowrap;pointer-events:none;`;
       } else {
