@@ -2370,6 +2370,37 @@
     return true;
   }
 
+  function annotationPreviewForCurrentSelection(v: EditorView) {
+    const range = v.state.selection.main;
+    if (range.empty) return null;
+    if (currentStyle === 0 && !stickySelectionActive && !shiftSelectionActive && !visualLineSelectionState) return null;
+    return {
+      from: Math.min(range.from, range.to),
+      to: Math.max(range.from, range.to),
+      style: currentStyle,
+      variant: currentAnnotationVariant
+    };
+  }
+
+  function syncAnnotationPreviewForCurrentSelection(v: EditorView) {
+    const next = annotationPreviewForCurrentSelection(v);
+    if (!next) {
+      if (!annotationPreview) return false;
+      annotationPreview = null;
+      v.dispatch({});
+      return true;
+    }
+    const same = !!annotationPreview &&
+      annotationPreview.from === next.from &&
+      annotationPreview.to === next.to &&
+      annotationPreview.style === next.style &&
+      annotationPreview.variant === next.variant;
+    if (same) return false;
+    annotationPreview = next;
+    v.dispatch({});
+    return true;
+  }
+
   function refreshAnnotationPreviewForSelection(v: EditorView) {
     if (!annotationPreview) return;
     const range = v.state.selection.main;
@@ -4599,6 +4630,14 @@ ${body}
     ? "plain"
     : `${styleName(currentStyle)} ${currentAnnotationVariant}`;
   $: currentStyleColor = styleColor(currentStyle);
+  $: if (view) {
+    currentStyle;
+    currentAnnotationVariant;
+    stickySelectionActive;
+    shiftSelectionActive;
+    visualLineSelectionState;
+    syncAnnotationPreviewForCurrentSelection(view);
+  }
 
   const statusPlugin = ViewPlugin.fromClass(class {
     constructor(v: EditorView) { applyEditorModeClasses(v); updateStatusFromView(v); }
@@ -4613,20 +4652,8 @@ ${body}
       else if (u.selectionSet) {
         const range = u.state.selection.main;
         if (range.empty) shiftSelectionActive = false;
-        if (!range.empty && currentStyle > 0) {
-          annotationPreview = {
-            from: Math.min(range.from, range.to),
-            to: Math.max(range.from, range.to),
-            style: currentStyle,
-            variant: currentAnnotationVariant
-          };
-        } else if ((stickySelectionActive || shiftSelectionActive || visualLineSelectionState) && !range.empty) {
-          annotationPreview = {
-            from: Math.min(range.from, range.to),
-            to: Math.max(range.from, range.to),
-            style: currentStyle,
-            variant: currentAnnotationVariant
-          };
+        if (!range.empty && (currentStyle > 0 || stickySelectionActive || shiftSelectionActive || visualLineSelectionState)) {
+          annotationPreview = annotationPreviewForCurrentSelection(u.view);
         } else {
           refreshAnnotationPreviewForSelection(u.view);
         }
