@@ -4814,7 +4814,7 @@ ${body}
 >
   <div class="toolbar">
     <div class="title">textAnnotate</div>
-    <span class="subtitle">paste or load .srt, .txt, .md, .docx, .odt, .pdf</span>
+    <span class="subtitle">.docx, .pdf, .odt, .srt, .txt, .md</span>
     <button class="toolbar-btn help-btn" on:click={() => showHelp = !showHelp} title="Keyboard shortcuts (?)">?</button>
   </div>
 
