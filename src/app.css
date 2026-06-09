@@ -1082,58 +1082,65 @@
     font-size: 11px;
   }
 
-  .padding-stepper-grid {
+  .padding-grid {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 5px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 10px;
     min-width: 0;
   }
 
-  .padding-stepper {
+  .padding-field {
     display: grid;
-    grid-template-columns: 18px minmax(0, 1fr) 34px auto;
-    align-items: center;
-    gap: 5px;
+    gap: 4px;
     min-width: 0;
-    color: var(--fg-muted);
+  }
+
+  .padding-field-label {
+    color: var(--fg);
     font-size: 11px;
   }
 
-  .padding-stepper-label {
-    min-width: 0;
-    color: var(--fg);
-  }
-
-  .padding-stepper-value {
-    color: var(--fg-muted);
-    font-size: 10px;
-    text-align: right;
-  }
-
-  .padding-stepper-buttons {
+  .padding-field-control {
     display: grid;
-    gap: 2px;
-  }
-
-  .padding-stepper-buttons button {
-    width: 18px;
-    height: 18px;
-    padding: 0;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
     border: 1px solid var(--border);
-    border-radius: 3px;
-    background: var(--bg-alt);
-    color: var(--fg-muted);
-    font: inherit;
-    font-size: 10px;
-    line-height: 1;
-    cursor: pointer;
+    border-radius: 4px;
+    background: var(--bg);
+    padding: 4px 8px;
   }
 
-  .padding-stepper-buttons button:hover,
-  .padding-stepper-buttons button:focus-visible {
+  .padding-field-control:focus-within {
     border-color: var(--orange);
-    color: var(--orange);
+  }
+
+  .padding-number {
+    width: 100%;
+    min-width: 0;
+    border: none;
+    background: transparent;
+    color: var(--fg);
+    font: inherit;
+    font-size: 11px;
+    line-height: 1.35;
     outline: none;
+  }
+
+  .padding-number::-webkit-outer-spin-button,
+  .padding-number::-webkit-inner-spin-button {
+    opacity: 1;
+  }
+
+  .padding-number:focus-visible {
+    outline: none;
+  }
+
+  .padding-unit {
+    color: var(--fg-muted);
+    font-size: 10px;
+    white-space: nowrap;
   }
 
   .settings-range-row {
