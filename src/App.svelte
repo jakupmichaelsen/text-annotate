@@ -152,7 +152,7 @@
   let settingsPersistenceReady = false;
   let settingsButtonEl: HTMLButtonElement | null = null;
   let settingsPopoverEl: HTMLDivElement | null = null;
-  type SettingsTab = "annotation" | "editor" | "shortcuts" | "import";
+  type SettingsTab = "layout" | "shortcuts" | "import";
   type AnnotationMode = "clean" | "raw" | "all";
   type AppSettings = {
     annotationMode: AnnotationMode;
@@ -1159,18 +1159,18 @@
   }
 
   function normalizeSettingsTab(value: unknown): SettingsTab {
-    if (value === "annotation" || value === "editor" || value === "shortcuts" || value === "import") return value;
-    if (value === "markup") return "annotation";
-    if (value === "layout") return "editor";
+    if (value === "layout" || value === "shortcuts" || value === "import") return value;
+    if (value === "annotation" || value === "editor") return "layout";
+    if (value === "markup") return "layout";
     if (value === "hotkeys") return "shortcuts";
     if (value === "transcribe") return "import";
-    return "annotation";
+    return "layout";
   }
 
   function loadAppSettings(): AppSettings {
     const defaults: AppSettings = {
       annotationMode: "clean",
-      settingsTab: "annotation",
+      settingsTab: "layout",
       rememberOpenAiApiKey: false,
       transcriptionModel: "whisper-1",
       transcriptionPrompt: ""
@@ -5019,13 +5019,12 @@ ${body}
       }}
     >
       <div class="settings-tabs" role="tablist" aria-label="Settings sections">
-        <button type="button" class:active={settingsTab === "annotation"} on:click={() => settingsTab = "annotation"}>Annotation</button>
-        <button type="button" class:active={settingsTab === "editor"} on:click={() => settingsTab = "editor"}>Editor</button>
+        <button type="button" class:active={settingsTab === "layout"} on:click={() => settingsTab = "layout"}>Layout</button>
         <button type="button" class:active={settingsTab === "shortcuts"} on:click={() => settingsTab = "shortcuts"}>Hotkeys</button>
         <button type="button" class:active={settingsTab === "import"} on:click={() => settingsTab = "import"}>Import</button>
       </div>
 
-      {#if settingsTab === "annotation"}
+      {#if settingsTab === "layout"}
         <div class="settings-panel">
           <section class="settings-section">
             <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">`</span><span>Markup Visibility</span></div>
@@ -5053,9 +5052,6 @@ ${body}
               </label>
             </div>
           </section>
-        </div>
-      {:else if settingsTab === "editor"}
-        <div class="settings-panel">
           <section class="settings-section">
             <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">Aa</span><span>Typography</span></div>
             <label class="settings-field layout-font-field">
@@ -5140,7 +5136,7 @@ ${body}
             </div>
           </section>
           <section class="settings-section">
-            <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">▣</span><span>Editor Frame</span></div>
+            <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">▣</span><span>Layout</span></div>
             <label class="settings-field">
               <span class="settings-field-label">Current line highlight</span>
               <select class="settings-input" bind:value={currentLineHighlightStyle}>
@@ -5177,7 +5173,7 @@ ${body}
               />
               <span class="settings-range-value">{columnGuideThickness}px</span>
             </label>
-            <div class="padding-grid" aria-label="Editor padding">
+            <div class="padding-grid" aria-label="Layout padding">
               <label class="padding-field">
                 <span class="padding-field-label">Top</span>
                 <span class="padding-field-control">
