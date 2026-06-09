@@ -3920,11 +3920,11 @@ ${body}
       span.title = this.comment;
       span.textContent = this.comment;
       if (this.mode === "sticky") {
-        span.style.cssText = `display:inline-block;vertical-align:baseline;margin-left:3px;padding:0 4px;border:1px solid color-mix(in srgb, ${this.color} 58%, var(--border));border-radius:3px;background:color-mix(in srgb, ${this.color} 16%, transparent);color:${activeTheme.fg};font-size:10px;line-height:1.35;white-space:nowrap;pointer-events:none;`;
+        span.style.cssText = `display:inline-flex;align-items:center;background:${this.color}22;border-radius:3px;padding:0 4px;margin:0 1px;color:${activeTheme.blockquoteFg};font-family:inherit;font-size:inherit;line-height:inherit;white-space:nowrap;pointer-events:none;`;
       } else if (this.mode === "superscript") {
-        span.style.cssText = `display:inline-block;vertical-align:super;margin-left:2px;color:${this.color};font-size:0.72em;line-height:1;white-space:nowrap;pointer-events:none;`;
+        span.style.cssText = `display:inline-block;vertical-align:super;margin-left:2px;color:${this.color};opacity:0.72;font-size:0.72em;line-height:1;white-space:nowrap;pointer-events:none;`;
       } else {
-        span.style.cssText = `display:inline-block;vertical-align:sub;margin-left:2px;color:${this.color};font-size:0.72em;line-height:1;white-space:nowrap;pointer-events:none;`;
+        span.style.cssText = `display:inline-block;vertical-align:sub;margin-left:2px;color:${this.color};opacity:0.72;font-size:0.72em;line-height:1;white-space:nowrap;pointer-events:none;`;
       }
       return span;
     }
