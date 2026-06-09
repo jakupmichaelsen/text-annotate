@@ -5137,6 +5137,7 @@ ${body}
     --active-line-edit: color-mix(in srgb, var(--green) var(--active-line-opacity-percent), transparent);
     --active-gutter-annotate: color-mix(in srgb, var(--active-style-color) 58%, var(--bg-hard));
     --active-gutter-edit: #2f4a3a;
+    --column-guide-color: ${currentStyleColor};
     --column-guide-width: ${columnGuideThickness}px;
     --app-font-family: ${layoutFontFamilyCss};
   `}
