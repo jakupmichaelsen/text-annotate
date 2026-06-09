@@ -252,6 +252,7 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       if (handlers.getEditorMode() !== "normal") return false;
       if (event.ctrlKey || event.metaKey || event.altKey) return false;
       if (event.key.length !== 1) return false;
+      if (isAppShortcutCandidate(event, handlers.styleNumberForKey)) return false;
       event.preventDefault();
       event.stopImmediatePropagation();
       return true;
