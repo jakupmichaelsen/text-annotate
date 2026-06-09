@@ -861,7 +861,24 @@
     }
     if (event.defaultPrevented || isEditorEventTarget(event.target) || shouldDeferWindowShortcut(event)) return;
     handleAudioKeydown(event);
-    if (event.defaultPrevented || !view || !isAppShortcutCandidate(event, styleNumberForKey)) return;
+    if (event.defaultPrevented || !view) return;
+
+    const isPrintableNormalKey =
+      editorMode === "normal" &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey &&
+      event.key.length === 1;
+
+    if (isPrintableNormalKey) {
+      runScopeHandlers(view, event, "editor");
+      event.preventDefault();
+      event.stopPropagation();
+      requestAnimationFrame(() => view?.focus());
+      return;
+    }
+
+    if (!isAppShortcutCandidate(event, styleNumberForKey)) return;
     if (!runScopeHandlers(view, event, "editor")) return;
     event.preventDefault();
     event.stopPropagation();
@@ -1263,7 +1280,12 @@
     const parsed = value as Record<string, unknown>;
     return Object.fromEntries(customShortcutDefinitions.map(definition => {
       const raw = typeof parsed[definition.action] === "string" ? parsed[definition.action] as string : definition.defaultValue;
-      return [definition.action, normalizeShortcutBinding(raw) || definition.defaultValue];
+      const migrated = definition.action === "annotationPrevious" && raw === "["
+        ? definition.defaultValue
+        : definition.action === "annotationNext" && raw === "]"
+          ? definition.defaultValue
+          : normalizeShortcutBinding(raw) || definition.defaultValue;
+      return [definition.action, migrated];
     })) as Record<CustomShortcutAction, string>;
   }
 
