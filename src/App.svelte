@@ -4094,23 +4094,34 @@ ${body}
       const titlePart = title ? `, title: "${title}"` : "";
       return `\`${text}\`<!-- ${annotationStyleToken(name, appliedVariant)}, ${ts}: ""${titlePart} -->`;
     };
+
+    const trimAnnotationPunctuation = (from: number, to: number) => {
+      const text = state.doc.sliceString(from, to);
+      const leading = text.match(/^[\s\p{P}]+/u)?.[0].length ?? 0;
+      const trailing = text.match(/[\s\p{P}]+$/u)?.[0].length ?? 0;
+      const nextFrom = from + leading;
+      const nextTo = Math.max(nextFrom, to - trailing);
+      return { from: nextFrom, to: nextTo, text: state.doc.sliceString(nextFrom, nextTo) };
+    };
+
     if (!range.empty) {
-      const selectedText = state.doc.sliceString(range.from, range.to);
+      const { from, to, text: selectedText } = trimAnnotationPunctuation(range.from, range.to);
+      if (!selectedText) return true;
       const insert = makeInsert(selectedText);
       annotationPreview = null;
       currentStyle = appliedStyle;
       currentAnnotationVariant = appliedVariant;
       v.dispatch({
-        changes: { from: range.from, to: range.to, insert },
-        selection: { anchor: range.from + 1 + selectedText.length }
+        changes: { from, to, insert },
+        selection: { anchor: from + 1 + selectedText.length }
       });
       return true;
     }
     const docText = state.doc.toString();
-    const wordRange = wordRangeAt(docText, range.from, true);
+    const wordRange = wordRangeAt(docText, range.from);
     if (!wordRange) return true;
-    const { from, to } = wordRange;
-    const wordText = state.doc.sliceString(from, to);
+    const { from, to, text: wordText } = trimAnnotationPunctuation(wordRange.from, wordRange.to);
+    if (!wordText) return true;
     const insert = makeInsert(wordText);
     annotationPreview = null;
     currentStyle = appliedStyle;
