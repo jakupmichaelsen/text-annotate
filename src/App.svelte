@@ -5619,19 +5619,20 @@ ${body}
             class:active-style={currentStyle === 0}
             role="listitem"
           >
-            <span class="style-swatch-placeholder" aria-hidden="true"></span>
             <span class="style-key-badge">0</span>
-            <span class="style-separator" aria-hidden="true">:</span>
-            <button
-              class="style-name style-title-action"
-              type="button"
-              title="Use plain text"
-              aria-label="Use plain text"
-              on:click={() => { currentStyle = 0; view?.focus(); }}
-              on:keydown={event => event.stopPropagation()}
-            >
-              plain
-            </button>
+            <div class="style-title-cell">
+              <button
+                class="style-name style-title-action"
+                type="button"
+                title="Use plain text"
+                aria-label="Use plain text"
+                on:click={() => { currentStyle = 0; view?.focus(); }}
+                on:keydown={event => event.stopPropagation()}
+              >
+                plain
+              </button>
+            </div>
+            <span class="style-remove-placeholder" aria-hidden="true"></span>
           </div>
           {#each highlightStyles as style, index}
             <div
@@ -5639,19 +5640,6 @@ ${body}
               class:active-style={currentStyle === index + 1}
               role="listitem"
             >
-              <button
-                class="style-swatch"
-                class:variant-fill={currentStyle === index + 1 && currentAnnotationVariant === "fill"}
-                class:variant-box={currentStyle === index + 1 && currentAnnotationVariant === "box"}
-                class:variant-underline={currentStyle === index + 1 && currentAnnotationVariant === "underline"}
-                class:variant-rail={currentStyle === index + 1 && currentAnnotationVariant === "rail"}
-                class:variant-bars={currentStyle === index + 1 && currentAnnotationVariant === "bars"}
-                style={`--swatch-color: ${style.color}; --swatch-text: ${annotationTextColorForStyle(style.name, style.color)}`}
-                type="button"
-                title={`Use ${styleDisplayTitle(style.name)}${currentStyle === index + 1 ? `, ${currentAnnotationVariant}` : ""}`}
-                aria-label={`Use ${styleDisplayTitle(style.name)}${currentStyle === index + 1 ? `, ${currentAnnotationVariant} variant` : ""}`}
-                on:click={() => { currentStyle = index + 1; view?.focus(); }}
-              ></button>
               {#if editingStyleKeyName === style.name}
                 <input
                   class="style-key-badge style-key-input"
@@ -5680,29 +5668,33 @@ ${body}
                   {styleKeyForName(style.name)}
                 </button>
               {/if}
-              <span class="style-separator" aria-hidden="true">:</span>
-              {#if editingStyleTitleName === style.name}
-                <input
-                  class="style-name style-title-input"
-                  bind:this={styleTitleInput}
-                  bind:value={styleTitleDraft}
-                  aria-label={`Title for ${style.name}`}
-                  on:click={event => event.stopPropagation()}
-                  on:focus={event => focusInputAtEnd(event.target as HTMLInputElement)}
-                  on:blur={saveStyleTitle}
-                  on:keydown={handleStyleTitleKeydown}
-                />
-              {:else}
-                <button
-                  class="style-name style-title-action"
-                  type="button"
-                  title={`Edit ${styleDisplayTitle(style.name)} title`}
-                  on:click={event => startStyleTitleEdit(event, style.name)}
-                  on:keydown={event => event.stopPropagation()}
-                >
-                  {styleDisplayTitle(style.name)}
-                </button>
-              {/if}
+              <div class="style-title-cell">
+                {#if editingStyleTitleName === style.name}
+                  <input
+                    class="style-name style-title-input"
+                    bind:this={styleTitleInput}
+                    bind:value={styleTitleDraft}
+                    aria-label={`Title for ${style.name}`}
+                    on:click={event => event.stopPropagation()}
+                    on:focus={event => focusInputAtEnd(event.target as HTMLInputElement)}
+                    on:blur={saveStyleTitle}
+                    on:keydown={handleStyleTitleKeydown}
+                  />
+                {:else}
+                  <button
+                    class="style-name style-title-action"
+                    type="button"
+                    title={`Edit ${styleDisplayTitle(style.name)} title`}
+                    on:click={event => startStyleTitleEdit(event, style.name)}
+                    on:keydown={event => event.stopPropagation()}
+                  >
+                    {styleDisplayTitle(style.name)}
+                  </button>
+                  {#if currentStyle === index + 1}
+                    <span class="style-variant-label" aria-hidden="true">{annotationVariantLabel(currentAnnotationVariant)}</span>
+                  {/if}
+                {/if}
+              </div>
               {#if style.custom}
                 <button
                   class="style-remove-button"
@@ -5711,6 +5703,8 @@ ${body}
                   aria-label={`Remove ${styleDisplayTitle(style.name)}`}
                   on:click={event => { event.stopPropagation(); removeCustomStyle(style.name); }}
                 >×</button>
+              {:else}
+                <span class="style-remove-placeholder" aria-hidden="true"></span>
               {/if}
             </div>
           {/each}

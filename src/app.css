@@ -1272,13 +1272,14 @@
 
   .style-row {
     display: grid;
-    grid-template-columns: 16px 22px max-content minmax(0, 1fr) 14px;
-    column-gap: 3px;
+    grid-template-columns: 22px minmax(0, 1fr) 14px;
+    column-gap: 6px;
     align-items: center;
     padding: 0;
   }
 
-  .style-swatch-placeholder {
+  .style-swatch-placeholder,
+  .style-remove-placeholder {
     width: 14px;
     height: 14px;
   }
@@ -1376,6 +1377,13 @@
       linear-gradient(var(--swatch-color), var(--swatch-color)) right / 3px 100% no-repeat;
   }
 
+  .style-title-cell {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+  }
+
   .style-name {
     min-width: 0;
     overflow: hidden;
@@ -1383,6 +1391,14 @@
     white-space: nowrap;
     color: var(--fg);
     font-size: 13px;
+  }
+
+  .style-variant-label {
+    flex: 0 0 auto;
+    color: var(--fg-muted);
+    font-size: 11px;
+    text-transform: lowercase;
+    white-space: nowrap;
   }
 
   .style-separator {
@@ -1393,7 +1409,9 @@
   }
 
   .style-title-action {
-    width: 100%;
+    flex: 1 1 auto;
+    min-width: 0;
+    width: auto;
     padding: 0;
     border: 0;
     background: transparent;
@@ -1403,6 +1421,8 @@
     cursor: text;
   }
 
+  .style-row.active-style .style-title-action,
+  .style-row.active-style .style-variant-label,
   .style-title-action:hover,
   .style-title-action:focus-visible {
     color: var(--yellow);
@@ -1410,8 +1430,10 @@
   }
 
   .style-title-input {
+    flex: 1 1 auto;
+    min-width: 0;
     box-sizing: border-box;
-    width: 100%;
+    width: auto;
     padding: 1px 3px;
     border: 1px solid var(--border);
     background: var(--bg);
