@@ -5204,10 +5204,9 @@ ${body}
       {#if settingsTab === "layout"}
         <div class="settings-panel">
           <section class="settings-section">
-            <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">`</span><span>Markup Visibility</span></div>
-            <label class="settings-field">
-              <span class="settings-field-label">Markup display</span>
-              <select class="settings-input" bind:value={annotationMode} aria-label="Markup display" on:change={() => { view?.dispatch({}); view?.focus(); }}>
+            <label class="settings-row">
+              <span class="settings-row-label">markup visibility</span>
+              <select class="settings-input settings-select settings-row-value" bind:value={annotationMode} aria-label="Markup visibility" on:change={() => { view?.dispatch({}); view?.focus(); }}>
                 <option value="clean">Clean</option>
                 <option value="raw">Raw (current)</option>
                 <option value="all">Raw (all)</option>
@@ -5218,11 +5217,10 @@ ${body}
             </label>
           </section>
           <section class="settings-section">
-            <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">Aa</span><span>Typography</span></div>
-            <label class="settings-field layout-font-field">
-              <span class="settings-field-label">Font face</span>
-              <span class="layout-font-controls">
-                <select class="settings-input" bind:value={layoutFontFamilyName}>
+            <label class="settings-row layout-font-field">
+              <span class="settings-row-label">font</span>
+              <span class="settings-row-value layout-font-controls">
+                <select class="settings-input settings-select" bind:value={layoutFontFamilyName} aria-label="Font">
                   {#each orderedFontFamilyOptions() as font}
                     <option value={font.name}>{font.name}</option>
                   {/each}
@@ -5270,30 +5268,27 @@ ${body}
                 {/each}
               </div>
             {/if}
-            <div class="layout-stepper-grid">
-              <div class="layout-stepper">
-                <span class="layout-control-icon" aria-hidden="true">↕</span>
-                <span class="layout-stepper-label">Line height</span>
-                <span class="layout-stepper-value">{lineHeight.toFixed(2)}</span>
-                <span class="layout-stepper-buttons">
+            <div class="settings-row-grid">
+              <div class="settings-row">
+                <span class="settings-row-label">line height</span>
+                <span class="settings-row-value">{lineHeight.toFixed(2)}</span>
+                <span class="settings-row-controls">
                   <button type="button" on:click={() => adjustLayoutValue("lineHeight", -1)} aria-label="Decrease line height">−</button>
                   <button type="button" on:click={() => adjustLayoutValue("lineHeight", 1)} aria-label="Increase line height">+</button>
                 </span>
               </div>
-              <div class="layout-stepper">
-                <span class="layout-control-icon" aria-hidden="true">T</span>
-                <span class="layout-stepper-label">Font size</span>
-                <span class="layout-stepper-value">{fontSize}px</span>
-                <span class="layout-stepper-buttons">
+              <div class="settings-row">
+                <span class="settings-row-label">font size</span>
+                <span class="settings-row-value">{fontSize}px</span>
+                <span class="settings-row-controls">
                   <button type="button" on:click={() => adjustLayoutValue("fontSize", -1)} aria-label="Decrease font size">−</button>
                   <button type="button" on:click={() => adjustLayoutValue("fontSize", 1)} aria-label="Increase font size">+</button>
                 </span>
               </div>
-              <div class="layout-stepper">
-                <span class="layout-control-icon" aria-hidden="true">¶</span>
-                <span class="layout-stepper-label">Paragraph spacing</span>
-                <span class="layout-stepper-value">{paragraphSpacing.toFixed(2)}</span>
-                <span class="layout-stepper-buttons">
+              <div class="settings-row">
+                <span class="settings-row-label">paragraph spacing</span>
+                <span class="settings-row-value">{paragraphSpacing.toFixed(2)}</span>
+                <span class="settings-row-controls">
                   <button type="button" on:click={() => adjustLayoutValue("paragraphSpacing", -1)} aria-label="Decrease paragraph spacing">−</button>
                   <button type="button" on:click={() => adjustLayoutValue("paragraphSpacing", 1)} aria-label="Increase paragraph spacing">+</button>
                 </span>
@@ -5301,88 +5296,86 @@ ${body}
             </div>
           </section>
           <section class="settings-section">
-            <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">▣</span><span>Layout</span></div>
-            <label class="settings-field">
-              <span class="settings-field-label">Current line highlight</span>
-              <select class="settings-input" bind:value={currentLineHighlightStyle} aria-label="Current line highlight">
+            <div class="settings-section-heading">editor</div>
+            <label class="settings-row">
+              <span class="settings-row-label">current line</span>
+              <select class="settings-input settings-select settings-row-value" bind:value={currentLineHighlightStyle} aria-label="Current line highlight">
                 <option value="fill">Fill</option>
                 <option value="underline">Underline</option>
                 <option value="borders">Top and bottom</option>
               </select>
             </label>
-            <div class="layout-stepper-grid">
-              <div class="layout-stepper">
-                <span class="layout-control-icon" aria-hidden="true">%</span>
-                <span class="layout-stepper-label">Highlight opacity</span>
-                <span class="layout-stepper-value">{Math.round(currentLineHighlightOpacity * 100)}%</span>
-                <span class="layout-stepper-buttons">
+            <div class="settings-row-grid">
+              <div class="settings-row">
+                <span class="settings-row-label">highlight opacity</span>
+                <span class="settings-row-value">{Math.round(currentLineHighlightOpacity * 100)}%</span>
+                <span class="settings-row-controls">
                   <button type="button" on:click={() => adjustLayoutValue("currentLineHighlightOpacity", -1)} aria-label="Decrease highlight opacity">−</button>
                   <button type="button" on:click={() => adjustLayoutValue("currentLineHighlightOpacity", 1)} aria-label="Increase highlight opacity">+</button>
                 </span>
               </div>
-              <div class="layout-stepper">
-                <span class="layout-control-icon" aria-hidden="true">│</span>
-                <span class="layout-stepper-label">Column guide</span>
-                <span class="layout-stepper-value">{columnGuideThickness}px</span>
-                <span class="layout-stepper-buttons">
+              <div class="settings-row">
+                <span class="settings-row-label">column guide</span>
+                <span class="settings-row-value">{columnGuideThickness}px</span>
+                <span class="settings-row-controls">
                   <button type="button" on:click={() => adjustLayoutValue("columnGuideThickness", -1)} aria-label="Decrease column guide thickness">−</button>
                   <button type="button" on:click={() => adjustLayoutValue("columnGuideThickness", 1)} aria-label="Increase column guide thickness">+</button>
                 </span>
               </div>
             </div>
-            <div class="padding-grid" aria-label="Layout padding">
-              <div class="layout-stepper">
-                <span class="layout-control-icon" aria-hidden="true">↥</span>
-                <span class="layout-stepper-label">Top</span>
-                <span class="layout-stepper-value">{padTop}px</span>
-                <span class="layout-stepper-buttons">
+          </section>
+          <section class="settings-section">
+            <div class="settings-section-heading">editor padding</div>
+            <div class="settings-row-grid" aria-label="Editor padding">
+              <div class="settings-row">
+                <span class="settings-row-label">top</span>
+                <span class="settings-row-value">{padTop}px</span>
+                <span class="settings-row-controls">
                   <button type="button" on:click={() => adjustLayoutValue("padTop", -1)} aria-label="Decrease top padding">−</button>
                   <button type="button" on:click={() => adjustLayoutValue("padTop", 1)} aria-label="Increase top padding">+</button>
                 </span>
               </div>
-              <div class="layout-stepper">
-                <span class="layout-control-icon" aria-hidden="true">↧</span>
-                <span class="layout-stepper-label">Bottom</span>
-                <span class="layout-stepper-value">{padBottom}px</span>
-                <span class="layout-stepper-buttons">
-                  <button type="button" on:click={() => adjustLayoutValue("padBottom", -1)} aria-label="Decrease bottom padding">−</button>
-                  <button type="button" on:click={() => adjustLayoutValue("padBottom", 1)} aria-label="Increase bottom padding">+</button>
-                </span>
-              </div>
-              <div class="layout-stepper">
-                <span class="layout-control-icon" aria-hidden="true">↤</span>
-                <span class="layout-stepper-label">Left</span>
-                <span class="layout-stepper-value">{padLeft}px</span>
-                <span class="layout-stepper-buttons">
-                  <button type="button" on:click={() => adjustLayoutValue("padLeft", -1)} aria-label="Decrease left padding">−</button>
-                  <button type="button" on:click={() => adjustLayoutValue("padLeft", 1)} aria-label="Increase left padding">+</button>
-                </span>
-              </div>
-              <div class="layout-stepper">
-                <span class="layout-control-icon" aria-hidden="true">↦</span>
-                <span class="layout-stepper-label">Right</span>
-                <span class="layout-stepper-value">{padRight}px</span>
-                <span class="layout-stepper-buttons">
+              <div class="settings-row">
+                <span class="settings-row-label">right</span>
+                <span class="settings-row-value">{padRight}px</span>
+                <span class="settings-row-controls">
                   <button type="button" on:click={() => adjustLayoutValue("padRight", -1)} aria-label="Decrease right padding">−</button>
                   <button type="button" on:click={() => adjustLayoutValue("padRight", 1)} aria-label="Increase right padding">+</button>
                 </span>
               </div>
+              <div class="settings-row">
+                <span class="settings-row-label">bottom</span>
+                <span class="settings-row-value">{padBottom}px</span>
+                <span class="settings-row-controls">
+                  <button type="button" on:click={() => adjustLayoutValue("padBottom", -1)} aria-label="Decrease bottom padding">−</button>
+                  <button type="button" on:click={() => adjustLayoutValue("padBottom", 1)} aria-label="Increase bottom padding">+</button>
+                </span>
+              </div>
+              <div class="settings-row">
+                <span class="settings-row-label">left</span>
+                <span class="settings-row-value">{padLeft}px</span>
+                <span class="settings-row-controls">
+                  <button type="button" on:click={() => adjustLayoutValue("padLeft", -1)} aria-label="Decrease left padding">−</button>
+                  <button type="button" on:click={() => adjustLayoutValue("padLeft", 1)} aria-label="Increase left padding">+</button>
+                </span>
+              </div>
             </div>
-            <div class="layout-stepper-grid">
-              <div class="layout-stepper">
-                <span class="layout-control-icon" aria-hidden="true">⇡</span>
-                <span class="layout-stepper-label">Top scroll border</span>
-                <span class="layout-stepper-value">{cursorScrollMarginTopLines} · {scrollBorderTopViewportPercent}%</span>
-                <span class="layout-stepper-buttons">
+          </section>
+          <section class="settings-section">
+            <div class="settings-section-heading">scroll border</div>
+            <div class="settings-row-grid">
+              <div class="settings-row">
+                <span class="settings-row-label">top</span>
+                <span class="settings-row-value">{cursorScrollMarginTopLines} · {scrollBorderTopViewportPercent}%</span>
+                <span class="settings-row-controls">
                   <button type="button" on:click={() => adjustLayoutValue("cursorScrollMarginTopLines", -1)} aria-label="Decrease top cursor scroll border">−</button>
                   <button type="button" on:click={() => adjustLayoutValue("cursorScrollMarginTopLines", 1)} aria-label="Increase top cursor scroll border">+</button>
                 </span>
               </div>
-              <div class="layout-stepper">
-                <span class="layout-control-icon" aria-hidden="true">⇣</span>
-                <span class="layout-stepper-label">Bottom scroll border</span>
-                <span class="layout-stepper-value">{cursorScrollMarginBottomLines} · {scrollBorderBottomViewportPercent}%</span>
-                <span class="layout-stepper-buttons">
+              <div class="settings-row">
+                <span class="settings-row-label">bottom</span>
+                <span class="settings-row-value">{cursorScrollMarginBottomLines} · {scrollBorderBottomViewportPercent}%</span>
+                <span class="settings-row-controls">
                   <button type="button" on:click={() => adjustLayoutValue("cursorScrollMarginBottomLines", -1)} aria-label="Decrease bottom cursor scroll border">−</button>
                   <button type="button" on:click={() => adjustLayoutValue("cursorScrollMarginBottomLines", 1)} aria-label="Increase bottom cursor scroll border">+</button>
                 </span>
@@ -5390,22 +5383,20 @@ ${body}
             </div>
           </section>
           <section class="settings-section">
-            <div class="settings-section-heading"><span class="settings-section-icon" aria-hidden="true">❝</span><span>Notes</span></div>
-            <div class="layout-stepper-grid">
-              <div class="layout-stepper">
-                <span class="layout-control-icon" aria-hidden="true">A</span>
-                <span class="layout-stepper-label">Alignment</span>
-                <span class="layout-stepper-value">{blockquoteAlign}</span>
-                <span class="layout-stepper-buttons">
+            <div class="settings-section-heading">notes</div>
+            <div class="settings-row-grid">
+              <div class="settings-row">
+                <span class="settings-row-label">alignment</span>
+                <span class="settings-row-value">{blockquoteAlign}</span>
+                <span class="settings-row-controls">
                   <button type="button" on:click={() => adjustLayoutValue("blockquoteAlign", -1)} aria-label="Decrease notes alignment">−</button>
                   <button type="button" on:click={() => adjustLayoutValue("blockquoteAlign", 1)} aria-label="Increase notes alignment">+</button>
                 </span>
               </div>
-              <div class="layout-stepper">
-                <span class="layout-control-icon" aria-hidden="true">W</span>
-                <span class="layout-stepper-label">Width</span>
-                <span class="layout-stepper-value">{blockquoteBgWidth}</span>
-                <span class="layout-stepper-buttons">
+              <div class="settings-row">
+                <span class="settings-row-label">width</span>
+                <span class="settings-row-value">{blockquoteBgWidth}</span>
+                <span class="settings-row-controls">
                   <button type="button" on:click={() => adjustLayoutValue("blockquoteBgWidth", -1)} aria-label="Decrease notes width">−</button>
                   <button type="button" on:click={() => adjustLayoutValue("blockquoteBgWidth", 1)} aria-label="Increase notes width">+</button>
                 </span>

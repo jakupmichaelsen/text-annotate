@@ -795,15 +795,74 @@
   }
 
   .settings-section-heading {
-    display: flex;
-    align-items: center;
-    gap: 6px;
     color: var(--orange);
     font-size: 11px;
     font-weight: 700;
     line-height: 1.1;
     text-transform: none;
     letter-spacing: 0;
+  }
+
+  .settings-row-grid {
+    display: grid;
+    gap: 5px;
+  }
+
+  .settings-row {
+    display: grid;
+    grid-template-columns: minmax(104px, 1fr) minmax(58px, max-content) auto;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    color: var(--fg-muted);
+    font-size: 11px;
+  }
+
+  .settings-row-label {
+    min-width: 0;
+    color: var(--fg);
+  }
+
+  .settings-row-value {
+    min-width: 0;
+    color: var(--fg-muted);
+    font-size: 10px;
+    text-align: right;
+  }
+
+  select.settings-row-value {
+    width: auto;
+    max-width: 100%;
+    justify-self: end;
+    font-size: 11px;
+  }
+
+  .settings-row-controls {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+
+  .settings-row-controls button {
+    width: auto;
+    min-width: 12px;
+    height: 18px;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    color: var(--fg-muted);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .settings-row-controls button:hover,
+  .settings-row-controls button:focus-visible {
+    color: var(--orange);
+    outline: none;
   }
 
   .settings-section-icon,
@@ -895,9 +954,10 @@
 
   .layout-font-controls {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 28px 28px 28px;
+    grid-template-columns: minmax(0, max-content) 22px 22px 22px;
     gap: 5px;
     align-items: center;
+    justify-self: end;
   }
 
   .font-favorite-list {
@@ -928,8 +988,8 @@
   }
 
   .settings-icon-button {
-    width: 28px;
-    height: 28px;
+    width: 22px;
+    height: 22px;
     padding: 0;
     border: none;
     border-radius: 0;
@@ -973,6 +1033,12 @@
     outline: none;
     appearance: none;
     -webkit-appearance: none;
+  }
+
+  .settings-select {
+    padding-right: 15px;
+    appearance: auto;
+    -webkit-appearance: menulist;
   }
 
   .settings-input:focus {
