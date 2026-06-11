@@ -228,11 +228,14 @@
   $: ttsProgressText = ttsStatus || (ttsSegments.length ? `${Math.min(ttsIndex + 1, ttsSegments.length)}/${ttsSegments.length}` : "ready");
 
   let currentStyle = 0;
-  type AnnotationStyle = { name: string; color: string; colorName?: string; custom?: boolean };
+  type AnnotationStyle = { name: string; color: string; colorName?: string };
   type AnnotationVariant = "fill" | "box" | "underline" | "rail" | "bars";
   const annotationVariants: AnnotationVariant[] = ["fill", "box", "underline", "rail", "bars"];
   type AnnotationPreview = { from: number; to: number; style: number; variant: AnnotationVariant };
   const namedStyleColors = [
+    { name: "red", color: "#fb4934" },
+    { name: "green", color: "#b8bb26" },
+    { name: "callout", color: "currentColor" },
     { name: "steel", color: "#83a598" },
     { name: "orange", color: "#fe8019" },
     { name: "periwinkle", color: "#8370d0" },
@@ -2416,11 +2419,19 @@
     return style === 0 ? "" : highlightStyles[style - 1]?.name ?? "";
   }
 
+  function defaultAnnotationStyles(): AnnotationStyle[] {
+    return baseHighlightStyles.map(style => ({
+      name: style.name,
+      colorName: style.name,
+      color: namedStyleColor(style.name)
+    }));
+  }
+
   function currentHighlightStyles(theme = activeTheme): AnnotationStyle[] {
-    return [
-      ...baseHighlightStyles.map(style => style.name === "callout" ? { ...style, color: theme.fg, colorName: style.name } : { ...style, colorName: style.name }),
-      ...customStyles.map(style => ({ ...style, color: namedStyleColor(style.colorName ?? style.name, theme) }))
-    ];
+    return customStyles.map(style => ({
+      ...style,
+      color: namedStyleColor(style.colorName ?? style.name, theme)
+    }));
   }
 
   function styleColor(style: number) {
@@ -2475,12 +2486,11 @@
   }
 
   function annotationColorForStyle(name: string, theme = activeTheme) {
-    if (name === "callout") return theme.fg;
     return highlightStyles.find(style => style.name === name)?.color ?? theme.yellow;
   }
 
   function annotationTextColorForStyle(name: string, color: string, theme = activeTheme) {
-    return name === "callout" ? theme.bg : contrastColor(color, theme.bg, theme.fg);
+    return (name === "callout" || color === "currentColor") ? theme.bg : contrastColor(color, theme.bg, theme.fg);
   }
 
   function annotationMarkCss(styleName: string, variant: AnnotationVariant, color: string, theme = activeTheme) {
@@ -2654,8 +2664,13 @@
       .slice(0, 24);
   }
 
-  function namedStyleColor(name: string, theme = activeTheme) {
+  function namedStyleColor(name: string, theme = getTheme(themeMode)) {
     if (name === "orange") return theme.orange;
+    if (name === "red") return theme.red;
+    if (name === "green") return theme.green;
+    if (name === "yellow") return theme.yellow;
+    if (name === "purple") return theme.purple;
+    if (name === "callout") return theme.fg;
     return namedStyleColors.find(color => color.name === name)?.color ?? namedStyleColors[0].color;
   }
 
@@ -2664,17 +2679,10 @@
     return namedStyleColors.some(color => color.name === normalized) ? normalized : namedStyleColors[0].name;
   }
 
-  function isBuiltInStyleName(name: string) {
-    return baseHighlightStyles.some(style => style.name === name);
-  }
-
   function uniqueCustomStyleName(name: string) {
     const fallback = normalizeNamedStyleColor(newStyleColorName);
     const base = normalizeCustomStyleName(name) || fallback;
-    const used = new Set([
-      ...baseHighlightStyles.map(style => style.name),
-      ...customStyles.map(style => style.name)
-    ]);
+    const used = new Set(customStyles.map(style => style.name));
     if (!used.has(base)) return base;
     for (let index = 2; index < 100; index += 1) {
       const candidate = `${base}-${index}`;
@@ -2683,39 +2691,60 @@
     return `${base}-${Date.now().toString(36)}`;
   }
 
+  function normalizeStoredStyle(entry: unknown, used: Set<string>): AnnotationStyle | null {
+    if (!entry || typeof entry !== "object") return null;
+    const rawName = (entry as { name?: unknown }).name;
+    const name = normalizeCustomStyleName(typeof rawName === "string" ? rawName : "");
+    const rawColorName = (entry as { colorName?: unknown }).colorName;
+    const colorName = normalizeNamedStyleColor(typeof rawColorName === "string" ? rawColorName : name);
+    if (!name || used.has(name)) return null;
+    used.add(name);
+    return { name, colorName, color: namedStyleColor(colorName) };
+  }
+
   function loadCustomStyles(): AnnotationStyle[] {
     const stored = typeof localStorage === "undefined" ? null : localStorage.getItem(customStylesStorageKey);
-    if (!stored) return [];
+    if (!stored) return defaultAnnotationStyles();
 
     try {
       const parsed = JSON.parse(stored);
-      if (!Array.isArray(parsed)) return [];
-      const used = new Set(baseHighlightStyles.map(style => style.name));
-      return parsed
-        .map((entry): AnnotationStyle | null => {
-          if (!entry || typeof entry !== "object") return null;
-          const rawName = (entry as { name?: unknown }).name;
-          const name = normalizeCustomStyleName(typeof rawName === "string" ? rawName : "");
-          const rawColorName = (entry as { colorName?: unknown }).colorName;
-          const colorName = normalizeNamedStyleColor(typeof rawColorName === "string" ? rawColorName : "");
-          if (!name || used.has(name)) return null;
-          used.add(name);
-          return { name, colorName, color: namedStyleColor(colorName), custom: true };
-        })
+      const used = new Set<string>();
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && Array.isArray((parsed as { styles?: unknown }).styles)) {
+        return (parsed as { styles: unknown[] }).styles
+          .map(entry => normalizeStoredStyle(entry, used))
+          .filter((entry): entry is AnnotationStyle => entry !== null);
+      }
+      if (!Array.isArray(parsed)) return defaultAnnotationStyles();
+      const oldCustomStyles = parsed
+        .map(entry => normalizeStoredStyle(entry, used))
         .filter((entry): entry is AnnotationStyle => entry !== null);
+      const oldCustomNames = new Set(oldCustomStyles.map(style => style.name));
+      return [
+        ...defaultAnnotationStyles().filter(style => !oldCustomNames.has(style.name)),
+        ...oldCustomStyles
+      ];
     } catch {
-      return [];
+      return defaultAnnotationStyles();
     }
   }
 
   function persistCustomStyles(styles: AnnotationStyle[]) {
     customStyles = styles;
     if (typeof localStorage === "undefined") return;
-    if (styles.length) {
-      localStorage.setItem(customStylesStorageKey, JSON.stringify(styles.map(({ name, colorName }) => ({ name, colorName }))));
-    } else {
-      localStorage.removeItem(customStylesStorageKey);
-    }
+    localStorage.setItem(customStylesStorageKey, JSON.stringify({
+      version: 2,
+      styles: styles.map(({ name, colorName }) => ({ name, colorName }))
+    }));
+  }
+
+  function persistStyleColor(name: string, colorName: string) {
+    const normalizedColorName = normalizeNamedStyleColor(colorName);
+    persistCustomStyles(customStyles.map(style =>
+      style.name === name
+        ? { ...style, colorName: normalizedColorName, color: namedStyleColor(normalizedColorName) }
+        : style
+    ));
+    view?.dispatch({});
   }
 
   function handleNewStyleColorName(event: Event) {
@@ -2735,10 +2764,11 @@
     const colorName = normalizeNamedStyleColor(newStyleColorName);
     const keyResult = captureStyleKey(newStyleKeyDraft);
     const key = keyResult.key || firstAvailableStyleKey();
-    const nextStyle = { name, colorName, color: namedStyleColor(colorName), custom: true };
-    persistCustomStyles([...customStyles, nextStyle]);
+    const nextStyle = { name, colorName, color: namedStyleColor(colorName) };
+    const nextStyles = [...customStyles, nextStyle];
+    persistCustomStyles(nextStyles);
     if (key) persistStyleKey(name, key);
-    currentStyle = baseHighlightStyles.length + customStyles.length;
+    currentStyle = nextStyles.length;
     newStyleColorName = "steel";
     newStyleName = newStyleColorName;
     newStyleKeyDraft = "";
@@ -2749,8 +2779,8 @@
   }
 
   function removeCustomStyle(name: string) {
-    if (isBuiltInStyleName(name)) return;
     const index = highlightStyles.findIndex(style => style.name === name);
+    if (index < 0) return;
     const nextCustomStyles = customStyles.filter(style => style.name !== name);
     persistCustomStyles(nextCustomStyles);
     const nextTitles = { ...styleTitles };
@@ -2760,8 +2790,8 @@
     delete nextKeys[name];
     persistStyleKeys(nextKeys);
     if (currentStyle === index + 1) {
-      currentStyle = Math.min(index, highlightStyles.length - 2);
-      if (currentStyle < 0) currentStyle = 0;
+      currentStyle = Math.min(index + 1, nextCustomStyles.length);
+      if (currentStyle < 1) currentStyle = 0;
     } else if (currentStyle > index + 1) {
       currentStyle -= 1;
     }
@@ -2769,8 +2799,7 @@
   }
 
   function knownStyleName(name: string) {
-    return baseHighlightStyles.some(style => style.name === name) ||
-      customStyles.some(style => style.name === name);
+    return customStyles.some(style => style.name === name);
   }
 
   function loadStyleTitles() {
@@ -5846,7 +5875,7 @@ ${body}
 
       <div class="sidebar-section">
         <div class="sidebar-label">Annotation styles</div>
-        <div class="sidebar-hint">1 / 2 / 3: styles, Tab / Shift+Tab: variants</div>
+        <div class="sidebar-hint">style keys are editable; Tab / Shift+Tab: variants</div>
         <div class="style-list sidebar-style-list">
           <div
             class="style-row style-row-plain"
@@ -5866,6 +5895,7 @@ ${body}
                 plain
               </button>
             </div>
+            <span class="style-remove-placeholder" aria-hidden="true"></span>
             <span class="style-remove-placeholder" aria-hidden="true"></span>
           </div>
           {#each highlightStyles as style, index}
@@ -5941,17 +5971,25 @@ ${body}
                   </button>
                 {/if}
               </div>
-              {#if style.custom}
-                <button
-                  class="style-remove-button"
-                  type="button"
-                  title={`Remove ${styleDisplayTitle(style.name)}`}
-                  aria-label={`Remove ${styleDisplayTitle(style.name)}`}
-                  on:click={event => { event.stopPropagation(); removeCustomStyle(style.name); }}
-                >×</button>
-              {:else}
-                <span class="style-remove-placeholder" aria-hidden="true"></span>
-              {/if}
+              <select
+                class="style-color-select"
+                value={style.colorName ?? style.name}
+                aria-label={`Color for ${styleDisplayTitle(style.name)}`}
+                title={`Color for ${styleDisplayTitle(style.name)}`}
+                on:click={event => event.stopPropagation()}
+                on:change={event => persistStyleColor(style.name, (event.target as HTMLSelectElement).value)}
+              >
+                {#each namedStyleColors as color}
+                  <option value={color.name}>{color.name}</option>
+                {/each}
+              </select>
+              <button
+                class="style-remove-button"
+                type="button"
+                title={`Remove ${styleDisplayTitle(style.name)}`}
+                aria-label={`Remove ${styleDisplayTitle(style.name)}`}
+                on:click={event => { event.stopPropagation(); removeCustomStyle(style.name); }}
+              >×</button>
             </div>
           {/each}
         </div>
