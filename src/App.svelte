@@ -54,7 +54,6 @@
   } from "./lib/srt";
   import {
     buildEditorKeymap,
-    isAudioRateShortcut,
     isAudioShortcut,
     isAppShortcutCandidate,
     isModeShortcut,
@@ -193,7 +192,6 @@
   let audioRateIndex = 2;
   const audioRates = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
   const mediaSeekSeconds = 10;
-  const mediaShortcutSeekSeconds = 5;
   const manualPauseRewindSeconds = 3;
   type TtsSegment = { text: string; from: number; to: number };
   let ttsAvailable = false;
@@ -320,6 +318,7 @@
     .filter(section => section.kind === "group" && section.itemType === "annotation")
     .map(section => section.id);
   $: summaryAllGroupsExpanded = summaryGroupIds.length > 0 && summaryGroupIds.every(id => expandedSummaryCategories[id]);
+  $: documentPreviewZoomLabel = `${Math.round(documentPreviewZoom * 100)}%`;
   let reorderDragState: ReorderDragState = null;
   let reorderDropTarget: ReorderDropTarget = null;
   let summaryCollapsed = true;
@@ -845,7 +844,7 @@
 
   function shouldDeferWindowShortcut(event: KeyboardEvent) {
     if (isTextEntryTarget(event.target)) return true;
-    if (isFormControlTarget(event.target) && !isModeShortcut(event) && !isAudioShortcut(event) && !isAudioRateShortcut(event)) return true;
+    if (isFormControlTarget(event.target) && !isModeShortcut(event) && !isAudioShortcut(event)) return true;
     return (event.key === " " || event.key === "Enter") &&
       event.target instanceof HTMLElement &&
       !!event.target.closest("button, a[href], [role='button']");
@@ -864,24 +863,19 @@
 
   function handleMediaShortcut(key: string) {
     const normalized = key.toLowerCase();
-    if (key === " " || normalized === "s") {
+    if (key === " ") {
       toggleMediaPlayback();
-      return;
-    }
-    if (normalized === "w" || normalized === "r") {
-      cycleAudioRate();
       return;
     }
 
     const direction =
       key === "ArrowLeft" ||
       key === "Left" ||
-      normalized === "a" ||
       normalized === "mediarewind" ||
       normalized === "mediatrackprevious"
         ? -1
         : 1;
-    seekMediaTransport(direction, normalized === "a" || normalized === "d" ? mediaShortcutSeekSeconds : mediaSeekSeconds);
+    seekMediaTransport(direction, mediaSeekSeconds);
   }
 
   function handleWindowKeydown(event: KeyboardEvent) {
@@ -1609,16 +1603,23 @@
   }
 
   function setDocumentPreviewZoom(nextZoom: number) {
-    documentPreviewZoom = Math.max(0.16, Math.min(1.2, nextZoom));
+    documentPreviewZoom = Math.max(0.12, Math.min(1.8, nextZoom));
   }
 
   function documentPreviewScale(page: DocumentMapPagePreview) {
-    return Math.min(1.2, Math.max(0.16, documentPreviewZoom));
+    return Math.min(1.8, Math.max(0.12, documentPreviewZoom));
   }
 
   function fitDocumentPreview() {
     const widest = documentMapPages.reduce((max, page) => Math.max(max, page.width), 1);
-    setDocumentPreviewZoom(Math.min(0.72, 460 / widest));
+    setDocumentPreviewZoom(Math.min(1, 460 / widest));
+  }
+
+  function handleDocumentPreviewWheel(event: WheelEvent) {
+    if (!documentPreviewOpen) return;
+    event.preventDefault();
+    const step = event.deltaY < 0 ? 0.08 : -0.08;
+    setDocumentPreviewZoom(documentPreviewZoom + step);
   }
 
   function shortcutBindingFor(action: CustomShortcutAction) {
@@ -2115,8 +2116,8 @@
       for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
         const page = await pdf.getPage(pageNumber);
         const baseViewport = page.getViewport({ scale: 1 });
-        const scale = Math.min(0.85, 520 / Math.max(baseViewport.width, 1));
-        const viewport = page.getViewport({ scale });
+        const renderScale = 1.8;
+        const viewport = page.getViewport({ scale: renderScale });
         const canvas = window.document.createElement("canvas");
         canvas.width = Math.max(1, Math.ceil(viewport.width));
         canvas.height = Math.max(1, Math.ceil(viewport.height));
@@ -2129,8 +2130,8 @@
         pages.push({
           kind: "pdf",
           page: pageNumber,
-          width: viewport.width,
-          height: viewport.height,
+          width: baseViewport.width,
+          height: baseViewport.height,
           dataUrl: canvas.toDataURL("image/png")
         });
       }
@@ -3347,7 +3348,7 @@ ${body}
         <span class="summary-export-swatch" style="background:${escapeHtml(item.color)}"></span>
         <span class="summary-export-title">${escapeHtml(summaryAnnotationTitle(item))}</span>
         <span class="summary-export-meta">Ln ${item.line}</span>
-        <span class="summary-export-meta">${escapeHtml(summaryTimestamp(item.timestamp))}</span>
+        <span class="summary-export-meta">${escapeHtml(item.timestamp)}</span>
       </div>
       <p class="summary-export-context"><span>${escapeHtml(item.context.before)}</span><mark style="background:${escapeHtml(item.color)};color:${escapeHtml(contrastColor(item.color))}">${escapeHtml(item.context.text)}</mark><span>${escapeHtml(item.context.after)}</span></p>
       ${comment ? `<p class="summary-export-comment">${escapeHtml(comment)}</p>` : ""}
@@ -3790,13 +3791,6 @@ ${body}
     }
     event.preventDefault();
     event.stopPropagation();
-  }
-
-  function summaryTimestamp(timestamp: string) {
-    return timestamp
-      .replace(/\s+\d{4}(?=\s+\d{2}:\d{2})/, "")
-      .replace(/\s+\d{4}$/, "")
-      .replace(/(\d{2}:\d{2}):\d{2}$/, "$1");
   }
 
   function blockquoteSummaryItems(docText: string, doc: Text) {
@@ -6114,7 +6108,7 @@ ${body}
                           {summaryAnnotationTitle(section.item)}
                         </button>
                       {/if}
-                      <span class="summary-heading-timestamp">{summaryTimestamp(section.item.timestamp)}</span>
+                      <span class="summary-heading-timestamp">{section.item.timestamp}</span>
                     </span>
                     <span class="summary-text summary-sentence">
                       <span>{section.item.context.before}</span><mark class="summary-context-hit" style="background: {section.item.color}; color: {contrastColor(section.item.color)}">{section.item.context.text}</mark><span>{section.item.context.after}</span>
@@ -6243,7 +6237,7 @@ ${body}
                               {summaryAnnotationTitle(item)}
                             </button>
                           {/if}
-                          <span class="summary-heading-timestamp">{summaryTimestamp(item.timestamp)}</span>
+                          <span class="summary-heading-timestamp">{item.timestamp}</span>
                         </span>
                         <span class="summary-text summary-sentence">
                           <span>{item.context.before}</span><mark class="summary-context-hit" style="background: {item.color}; color: {contrastColor(item.color)}">{item.context.text}</mark><span>{item.context.after}</span>
@@ -6357,11 +6351,12 @@ ${body}
           <div class="document-preview-controls" aria-label="Preview zoom">
             <button type="button" on:click={() => setDocumentPreviewZoom(documentPreviewZoom - 0.08)} aria-label="Zoom out">−</button>
             <button type="button" on:click={fitDocumentPreview}>FIT</button>
+            <span class="document-preview-zoom">{documentPreviewZoomLabel}</span>
             <button type="button" on:click={() => setDocumentPreviewZoom(documentPreviewZoom + 0.08)} aria-label="Zoom in">+</button>
             <button type="button" on:click={closeDocumentPreview} aria-label="Close document preview">×</button>
           </div>
         </div>
-        <div class="document-preview-body">
+        <div class="document-preview-body" on:wheel|nonpassive={handleDocumentPreviewWheel}>
           {#if documentMapPages.length}
             <div class="document-preview-pages">
               {#each documentMapPages as page}

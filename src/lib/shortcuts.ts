@@ -42,14 +42,9 @@ export const helpSections = [
     items: [
       ["F2", "enter Edit mode"],
       ["Esc", "return to Annotate mode"],
-      ["r", "cycle playback / TTS speed"],
       ["Alt+Space", "play / pause media / TTS"],
-      ["Alt+s", "play / pause media / TTS"],
-      ["Alt+a/d", "seek media 5s / step TTS"],
-      ["Alt+w", "cycle playback / TTS speed"],
       ["Alt+←/→", "seek media 10s / step TTS"],
       ["Media RW/FF", "seek media / step TTS"],
-      ["Alt+r", "cycle playback / TTS speed"],
       ["Ctrl/Cmd+,", "toggle settings"],
       ["F1 / ?", "toggle this help"]
     ]

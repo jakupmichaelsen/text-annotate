@@ -1,7 +1,7 @@
 import { Prec, type Extension } from "@codemirror/state";
 import { EditorView, keymap, type EditorView as EditorViewType } from "@codemirror/view";
 
-export const reservedStyleKeys = new Set(["h", "j", "k", "l", "w", "a", "s", "d", "q", "e", "r", "n", "u", "v", "x", "c", "?", " "]);
+export const reservedStyleKeys = new Set(["h", "j", "k", "l", "w", "a", "s", "d", "n", "u", "v", "x", "c", "?", " "]);
 
 export const customShortcutActions = [
   "stridePrevious",
@@ -29,12 +29,7 @@ export function isAudioShortcut(event: KeyboardEvent) {
   if (!event.altKey && !event.ctrlKey && !event.metaKey &&
     (key === "mediarewind" || key === "mediafastforward" || key === "mediatrackprevious" || key === "mediatracknext")) return true;
   return event.altKey && !event.ctrlKey && !event.metaKey &&
-    (event.key === " " || event.key === "ArrowLeft" || event.key === "Left" || event.key === "ArrowRight" || event.key === "Right" ||
-      key === "a" || key === "d" || key === "s" || key === "w");
-}
-
-export function isAudioRateShortcut(event: KeyboardEvent) {
-  return event.altKey && !event.ctrlKey && !event.metaKey && (event.key.toLowerCase() === "r" || event.key.toLowerCase() === "w");
+    (event.key === " " || event.key === "ArrowLeft" || event.key === "Left" || event.key === "ArrowRight" || event.key === "Right");
 }
 
 function normalizeShortcutKey(key: string) {
@@ -126,16 +121,16 @@ export function isAppShortcutCandidate(
 ) {
   if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key === ",") return true;
   if (event.metaKey) return false;
-  if (isModeShortcut(event) || isAudioShortcut(event) || isAudioRateShortcut(event)) return true;
+  if (isModeShortcut(event) || isAudioShortcut(event)) return true;
   if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key === "CapsLock") return true;
   if (event.ctrlKey && !event.altKey && (event.key === "z" || event.key === "y" || event.key === "Z")) return true;
   if (event.ctrlKey && !event.altKey && event.key === "Tab") return true;
   if (event.altKey) return false;
-  if (!event.ctrlKey && (event.key.toLowerCase() === "r" || styleNumberForKey(event.key) !== null || event.key === "Tab")) return true;
+  if (!event.ctrlKey && (styleNumberForKey(event.key) !== null || event.key === "Tab")) return true;
 
   if (event.ctrlKey) {
     if (event.key === "ArrowLeft" || event.key === "ArrowRight" || event.key === "ArrowUp" || event.key === "ArrowDown") return true;
-    return ["h", "j", "k", "l", "w", "s", "d"].includes(event.key.toLowerCase());
+    return false;
   }
 
   return event.key === " " ||
@@ -146,7 +141,7 @@ export function isAppShortcutCandidate(
     event.key === "ArrowRight" ||
     event.key === "ArrowUp" ||
     event.key === "ArrowDown" ||
-    "hjklwasdcqeHJKLWASDCQErxvnNuU".includes(event.key);
+    "hjklwasdcHJKLWASDCxvnNuU".includes(event.key);
 }
 
 export type EditorMode = "normal" | "insert";
@@ -225,11 +220,11 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
 
       if (
         key === "arrowleft" || key === "arrowright" ||
-        key === "h" || key === "l" || key === "q" || key === "e" ||
+        key === "h" || key === "l" ||
         key === "a" || key === "d"
       ) {
         const isWasdNavigation = key === "a" || key === "d";
-        const isHjklNavigation = key === "h" || key === "l" || key === "q" || key === "e";
+        const isHjklNavigation = key === "h" || key === "l";
         if (isWasdNavigation && !handlers.useWasdNavigation()) return false;
         if (isHjklNavigation && !handlers.useHjklNavigation()) return false;
         if (visualLineSelection) {
@@ -237,7 +232,7 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
           event.stopImmediatePropagation();
           return true;
         }
-        const forward = key === "arrowright" || key === "l" || key === "e" || key === "d";
+        const forward = key === "arrowright" || key === "l" || key === "d";
         event.preventDefault();
         event.stopImmediatePropagation();
         return moveHorizontal(view, forward, extend, handlers.useWordNavigation());
@@ -323,21 +318,6 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       { key: "Shift-Ctrl-ArrowRight", run: normal(view => handlers.navigation.moveByWordCount(view, true, 1, true)) },
       { key: "Shift-Ctrl-ArrowUp",    run: normal(view => handlers.navigation.paragraphBoundary(view, "start", true)) },
       { key: "Shift-Ctrl-ArrowDown",  run: normal(view => handlers.navigation.paragraphBoundary(view, "end", true)) },
-      { key: "Ctrl-h", run: normal(view => handlers.navigation.moveByWordCount(view, false, 1)) },
-      { key: "Ctrl-j", run: normal(view => handlers.navigation.paragraphBoundary(view, "end")) },
-      { key: "Ctrl-k", run: normal(view => handlers.navigation.paragraphBoundary(view, "start")) },
-      { key: "Ctrl-l", run: normal(view => handlers.navigation.moveByWordCount(view, true, 1)) },
-      { key: "Ctrl-w", run: normal(view => handlers.navigation.paragraphBoundary(view, "start")) },
-      { key: "Ctrl-s", run: normal(view => handlers.navigation.paragraphBoundary(view, "end")) },
-      { key: "Ctrl-d", run: normal(view => handlers.navigation.moveByWordCount(view, true, 5)) },
-      { key: "Shift-Ctrl-h", run: normal(view => handlers.navigation.moveByWordCount(view, false, 1, true)) },
-      { key: "Shift-Ctrl-j", run: normal(view => handlers.navigation.paragraphBoundary(view, "end", true)) },
-      { key: "Shift-Ctrl-k", run: normal(view => handlers.navigation.paragraphBoundary(view, "start", true)) },
-      { key: "Shift-Ctrl-l", run: normal(view => handlers.navigation.moveByWordCount(view, true, 1, true)) },
-      { key: "Shift-Ctrl-w", run: normal(view => handlers.navigation.paragraphBoundary(view, "start", true)) },
-      { key: "Shift-Ctrl-s", run: normal(view => handlers.navigation.paragraphBoundary(view, "end", true)) },
-      { key: "Shift-Ctrl-a", run: normal(view => handlers.navigation.moveByWordCount(view, false, 5, true)) },
-      { key: "Shift-Ctrl-d", run: normal(view => handlers.navigation.moveByWordCount(view, true, 5, true)) },
       {
         any: (view, event) => {
           if (
@@ -359,7 +339,6 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       { key: "X",      run: normal(view => handlers.deleteCurrentLine(view)) },
       { key: "v",      run: normal(view => handlers.toggleStickySelection(view)) },
       { key: "V",      run: normal(view => handlers.startVisualLineSelection(view)) },
-      { key: "r",      run: normal(() => { handlers.handleMediaShortcut("r"); return true; }) },
       { key: "<",      run: normal(view => handlers.enterBlockquoteEditMode(view)) },
       { key: ">",      run: normal(view => handlers.splitLineEndToBlockquote(view)) },
       { key: "u",      run: normal(view => handlers.undo(view)) },
@@ -368,11 +347,6 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       { key: "Ctrl-y", run: view => handlers.redo(view) },
       { key: "Ctrl-Z", run: view => handlers.redo(view) },
       { key: "?",      run: normal(() => handlers.toggleHelp()) },
-      { key: "Alt-r", run: () => { handlers.handleMediaShortcut("r"); return true; } },
-      { key: "Alt-w", run: () => { handlers.handleMediaShortcut("w"); return true; } },
-      { key: "Alt-a", run: () => { handlers.handleMediaShortcut("a"); return true; } },
-      { key: "Alt-s", run: () => { handlers.handleMediaShortcut("s"); return true; } },
-      { key: "Alt-d", run: () => { handlers.handleMediaShortcut("d"); return true; } },
       { key: "Alt-Space",  run: () => { handlers.toggleMediaPlayback(); return true; } },
       { key: "Alt-ArrowLeft",  run: () => { handlers.seekAudio(-10); return true; } },
       { key: "Alt-ArrowRight", run: () => { handlers.seekAudio(10); return true; } },

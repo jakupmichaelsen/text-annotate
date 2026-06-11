@@ -2354,6 +2354,14 @@
     outline: none;
   }
 
+  .document-preview-zoom {
+    min-width: 32px;
+    color: var(--fg-muted);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+  }
+
   .document-preview-body {
     min-height: 0;
     overflow: auto;
