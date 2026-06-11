@@ -14,6 +14,96 @@ export const customShortcutActions = [
 
 export type CustomShortcutAction = typeof customShortcutActions[number];
 
+export const customShortcutDefinitions: Array<{ action: CustomShortcutAction; label: string; icon: string; defaultValue: string }> = [
+  { action: "stridePrevious", label: "Stride previous", icon: "C", defaultValue: "Shift+c" },
+  { action: "strideNext", label: "Stride next", icon: "c", defaultValue: "c" },
+  { action: "annotationPrevious", label: "Annotation previous", icon: "n", defaultValue: "n" },
+  { action: "annotationNext", label: "Annotation next", icon: "N", defaultValue: "N" },
+  { action: "variantPrevious", label: "Variant previous", icon: "⇧⇥", defaultValue: "Shift+Tab" },
+  { action: "variantNext", label: "Variant next", icon: "⇥", defaultValue: "Tab" }
+];
+
+export type KeyboardHelpSection = {
+  title: string;
+  items: readonly (readonly [string, string])[];
+};
+
+export type KeyboardPassthrough = {
+  label: string;
+  description: string;
+  bindings: readonly string[];
+};
+
+export const editModeUsesCodeMirrorDefaults = true;
+
+export const annotatePassthroughKeys: readonly KeyboardPassthrough[] = [
+  { label: "Ctrl/Cmd+A", description: "select all", bindings: ["Ctrl+a", "Meta+a"] },
+  { label: "Ctrl/Cmd+C", description: "copy", bindings: ["Ctrl+c", "Meta+c"] },
+  { label: "Ctrl/Cmd+F", description: "find", bindings: ["Ctrl+f", "Meta+f"] },
+  { label: "Ctrl/Cmd+L", description: "browser location", bindings: ["Ctrl+l", "Meta+l"] }
+];
+
+export const annotateHandledKeySections: readonly KeyboardHelpSection[] = [
+  {
+    title: "Navigation",
+    items: [
+      ["← ↓ ↑ →", "left / down / up / right"],
+      ["CapsLock", "on = word navigation, off = character navigation"],
+      ["c / C", "column stride right / left"],
+      ["WASD", "optional navigation keys"],
+      ["HJKL", "optional navigation keys"]
+    ]
+  },
+  {
+    title: "Selection",
+    items: [
+      ["v", "toggle sticky selection"],
+      ["V", "visual-line selection"]
+    ]
+  },
+  {
+    title: "Annotations",
+    items: [
+      ["Space", "wrap word / selection"],
+      ["n / N", "previous / next annotation"],
+      ["1 / 2 / 3", "select styles"],
+      ["0", "plain annotation"],
+      ["Tab / Shift+Tab", "variant next / previous"],
+      ["<", "new blockquote below"],
+      [">", "split rest of line to blockquote"],
+      ["Enter", "edit note / cue playback"],
+      ["x", "remove annotation / delete"]
+    ]
+  },
+  {
+    title: "History",
+    items: [
+      ["u U", "undo / redo"],
+      ["Ctrl+Z/Y", "undo / redo"]
+    ]
+  },
+  {
+    title: "Other",
+    items: [
+      ["F2", "enter Edit mode"],
+      ["Esc", "close app panels"],
+      ["Alt+Space", "play / pause media / TTS"],
+      ["Alt+←/→", "seek media 10s / step TTS"],
+      ["Media RW/FF", "seek media / step TTS"],
+      ["Ctrl/Cmd+,", "toggle settings"],
+      ["F1 / ?", "toggle this help"]
+    ]
+  }
+];
+
+export const keyboardHelpSections: readonly KeyboardHelpSection[] = [
+  ...annotateHandledKeySections,
+  {
+    title: "Passthrough",
+    items: annotatePassthroughKeys.map(key => [key.label, key.description] as const)
+  }
+];
+
 export function normalizeStyleKey(key: string) {
   if (key.length !== 1 || /\s/.test(key)) return "";
   const normalized = key.toLowerCase();
@@ -102,17 +192,9 @@ function isModifierOnlyKey(event: KeyboardEvent) {
 
 function isAnnotateModePassthrough(event: KeyboardEvent) {
   if (isModifierOnlyKey(event)) return true;
-  if (event.altKey) return false;
-  if (!event.ctrlKey && !event.metaKey) return false;
-
-  const key = event.key.toLowerCase();
-  return key === "a" ||
-    key === "c" ||
-    key === "f" ||
-    key === "l" ||
-    key === "+" ||
-    key === "-" ||
-    key === "0";
+  return annotatePassthroughKeys.some(entry =>
+    entry.bindings.some(binding => shortcutBindingMatchesEvent(event, binding))
+  );
 }
 
 export function isAppShortcutCandidate(
@@ -297,18 +379,18 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
     normalPrintableKeyBehavior,
     Prec.high(keymap.of([
       { any: (view, event) => handlers.getEditorMode() === "normal" && handlers.handleVariantPickerKey(view, event) },
-      { key: "Escape", run: () => handlers.handleEscape() },
-      { key: "F2", run: view => { handlers.setMode(handlers.getEditorMode() === "insert" ? "normal" : "insert"); return true; } },
+      { key: "Escape", run: normal(() => handlers.handleEscape()) },
+      { key: "F2", run: normal(view => { handlers.setMode("insert"); return true; }) },
       { key: "CapsLock", run: normal(() => handlers.toggleWordNavigation()) },
-      { key: "F1", run: () => handlers.toggleHelp() },
-      { key: "Mod-,", run: () => handlers.toggleSettings() },
-      { key: "Ctrl-Tab", run: view => handlers.scrollCurrentLineIntoView(view) },
-      { key: "Enter", run: view => handlers.finishBlockquoteEditMode(view) },
-      { key: "Shift-Enter", run: view => handlers.insertBlockquoteLineBreak(view) },
-      { key: "Alt-Enter", run: view => handlers.insertBlockquoteLineBreak(view) },
-      { key: "Tab", run: view => handlers.insertBlockquoteLevel(view) },
-      { key: "ArrowUp", run: view => handlers.exitBlockquoteEditForNavigation(view) },
-      { key: "ArrowDown", run: view => handlers.exitBlockquoteEditForNavigation(view) },
+      { key: "F1", run: normal(() => handlers.toggleHelp()) },
+      { key: "Mod-,", run: normal(() => handlers.toggleSettings()) },
+      { key: "Ctrl-Tab", run: normal(view => handlers.scrollCurrentLineIntoView(view)) },
+      { key: "Enter", run: normal(view => handlers.finishBlockquoteEditMode(view)) },
+      { key: "Shift-Enter", run: normal(view => handlers.insertBlockquoteLineBreak(view)) },
+      { key: "Alt-Enter", run: normal(view => handlers.insertBlockquoteLineBreak(view)) },
+      { key: "Tab", run: normal(view => handlers.insertBlockquoteLevel(view)) },
+      { key: "ArrowUp", run: normal(view => handlers.exitBlockquoteEditForNavigation(view)) },
+      { key: "ArrowDown", run: normal(view => handlers.exitBlockquoteEditForNavigation(view)) },
 
       { key: "Ctrl-ArrowLeft",        run: normal(view => handlers.navigation.moveByWordCount(view, false, 1)) },
       { key: "Ctrl-ArrowRight",       run: normal(view => handlers.navigation.moveByWordCount(view, true, 1)) },
@@ -343,17 +425,17 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       { key: ">",      run: normal(view => handlers.splitLineEndToBlockquote(view)) },
       { key: "u",      run: normal(view => handlers.undo(view)) },
       { key: "U",      run: normal(view => handlers.redo(view)) },
-      { key: "Ctrl-z", run: view => handlers.undo(view) },
-      { key: "Ctrl-y", run: view => handlers.redo(view) },
-      { key: "Ctrl-Z", run: view => handlers.redo(view) },
+      { key: "Ctrl-z", run: normal(view => handlers.undo(view)) },
+      { key: "Ctrl-y", run: normal(view => handlers.redo(view)) },
+      { key: "Ctrl-Z", run: normal(view => handlers.redo(view)) },
       { key: "?",      run: normal(() => handlers.toggleHelp()) },
-      { key: "Alt-Space",  run: () => { handlers.toggleMediaPlayback(); return true; } },
-      { key: "Alt-ArrowLeft",  run: () => { handlers.seekAudio(-10); return true; } },
-      { key: "Alt-ArrowRight", run: () => { handlers.seekAudio(10); return true; } },
-      { key: "MediaRewind", run: () => { handlers.handleMediaShortcut("MediaRewind"); return true; } },
-      { key: "MediaFastForward", run: () => { handlers.handleMediaShortcut("MediaFastForward"); return true; } },
-      { key: "MediaTrackPrevious", run: () => { handlers.handleMediaShortcut("MediaTrackPrevious"); return true; } },
-      { key: "MediaTrackNext", run: () => { handlers.handleMediaShortcut("MediaTrackNext"); return true; } }
+      { key: "Alt-Space",  run: normal(() => { handlers.toggleMediaPlayback(); return true; }) },
+      { key: "Alt-ArrowLeft",  run: normal(() => { handlers.seekAudio(-10); return true; }) },
+      { key: "Alt-ArrowRight", run: normal(() => { handlers.seekAudio(10); return true; }) },
+      { key: "MediaRewind", run: normal(() => { handlers.handleMediaShortcut("MediaRewind"); return true; }) },
+      { key: "MediaFastForward", run: normal(() => { handlers.handleMediaShortcut("MediaFastForward"); return true; }) },
+      { key: "MediaTrackPrevious", run: normal(() => { handlers.handleMediaShortcut("MediaTrackPrevious"); return true; }) },
+      { key: "MediaTrackNext", run: normal(() => { handlers.handleMediaShortcut("MediaTrackNext"); return true; }) }
     ])),
     annotateModeKeyBoundary
   ];

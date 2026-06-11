@@ -30,7 +30,6 @@
     summaryVisibleText
   } from "./lib/annotations";
   import { createNavigationCommands } from "./lib/navigation";
-  import { helpSections } from "./lib/shortcuts";
   import {
     buildEditorTheme,
     buildHighlightStyle,
@@ -54,9 +53,11 @@
   } from "./lib/srt";
   import {
     buildEditorKeymap,
+    customShortcutDefinitions,
     isAudioShortcut,
     isAppShortcutCandidate,
     isModeShortcut,
+    keyboardHelpSections,
     normalizeStyleKey,
     normalizeShortcutBinding,
     reservedStyleKeys,
@@ -112,14 +113,6 @@
   ] as const;
   const defaultFontFamilyName = "Calling Code";
   const defaultFontFavorites: string[] = [];
-  const customShortcutDefinitions: Array<{ action: CustomShortcutAction; label: string; icon: string; defaultValue: string }> = [
-    { action: "stridePrevious", label: "Stride previous", icon: "C", defaultValue: "Shift+c" },
-    { action: "strideNext", label: "Stride next", icon: "c", defaultValue: "c" },
-    { action: "annotationPrevious", label: "Annotation previous", icon: "n", defaultValue: "n" },
-    { action: "annotationNext", label: "Annotation next", icon: "N", defaultValue: "N" },
-    { action: "variantPrevious", label: "Variant previous", icon: "⇧⇥", defaultValue: "Shift+Tab" },
-    { action: "variantNext", label: "Variant next", icon: "⇥", defaultValue: "Tab" }
-  ];
 
   let editorEl: HTMLDivElement;
   let view: EditorView;
@@ -6546,7 +6539,7 @@ ${body}
           <button class="help-close" on:click={() => showHelp = false}>✕</button>
         </div>
         <div class="keybinds">
-          {#each helpSections as section}
+          {#each keyboardHelpSections as section}
             <section class="kb-section">
               <div class="kb-section-label">{helpShortcutGroupTitle(section.title)}</div>
               <div class="kb-group">
