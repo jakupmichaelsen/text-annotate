@@ -296,6 +296,7 @@
   let documentMapViewportTop = 0;
   let documentMapViewportHeight = 0;
   let documentMapCurrentLine = 1;
+  let sourceDocumentMapLines: string[] = [];
   $: orderedSummarySections = orderSummarySections(summarySections, summaryCategoryOrder);
   $: summaryGroupIds = orderedSummarySections.filter(section => section.kind === "group").map(section => section.id);
   $: summaryAnnotationGroupIds = orderedSummarySections
@@ -912,8 +913,9 @@
     return `${mins}:${secText}`;
   }
 
-  function replaceDocument(text: string, preserveLineBreaks = false) {
+  function replaceDocument(text: string, preserveLineBreaks = false, sourceLines: string[] = []) {
     if (!view) return;
+    sourceDocumentMapLines = sourceLines;
     applyDocumentLoadFontPreference();
     const normalized = text.replace(/\r\n?/g, "\n").trim();
     const insert = importTextForEditor(normalized, preserveLineBreaks);
@@ -1054,31 +1056,41 @@
     const combined = documents
       .map(document => multiple ? `# ${document.file.name}\n\n${document.text}` : document.text)
       .join("\n\n");
+    const sourceLines = documents.flatMap((document, index) => {
+      const lines = document.sourceLines.length ? document.sourceLines : sourceLinesFromText(document.text);
+      return multiple
+        ? [document.file.name, "", ...lines, ...(index < documents.length - 1 ? [""] : [])]
+        : lines;
+    });
     loadedFileType = multiple ? "MULTI" : documents[0]?.type ?? "TEXT";
-    replaceDocument(combined, documents.some(document => document.preserveLineBreaks));
+    replaceDocument(combined, documents.some(document => document.preserveLineBreaks), sourceLines);
   }
 
   async function documentTextFromFile(file: File) {
     if (file.name.toLowerCase().endsWith(".srt")) {
-      return { file, type: "SRT", text: formatSrtTranscript(await file.text()), preserveLineBreaks: true };
+      const text = formatSrtTranscript(await file.text());
+      return { file, type: "SRT", text, sourceLines: sourceLinesFromText(text), preserveLineBreaks: true };
     }
     if (isPdfFile(file)) {
       const extracted = await extractPdfText(file);
-      return { file, type: "PDF", text: extracted.text || "", preserveLineBreaks: false };
+      return { file, type: "PDF", text: extracted.text || "", sourceLines: extracted.lines, preserveLineBreaks: false };
     }
     if (file.name.toLowerCase().endsWith(".docx")) {
       const buffer = await file.arrayBuffer();
       const mammoth = await import("mammoth");
       const result = await mammoth.extractRawText({ arrayBuffer: buffer });
-      return { file, type: "DOCX", text: stripEmptyLines(result.value), preserveLineBreaks: false };
+      return { file, type: "DOCX", text: stripEmptyLines(result.value), sourceLines: sourceLinesFromText(result.value), preserveLineBreaks: false };
     }
     if (isOdtFile(file)) {
-      return { file, type: "ODT", text: await extractOdtText(file), preserveLineBreaks: false };
+      const extracted = await extractOdtText(file);
+      return { file, type: "ODT", text: extracted.text, sourceLines: extracted.sourceLines, preserveLineBreaks: false };
     }
+    const text = await file.text();
     return {
       file,
       type: file.name.split(".").pop()?.toUpperCase() || "TEXT",
-      text: stripEmptyLines(await file.text()),
+      text: stripEmptyLines(text),
+      sourceLines: sourceLinesFromText(text),
       preserveLineBreaks: false
     };
   }
@@ -1134,7 +1146,15 @@
     }
 
     collectBlocks(textRoot);
-    return stripEmptyLines(blocks.join("\n\n"));
+    const rawText = blocks.join("\n\n");
+    return {
+      text: stripEmptyLines(rawText),
+      sourceLines: sourceLinesFromText(rawText)
+    };
+  }
+
+  function sourceLinesFromText(text: string) {
+    return text.replace(/\r\n?/g, "\n").split("\n");
   }
 
   function isMediaFile(file: File) {
@@ -2142,7 +2162,7 @@
   }
 
   function loadPdfDraft(text = pdfDraftText) {
-    replaceDocument(text);
+    replaceDocument(text, false, pdfSourceLines.length ? pdfSourceLines : sourceLinesFromText(text));
     closePdfModal();
   }
 
@@ -3341,40 +3361,45 @@ ${body}
 
   function updateDocumentMapFromView(v: EditorView) {
     const doc = v.state.doc;
+    const sourceLines = sourceDocumentMapLines.length
+      ? sourceDocumentMapLines
+      : Array.from({ length: doc.lines }, (_, index) => doc.line(index + 1).text);
     const lines: DocumentMapLine[] = [];
     let maxLength = 1;
 
-    for (let lineNumber = 1; lineNumber <= doc.lines; lineNumber += 1) {
-      const line = doc.line(lineNumber);
-      const visibleLength = line.text.replace(/\s+$/g, "").length;
+    for (const line of sourceLines) {
+      const visibleLength = line.replace(/\s+$/g, "").length;
       if (visibleLength > maxLength) maxLength = visibleLength;
     }
 
     let top = 0;
-    for (let lineNumber = 1; lineNumber <= doc.lines; lineNumber += 1) {
-      const line = doc.line(lineNumber);
-      const trimmed = line.text.trim();
+    for (let index = 0; index < sourceLines.length; index += 1) {
+      const text = sourceLines[index] ?? "";
+      const trimmed = text.trim();
       const blank = trimmed.length === 0;
-      const visibleLength = line.text.replace(/\s+$/g, "").length;
-      const indent = blank ? 0 : Math.min(24, line.text.match(/^\s*/)?.[0].length ?? 0);
+      const visibleLength = text.replace(/\s+$/g, "").length;
+      const indent = blank ? 0 : Math.min(24, text.match(/^\s*/)?.[0].length ?? 0);
       const width = blank ? 16 : Math.max(14, Math.min(100, 18 + (visibleLength / maxLength) * 82));
       const height = blank ? 7 : 4;
-      lines.push({ line: lineNumber, from: line.from, blank, width, indent, top, height });
+      const editorLine = doc.line(Math.max(1, Math.min(doc.lines, index + 1)));
+      lines.push({ line: index + 1, from: editorLine.from, blank, width, indent, top, height });
       top += height + 1;
     }
 
     const ranges = v.visibleRanges.length ? v.visibleRanges : [{ from: 0, to: doc.length }];
     const firstVisibleLine = doc.lineAt(ranges[0].from).number;
     const lastVisibleLine = doc.lineAt(ranges[ranges.length - 1].to).number;
-    const viewportStart = lines[firstVisibleLine - 1]?.top ?? 0;
-    const viewportEnd = (lines[lastVisibleLine - 1]?.top ?? viewportStart) + (lines[lastVisibleLine - 1]?.height ?? 0);
+    const firstMapLine = Math.max(1, Math.min(lines.length, firstVisibleLine));
+    const lastMapLine = Math.max(firstMapLine, Math.min(lines.length, lastVisibleLine));
+    const viewportStart = lines[firstMapLine - 1]?.top ?? 0;
+    const viewportEnd = (lines[lastMapLine - 1]?.top ?? viewportStart) + (lines[lastMapLine - 1]?.height ?? 0);
 
     documentMapLines = lines;
-    documentMapLineCount = doc.lines;
+    documentMapLineCount = sourceLines.length;
     documentMapTotalHeight = top;
     documentMapViewportTop = viewportStart;
-    documentMapViewportHeight = Math.max(lines[firstVisibleLine - 1]?.height ?? 0, viewportEnd - viewportStart);
-    documentMapCurrentLine = doc.lineAt(v.state.selection.main.head).number;
+    documentMapViewportHeight = Math.max(lines[firstMapLine - 1]?.height ?? 0, viewportEnd - viewportStart);
+    documentMapCurrentLine = Math.max(1, Math.min(lines.length, doc.lineAt(v.state.selection.main.head).number));
   }
 
   function jumpToDocumentLine(v: EditorView, lineNumber: number) {
