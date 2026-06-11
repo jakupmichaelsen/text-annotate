@@ -167,9 +167,12 @@
   let settingsTab: SettingsTab = initialAppSettings.settingsTab;
   type ImportLineMode = "original" | "sentences" | "reflow";
   let importLineMode: ImportLineMode = initialLayoutSettings.importLineMode ?? (initialLayoutSettings.divideImportSentences === false ? "original" : "sentences");
+  const annotationCommentOpen = "<" + "!--";
+  const annotationStylePrefixPattern = new RegExp("^`([^`]+)`" + annotationCommentOpen + "\\s*\\w+(?:\\s+\\w+)?,");
   let pdfModalOpen = false;
   let pdfDraftText = "";
   let pdfSourceLines: string[] = [];
+  let pdfDocumentMapPages: DocumentMapPagePreview[] = [];
   let pdfPreviewUrl = "";
   let pdfFileName = "";
   let pdfIsParsing = false;
@@ -281,6 +284,14 @@
     top: number;
     height: number;
   };
+  type DocumentMapPagePreview = {
+    kind: "pdf" | "docx";
+    page: number;
+    width: number;
+    height: number;
+    dataUrl?: string;
+    html?: string;
+  };
   type SummarySection =
     | { kind: "item"; id: string; item: SummaryItem }
     | { kind: "group"; id: string; label: string; count: number; color: string; itemType: SummaryItem["type"]; items: SummaryItem[] };
@@ -297,6 +308,7 @@
   let documentMapViewportHeight = 0;
   let documentMapCurrentLine = 1;
   let sourceDocumentMapLines: string[] = [];
+  let documentMapPages: DocumentMapPagePreview[] = [];
   $: orderedSummarySections = orderSummarySections(summarySections, summaryCategoryOrder);
   $: summaryGroupIds = orderedSummarySections.filter(section => section.kind === "group").map(section => section.id);
   $: summaryAnnotationGroupIds = orderedSummarySections
@@ -913,9 +925,15 @@
     return `${mins}:${secText}`;
   }
 
-  function replaceDocument(text: string, preserveLineBreaks = false, sourceLines: string[] = []) {
+  function replaceDocument(
+    text: string,
+    preserveLineBreaks = false,
+    sourceLines: string[] = [],
+    pagePreviews: DocumentMapPagePreview[] = []
+  ) {
     if (!view) return;
     sourceDocumentMapLines = sourceLines;
+    documentMapPages = pagePreviews;
     applyDocumentLoadFontPreference();
     const normalized = text.replace(/\r\n?/g, "\n").trim();
     const insert = importTextForEditor(normalized, preserveLineBreaks);
@@ -1063,7 +1081,8 @@
         : lines;
     });
     loadedFileType = multiple ? "MULTI" : documents[0]?.type ?? "TEXT";
-    replaceDocument(combined, documents.some(document => document.preserveLineBreaks), sourceLines);
+    const pagePreviews = !multiple ? documents[0]?.pagePreviews ?? [] : [];
+    replaceDocument(combined, documents.some(document => document.preserveLineBreaks), sourceLines, pagePreviews);
   }
 
   async function documentTextFromFile(file: File) {
@@ -1077,9 +1096,19 @@
     }
     if (file.name.toLowerCase().endsWith(".docx")) {
       const buffer = await file.arrayBuffer();
-      const mammoth = await import("mammoth");
+      const [mammoth, pagePreviews] = await Promise.all([
+        import("mammoth"),
+        renderDocxDocumentMapPages(buffer)
+      ]);
       const result = await mammoth.extractRawText({ arrayBuffer: buffer });
-      return { file, type: "DOCX", text: stripEmptyLines(result.value), sourceLines: sourceLinesFromText(result.value), preserveLineBreaks: false };
+      return {
+        file,
+        type: "DOCX",
+        text: stripEmptyLines(result.value),
+        sourceLines: sourceLinesFromText(result.value),
+        preserveLineBreaks: false,
+        pagePreviews
+      };
     }
     if (isOdtFile(file)) {
       const extracted = await extractOdtText(file);
@@ -1971,14 +2000,19 @@
     pdfFileName = file.name;
     pdfDraftText = "";
     pdfSourceLines = [];
+    pdfDocumentMapPages = [];
     pdfParseError = "";
     pdfIsParsing = true;
     pdfModalOpen = true;
 
     try {
-      const extractedPdf = await extractPdfText(file);
+      const [extractedPdf, pagePreviews] = await Promise.all([
+        extractPdfText(file),
+        renderPdfDocumentMapPages(file)
+      ]);
       pdfDraftText = extractedPdf.text;
       pdfSourceLines = extractedPdf.lines;
+      pdfDocumentMapPages = pagePreviews;
       if (!pdfDraftText.trim()) {
         pdfParseError = "No selectable text was found. This PDF may be scanned, so paste or type corrected text here before loading.";
       }
@@ -1986,6 +2020,7 @@
       pdfParseError = error instanceof Error ? error.message : "Could not parse this PDF.";
       pdfDraftText = "";
       pdfSourceLines = [];
+      pdfDocumentMapPages = [];
     } finally {
       pdfIsParsing = false;
     }
@@ -2031,6 +2066,100 @@
       text: pages.join("\n\n").replace(/[ \t]+\n/g, "\n").trim(),
       lines: sourceLines
     };
+  }
+
+  async function renderPdfDocumentMapPages(file: File): Promise<DocumentMapPagePreview[]> {
+    const data = new Uint8Array(await file.arrayBuffer());
+    const pdf = await pdfjsLib.getDocument({ data }).promise;
+    const pages: DocumentMapPagePreview[] = [];
+
+    try {
+      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+        const page = await pdf.getPage(pageNumber);
+        const baseViewport = page.getViewport({ scale: 1 });
+        const scale = Math.min(0.22, 180 / Math.max(baseViewport.width, 1));
+        const viewport = page.getViewport({ scale });
+        const canvas = window.document.createElement("canvas");
+        canvas.width = Math.max(1, Math.ceil(viewport.width));
+        canvas.height = Math.max(1, Math.ceil(viewport.height));
+        const canvasContext = canvas.getContext("2d");
+        if (!canvasContext) continue;
+
+        canvasContext.fillStyle = "#fff";
+        canvasContext.fillRect(0, 0, canvas.width, canvas.height);
+        await page.render({ canvasContext, viewport }).promise;
+        pages.push({
+          kind: "pdf",
+          page: pageNumber,
+          width: viewport.width,
+          height: viewport.height,
+          dataUrl: canvas.toDataURL("image/png")
+        });
+      }
+    } finally {
+      await pdf.destroy();
+    }
+
+    return pages;
+  }
+
+  async function renderDocxDocumentMapPages(buffer: ArrayBuffer): Promise<DocumentMapPagePreview[]> {
+    const host = window.document.createElement("div");
+    const bodyContainer = window.document.createElement("div");
+    const styleContainer = window.document.createElement("div");
+
+    host.style.cssText = [
+      "position:fixed",
+      "left:-10000px",
+      "top:0",
+      "width:max-content",
+      "height:auto",
+      "opacity:0",
+      "pointer-events:none",
+      "z-index:-1"
+    ].join(";");
+    host.append(styleContainer, bodyContainer);
+    window.document.body.appendChild(host);
+
+    try {
+      const { renderAsync: renderDocxAsync } = await import("docx-preview");
+      await renderDocxAsync(buffer, bodyContainer, styleContainer, {
+        breakPages: true,
+        ignoreLastRenderedPageBreak: false,
+        renderHeaders: true,
+        renderFooters: true,
+        useBase64URL: true
+      });
+
+      const pageElements = Array.from(
+        bodyContainer.querySelectorAll<HTMLElement>(".docx-wrapper > section.docx, section.docx")
+      );
+      const pages = pageElements.length ? pageElements : [bodyContainer.querySelector<HTMLElement>(".docx")].filter(Boolean);
+      const styleHtml = styleContainer.innerHTML;
+
+      return pages.map((page, index) => {
+        const rect = page.getBoundingClientRect();
+        const width = rect.width || cssPixelValue(page.style.width) || 816;
+        const height = rect.height || cssPixelValue(page.style.height) || 1056;
+        return {
+          kind: "docx",
+          page: index + 1,
+          width,
+          height,
+          html: `${styleHtml}${page.outerHTML}`
+        };
+      });
+    } catch (error) {
+      console.warn("Could not render DOCX document map.", error);
+      return [];
+    } finally {
+      host.remove();
+    }
+  }
+
+  function cssPixelValue(value: string) {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : 0;
   }
 
   function buildPdfLine(items: { text: string; x: number; width: number }[]) {
@@ -2162,7 +2291,7 @@
   }
 
   function loadPdfDraft(text = pdfDraftText) {
-    replaceDocument(text, false, pdfSourceLines.length ? pdfSourceLines : sourceLinesFromText(text));
+    replaceDocument(text, false, pdfSourceLines.length ? pdfSourceLines : sourceLinesFromText(text), pdfDocumentMapPages);
     closePdfModal();
   }
 
@@ -2170,6 +2299,7 @@
     pdfModalOpen = false;
     pdfDraftText = "";
     pdfSourceLines = [];
+    pdfDocumentMapPages = [];
     pdfFileName = "";
     pdfParseError = "";
     pdfIsParsing = false;
@@ -2426,12 +2556,16 @@
       const spanStart = m.index, spanEnd = spanStart + m[0].length;
       if (cursor >= spanStart && cursor <= spanEnd) {
         const { style } = annotationStyleParts(m[2]);
-        const updated = m[0].replace(/^`([^`]+)`<!--\s*\w+(?:\s+\w+)?,/, `\`$1\`<!-- ${annotationStyleToken(style, variant)},`);
+        const updated = replaceAnnotationStylePrefix(m[0], annotationStyleToken(style, variant));
         v.dispatch({ changes: { from: spanStart, to: spanEnd, insert: updated } });
         return true;
       }
     }
     return false;
+  }
+
+  function replaceAnnotationStylePrefix(markup: string, styleToken: string) {
+    return markup.replace(annotationStylePrefixPattern, (_match, text) => `\`${text}\`${annotationCommentOpen} ${styleToken},`);
   }
 
   function cycleAnnotationVariant(v: EditorView | null, delta: number) {
@@ -3411,6 +3545,18 @@ ${body}
     });
     v.focus();
     return true;
+  }
+
+  function jumpToDocumentPage(v: EditorView, pageNumber: number) {
+    const doc = v.state.doc;
+    const pageCount = Math.max(1, documentMapPages.length);
+    const ratio = pageCount <= 1 ? 0 : (Math.max(1, pageNumber) - 1) / (pageCount - 1);
+    const targetLine = Math.max(1, Math.min(doc.lines, Math.round(1 + ratio * (doc.lines - 1))));
+    return jumpToDocumentLine(v, targetLine);
+  }
+
+  function documentMapPageScale(page: DocumentMapPagePreview) {
+    return Math.min(1, 148 / Math.max(1, page.width));
   }
 
   function buildSummarySections(items: SummaryItem[]) {
@@ -4560,7 +4706,7 @@ ${body}
         const { style: oldStyle, variant } = annotationStyleParts(m[2]);
         const newStyle = cycleStyleNumber(styleNumberForName(oldStyle), delta, false);
         const newName = styleName(newStyle);
-        const updated = m[0].replace(/^`([^`]+)`<!--\s*\w+(?:\s+\w+)?,/, `\`$1\`<!-- ${annotationStyleToken(newName, variant)},`);
+        const updated = replaceAnnotationStylePrefix(m[0], annotationStyleToken(newName, variant));
         currentStyle = newStyle;
         v.dispatch({ changes: { from: spanStart, to: spanEnd, insert: updated } });
         return true;
@@ -4588,7 +4734,7 @@ ${body}
           return true;
         }
         const newName = styleName(style);
-        const updated = m[0].replace(/^`([^`]+)`<!--\s*\w+(?:\s+\w+)?,/, `\`$1\`<!-- ${annotationStyleToken(newName, variant)},`);
+        const updated = replaceAnnotationStylePrefix(m[0], annotationStyleToken(newName, variant));
         currentStyle = style;
         currentAnnotationVariant = variant;
         v.dispatch({
@@ -5908,29 +6054,72 @@ ${body}
         <section class="summary-document-panel">
           <div class="summary-document-header">
             <span class="summary-title">Document map</span>
-            <span class="summary-document-meta">{documentMapLineCount} lines</span>
+            <span class="summary-document-meta">
+              {#if documentMapPages.length}
+                {documentMapPages.length} pages
+              {:else}
+                {documentMapLineCount} lines
+              {/if}
+            </span>
           </div>
           <div class="document-map" aria-label="Document overview">
-            <div class="document-map-track" style={`height: ${documentMapTotalHeight}px;`}>
-              <div
-                class="document-map-viewport"
-                aria-hidden="true"
-                style={`top: ${documentMapViewportTop}px; height: ${documentMapViewportHeight}px;`}
-              ></div>
-              {#each documentMapLines as line}
-                <button
-                  class="document-map-line"
-                  class:blank={line.blank}
-                  class:active={line.line === documentMapCurrentLine}
-                  type="button"
-                  aria-label={`Jump to line ${line.line}`}
-                  style={`top: ${line.top}px; height: ${line.height}px;`}
-                  on:click={() => jumpToDocumentLine(view, line.line)}
-                >
-                  <span class="document-map-line-fill" style={`width: ${line.width}%; margin-left: ${line.indent}px;`}></span>
-                </button>
-              {/each}
-            </div>
+            {#if documentMapPages.length}
+              <div class="document-map-pages">
+                {#each documentMapPages as page}
+                  {@const scale = documentMapPageScale(page)}
+                  <button
+                    class="document-map-page"
+                    type="button"
+                    aria-label={`Jump near page ${page.page}`}
+                    on:click={() => jumpToDocumentPage(view, page.page)}
+                  >
+                    {#if page.kind === "pdf" && page.dataUrl}
+                      <img
+                        class="document-map-page-image"
+                        src={page.dataUrl}
+                        alt=""
+                        width={Math.round(page.width)}
+                        height={Math.round(page.height)}
+                      />
+                    {:else if page.html}
+                      <div
+                        class="document-map-docx-viewport"
+                        style={`width: ${page.width * scale}px; height: ${page.height * scale}px;`}
+                      >
+                        <div
+                          class="document-map-docx-page"
+                          style={`width: ${page.width}px; height: ${page.height}px; transform: scale(${scale});`}
+                        >
+                          {@html page.html}
+                        </div>
+                      </div>
+                    {/if}
+                    <span class="document-map-page-number">{page.page}</span>
+                  </button>
+                {/each}
+              </div>
+            {:else}
+              <div class="document-map-track" style={`height: ${documentMapTotalHeight}px;`}>
+                <div
+                  class="document-map-viewport"
+                  aria-hidden="true"
+                  style={`top: ${documentMapViewportTop}px; height: ${documentMapViewportHeight}px;`}
+                ></div>
+                {#each documentMapLines as line}
+                  <button
+                    class="document-map-line"
+                    class:blank={line.blank}
+                    class:active={line.line === documentMapCurrentLine}
+                    type="button"
+                    aria-label={`Jump to line ${line.line}`}
+                    style={`top: ${line.top}px; height: ${line.height}px;`}
+                    on:click={() => jumpToDocumentLine(view, line.line)}
+                  >
+                    <span class="document-map-line-fill" style={`width: ${line.width}%; margin-left: ${line.indent}px;`}></span>
+                  </button>
+                {/each}
+              </div>
+            {/if}
           </div>
         </section>
         <div class="summary-list">

@@ -343,6 +343,69 @@
     background: var(--yellow);
   }
 
+  .document-map-pages {
+    display: grid;
+    gap: 8px;
+    justify-items: center;
+  }
+
+  .document-map-page {
+    position: relative;
+    display: grid;
+    justify-items: center;
+    gap: 4px;
+    width: 100%;
+    padding: 5px;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--fg-muted);
+    cursor: pointer;
+    outline: none;
+  }
+
+  .document-map-page:hover,
+  .document-map-page:focus-visible {
+    border-color: var(--yellow);
+    background: color-mix(in srgb, var(--yellow) 8%, transparent);
+    color: var(--fg);
+  }
+
+  .document-map-page-image,
+  .document-map-docx-viewport {
+    display: block;
+    max-width: 148px;
+    background: #fff;
+    border: 1px solid color-mix(in srgb, var(--fg) 16%, transparent);
+    box-shadow: 0 1px 2px color-mix(in srgb, #000 18%, transparent);
+  }
+
+  .document-map-page-image {
+    height: auto;
+    object-fit: contain;
+  }
+
+  .document-map-docx-viewport {
+    overflow: hidden;
+    color: #111;
+  }
+
+  .document-map-docx-page {
+    transform-origin: top left;
+    pointer-events: none;
+  }
+
+  .document-map-docx-page .docx-wrapper {
+    background: transparent;
+    padding: 0;
+  }
+
+  .document-map-page-number {
+    font-size: 9px;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+
   .summary-list {
     min-height: 0;
     flex: 1 1 auto;
