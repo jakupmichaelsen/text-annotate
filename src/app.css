@@ -1544,14 +1544,6 @@
     font-size: 13px;
   }
 
-  .style-variant-label {
-    flex: 0 0 auto;
-    color: var(--fg-muted);
-    font-size: 11px;
-    text-transform: lowercase;
-    white-space: nowrap;
-  }
-
   .style-separator {
     color: var(--fg);
     font-size: 13px;
@@ -1560,11 +1552,13 @@
   }
 
   .style-title-action {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     min-width: 0;
-    width: auto;
-    padding: 0;
+    max-width: 100%;
+    width: fit-content;
+    padding: 1px 3px;
     border: 0;
+    border-radius: 2px;
     background: transparent;
     font: inherit;
     font-size: 13px;
@@ -1572,12 +1566,55 @@
     cursor: text;
   }
 
-  .style-row.active-style .style-title-action,
-  .style-row.active-style .style-variant-label,
+  .style-row.active-style .style-title-action:not(.variant-fill):not(.variant-box):not(.variant-underline):not(.variant-rail):not(.variant-bars),
   .style-title-action:hover,
   .style-title-action:focus-visible {
     color: var(--yellow);
     outline: none;
+  }
+
+  .style-title-action.variant-fill {
+    background: var(--swatch-color);
+    color: var(--swatch-text);
+  }
+
+  .style-title-action.variant-box {
+    border: 1px solid var(--swatch-color);
+    color: var(--swatch-color);
+  }
+
+  .style-title-action.variant-underline {
+    border-bottom: 3px solid var(--swatch-color);
+    border-radius: 0;
+    color: var(--swatch-color);
+  }
+
+  .style-title-action.variant-rail {
+    border-top: 2px solid var(--swatch-color);
+    border-bottom: 2px solid var(--swatch-color);
+    border-radius: 0;
+    color: var(--swatch-color);
+  }
+
+  .style-title-action.variant-bars {
+    border-left: 3px solid var(--swatch-color);
+    border-right: 3px solid var(--swatch-color);
+    border-radius: 0;
+    color: var(--swatch-color);
+  }
+
+  .style-title-action.variant-fill:hover,
+  .style-title-action.variant-fill:focus-visible,
+  .style-title-action.variant-box:hover,
+  .style-title-action.variant-box:focus-visible,
+  .style-title-action.variant-underline:hover,
+  .style-title-action.variant-underline:focus-visible,
+  .style-title-action.variant-rail:hover,
+  .style-title-action.variant-rail:focus-visible,
+  .style-title-action.variant-bars:hover,
+  .style-title-action.variant-bars:focus-visible {
+    outline: 1px solid var(--yellow);
+    outline-offset: 2px;
   }
 
   .style-title-input {

@@ -2640,11 +2640,6 @@
     view?.focus();
   }
 
-  function annotationVariantLabel(variant: AnnotationVariant) {
-    if (variant === "underline") return "under";
-    return variant;
-  }
-
   function handleVariantPickerKey(v: EditorView, event: KeyboardEvent) {
     if (!variantPickerOpen) return false;
     if (event.key === "ArrowDown" || event.key === "j" || event.key === "s") {
@@ -5909,6 +5904,7 @@ ${body}
               class="style-row"
               class:active-style={currentStyle === index + 1}
               role="listitem"
+              style={`--swatch-color: ${style.color}; --swatch-text: ${annotationTextColorForStyle(style.name, style.color)};`}
             >
               {#if editingStyleKeyName === style.name}
                 <input
@@ -5953,6 +5949,11 @@ ${body}
                 {:else}
                   <button
                     class="style-name style-title-action"
+                    class:variant-fill={currentStyle === index + 1 && currentAnnotationVariant === "fill"}
+                    class:variant-box={currentStyle === index + 1 && currentAnnotationVariant === "box"}
+                    class:variant-underline={currentStyle === index + 1 && currentAnnotationVariant === "underline"}
+                    class:variant-rail={currentStyle === index + 1 && currentAnnotationVariant === "rail"}
+                    class:variant-bars={currentStyle === index + 1 && currentAnnotationVariant === "bars"}
                     type="button"
                     title={`Edit ${styleDisplayTitle(style.name)} title`}
                     on:click={event => startStyleTitleEdit(event, style.name)}
@@ -5960,9 +5961,6 @@ ${body}
                   >
                     {styleDisplayTitle(style.name)}
                   </button>
-                  {#if currentStyle === index + 1}
-                    <span class="style-variant-label" aria-hidden="true">{annotationVariantLabel(currentAnnotationVariant)}</span>
-                  {/if}
                 {/if}
               </div>
               {#if style.custom}
