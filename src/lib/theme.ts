@@ -110,9 +110,6 @@ export function buildEditorTheme(theme: ThemePalette): Extension {
     ".cm-scroller": { overflow: "auto", fontFamily: "var(--app-font-family)", lineHeight: "1.75" },
     ".cm-content": { textAlign: "left", padding: "1rem 1.25rem 4rem", minHeight: "100%", caretColor: theme.cursor, whiteSpace: "pre-wrap", wordBreak: "break-word" },
     ".cm-line": { textAlign: "left" },
-    "&.cm-focused .cm-cursor": { borderLeftColor: theme.cursor },
-    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": { backgroundColor: theme.selection },
-    ".cm-content ::selection": { backgroundColor: theme.selection },
     "&.mode-normal .cm-content, &.mode-normal .cm-line": { caretColor: "transparent !important" },
     "&.mode-normal .cm-cursorLayer, &.mode-normal .cm-cursor, &.mode-normal .cm-cursor-primary, &.mode-normal .cm-cursor-secondary, &.mode-normal .cm-secondaryCursor, &.mode-normal .cm-dropCursor": {
       borderLeft: "0 !important",
@@ -121,13 +118,6 @@ export function buildEditorTheme(theme: ThemePalette): Extension {
       opacity: "0 !important",
       visibility: "hidden !important"
     },
-    ".cm-gutters": { backgroundColor: theme.bgHard, color: theme.gutterText, borderRight: "none" },
-    ".cm-activeLine": { backgroundColor: theme.activeLine },
-    ".cm-activeLineGutter": { color: theme.gutterText, backgroundColor: theme.bg },
-    ".cm-panels": { backgroundColor: theme.bgSoft, color: theme.fg },
-    ".cm-searchMatch": { backgroundColor: theme.searchMatch, outline: `1px solid ${theme.yellow}` },
-    ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: theme.searchMatchSelected },
-    ".cm-matchingBracket, .cm-nonmatchingBracket": { backgroundColor: theme.bgAlt, outline: `1px solid ${theme.blue}` },
     ".cm-formatting-code": { color: theme.orange },
     ".cm-formatting-code-block": { color: theme.orange },
     ".cm-formatting": { color: theme.fgMuted },

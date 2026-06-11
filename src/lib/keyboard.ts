@@ -86,7 +86,7 @@ export const annotateHandledKeySections: readonly KeyboardHelpSection[] = [
     title: "Other",
     items: [
       ["F2", "enter Edit mode"],
-      ["Esc", "close app panels"],
+      ["Esc", "exit Edit mode / close panels"],
       ["Alt+Space", "play / pause media / TTS"],
       ["Alt+←/→", "seek media 10s / step TTS"],
       ["Media RW/FF", "seek media / step TTS"],
@@ -379,7 +379,7 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
     normalPrintableKeyBehavior,
     Prec.high(keymap.of([
       { any: (view, event) => handlers.getEditorMode() === "normal" && handlers.handleVariantPickerKey(view, event) },
-      { key: "Escape", run: normal(() => handlers.handleEscape()) },
+      { key: "Escape", run: () => handlers.handleEscape() },
       { key: "F2", run: normal(view => { handlers.setMode("insert"); return true; }) },
       { key: "CapsLock", run: normal(() => handlers.toggleWordNavigation()) },
       { key: "F1", run: normal(() => handlers.toggleHelp()) },

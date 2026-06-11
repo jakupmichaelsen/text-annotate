@@ -104,3 +104,15 @@ test("edit mode keeps CodeMirror line movement active", async ({ page }) => {
   await page.keyboard.press("Alt+ArrowUp");
   await expect.poll(editorText).toBe("beta\nalpha\ngamma");
 });
+
+test("escape exits edit mode", async ({ page }) => {
+  await page.goto("/");
+  const modeSwitch = page.locator(".mode-switch input");
+  const editor = page.locator(".cm-content");
+
+  await page.locator(".mode-switch").click();
+  await expect(modeSwitch).toBeChecked();
+  await editor.click();
+  await page.keyboard.press("Escape");
+  await expect(modeSwitch).not.toBeChecked();
+});
