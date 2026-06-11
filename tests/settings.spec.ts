@@ -8,15 +8,15 @@ test("settings controls update values and stay text-like", async ({ page }) => {
   await expect(layoutTab).toHaveCSS("border-bottom-style", "solid");
   await expect(layoutTab).not.toHaveCSS("text-decoration-line", "underline");
 
-  const lineHeightRow = page.locator(".layout-stepper").nth(0);
-  const fontSizeRow = page.locator(".layout-stepper").nth(1);
-  const paragraphSpacingRow = page.locator(".layout-stepper").nth(2);
+  const lineHeightRow = page.locator(".settings-row", { hasText: "line height" }).first();
+  const fontSizeRow = page.locator(".settings-row", { hasText: "font size" }).first();
+  const paragraphSpacingRow = page.locator(".settings-row", { hasText: "paragraph spacing" }).first();
 
   await expect(lineHeightRow).toContainText("1.60");
   await expect(fontSizeRow).toContainText("14px");
   await expect(paragraphSpacingRow).toContainText("0.00");
 
-  const layoutButtons = page.locator(".layout-stepper-buttons button");
+  const layoutButtons = page.locator(".settings-row-controls button");
   await expect(layoutButtons.first()).not.toHaveCSS("text-decoration-line", "underline");
   await expect(layoutButtons.last()).not.toHaveCSS("text-decoration-line", "underline");
 
@@ -28,7 +28,7 @@ test("settings controls update values and stay text-like", async ({ page }) => {
   await expect(fontSizeRow).toContainText("15px");
   await expect(paragraphSpacingRow).toContainText("0.15");
 
-  const markupSelect = page.getByLabel("Markup display");
+  const markupSelect = page.getByLabel("Markup visibility");
   await expect(markupSelect).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(markupSelect).toHaveCSS("border-top-style", "none");
   await expect(markupSelect).toHaveCSS("border-bottom-style", "solid");
@@ -38,8 +38,33 @@ test("settings controls update values and stay text-like", async ({ page }) => {
   await currentHighlightSelect.selectOption("underline");
   await expect(currentHighlightSelect).toHaveValue("underline");
 
-  const columnGuideRow = page.locator(".layout-stepper").nth(4);
+  const columnGuideRow = page.locator(".settings-row", { hasText: "column guide" }).first();
   await expect(columnGuideRow).toContainText("1px");
   await columnGuideRow.locator("button").last().click();
   await expect(columnGuideRow).toContainText("2px");
+});
+
+
+test("annotate mode blocks unhandled editing keys", async ({ page }) => {
+  await page.goto("/");
+  const editor = page.locator(".cm-content");
+  await editor.click();
+
+  const before = await editor.innerText();
+
+  await page.keyboard.press("t");
+  expect(await editor.innerText()).toBe(before);
+
+  await page.keyboard.press("Backspace");
+  expect(await editor.innerText()).toBe(before);
+
+  await page.keyboard.press("Delete");
+  expect(await editor.innerText()).toBe(before);
+
+  await page.keyboard.press("Control+A");
+  await page.keyboard.press("Control+X");
+  expect(await editor.innerText()).toBe(before);
+
+  await page.keyboard.press("Control+V");
+  expect(await editor.innerText()).toBe(before);
 });

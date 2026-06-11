@@ -97,6 +97,29 @@ export function shortcutBindingMatchesEvent(event: KeyboardEvent, binding: strin
     parsed.key.toLowerCase() === shortcutKeyForEvent(event).toLowerCase();
 }
 
+function isModifierOnlyKey(event: KeyboardEvent) {
+  return event.key === "Shift" ||
+    event.key === "Control" ||
+    event.key === "Meta" ||
+    event.key === "Alt" ||
+    event.key === "AltGraph";
+}
+
+function isAnnotateModePassthrough(event: KeyboardEvent) {
+  if (isModifierOnlyKey(event)) return true;
+  if (event.altKey) return false;
+  if (!event.ctrlKey && !event.metaKey) return false;
+
+  const key = event.key.toLowerCase();
+  return key === "a" ||
+    key === "c" ||
+    key === "f" ||
+    key === "l" ||
+    key === "+" ||
+    key === "-" ||
+    key === "0";
+}
+
 export function isAppShortcutCandidate(
   event: KeyboardEvent,
   styleNumberForKey: (key: string) => number | null
@@ -264,6 +287,15 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
     }
   });
 
+  const annotateModeKeyBoundary = keymap.of([
+    {
+      any: (_view, event) => {
+        if (handlers.getEditorMode() !== "normal") return false;
+        return !isAnnotateModePassthrough(event);
+      }
+    }
+  ]);
+
   return [
     customShortcutBehavior,
     normalNavigationBehavior,
@@ -348,6 +380,7 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       { key: "MediaFastForward", run: () => { handlers.handleMediaShortcut("MediaFastForward"); return true; } },
       { key: "MediaTrackPrevious", run: () => { handlers.handleMediaShortcut("MediaTrackPrevious"); return true; } },
       { key: "MediaTrackNext", run: () => { handlers.handleMediaShortcut("MediaTrackNext"); return true; } }
-    ]))
+    ])),
+    annotateModeKeyBoundary
   ];
 }
