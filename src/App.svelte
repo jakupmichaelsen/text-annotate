@@ -2737,16 +2737,6 @@
     }));
   }
 
-  function persistStyleColor(name: string, colorName: string) {
-    const normalizedColorName = normalizeNamedStyleColor(colorName);
-    persistCustomStyles(customStyles.map(style =>
-      style.name === name
-        ? { ...style, colorName: normalizedColorName, color: namedStyleColor(normalizedColorName) }
-        : style
-    ));
-    view?.dispatch({});
-  }
-
   function handleNewStyleColorName(event: Event) {
     const colorName = normalizeNamedStyleColor((event.target as HTMLSelectElement).value);
     newStyleColorName = colorName;
@@ -5896,7 +5886,6 @@ ${body}
               </button>
             </div>
             <span class="style-remove-placeholder" aria-hidden="true"></span>
-            <span class="style-remove-placeholder" aria-hidden="true"></span>
           </div>
           {#each highlightStyles as style, index}
             <div
@@ -5971,18 +5960,6 @@ ${body}
                   </button>
                 {/if}
               </div>
-              <select
-                class="style-color-select"
-                value={style.colorName ?? style.name}
-                aria-label={`Color for ${styleDisplayTitle(style.name)}`}
-                title={`Color for ${styleDisplayTitle(style.name)}`}
-                on:click={event => event.stopPropagation()}
-                on:change={event => persistStyleColor(style.name, (event.target as HTMLSelectElement).value)}
-              >
-                {#each namedStyleColors as color}
-                  <option value={color.name}>{color.name}</option>
-                {/each}
-              </select>
               <button
                 class="style-remove-button"
                 type="button"
