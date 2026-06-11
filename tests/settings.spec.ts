@@ -34,6 +34,9 @@ test("settings controls update values and stay text-like", async ({ page }) => {
   await expect(markupSelect).toHaveCSS("border-bottom-style", "solid");
   await expect(markupSelect).not.toHaveCSS("text-decoration-line", "underline");
 
+  const themeSelect = page.getByLabel("Theme");
+  await expect(themeSelect).toHaveValue("nord");
+
   const currentHighlightSelect = page.getByLabel("Current line highlight");
   await currentHighlightSelect.selectOption("underline");
   await expect(currentHighlightSelect).toHaveValue("underline");

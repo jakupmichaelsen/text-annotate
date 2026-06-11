@@ -35,6 +35,8 @@
     getTheme,
     gruvbox,
     highlightStyles as baseHighlightStyles,
+    isThemeMode,
+    themeOptions,
     type ThemeMode,
     type ThemePalette
   } from "./lib/theme";
@@ -339,7 +341,6 @@
   let styleKeys = loadStyleKeys();
   const themeCompartment = new Compartment();
   $: activeTheme = getTheme(themeMode);
-  $: activeThemeName = themeMode === "nord" ? "Nord" : "Gruvbox";
   $: highlightStyles = currentHighlightStyles(activeTheme);
   $: layoutFontFamilyCss = fontFamilyCssForName(layoutFontFamilyName);
   $: if (settingsPersistenceReady) {
@@ -1233,10 +1234,10 @@
 
   function loadThemeMode(): ThemeMode {
     const stored = typeof localStorage === "undefined" ? null : localStorage.getItem(themeStorageKey);
-    if (stored === "gruvbox" || stored === "nord") return stored;
+    if (isThemeMode(stored)) return stored;
     const preferences = objectFromStorage(unifiedPreferencesStorageKey);
     const mode = preferences?.themeMode;
-    return mode === "gruvbox" || mode === "nord" ? mode : "nord";
+    return isThemeMode(mode) ? mode : "nord";
   }
 
   function normalizeSettingsTab(value: unknown): SettingsTab {
@@ -1570,10 +1571,6 @@
     themeMode = nextMode;
     if (typeof localStorage !== "undefined") localStorage.setItem(themeStorageKey, nextMode);
     view?.dispatch({ effects: themeCompartment.reconfigure(buildThemeExtensions(nextMode)) });
-  }
-
-  function toggleThemeMode() {
-    reconfigureTheme(themeMode === "nord" ? "gruvbox" : "nord");
   }
 
   function toggleSettings() {
@@ -5443,6 +5440,14 @@ ${body}
         <div class="settings-panel">
           <section class="settings-section">
             <label class="settings-row">
+              <span class="settings-row-label">theme</span>
+              <select class="settings-input settings-select settings-row-value" bind:value={themeMode} aria-label="Theme" on:change={() => { reconfigureTheme(themeMode); view?.focus(); }}>
+                {#each themeOptions as option}
+                  <option value={option.value}>{option.label}</option>
+                {/each}
+              </select>
+            </label>
+            <label class="settings-row">
               <span class="settings-row-label">markup visibility</span>
               <select class="settings-input settings-select settings-row-value" bind:value={annotationMode} aria-label="Markup visibility" on:change={() => { view?.dispatch({}); view?.focus(); }}>
                 <option value="clean">Clean</option>
@@ -5845,7 +5850,6 @@ ${body}
           </span>
           <span class:active={editorMode === "insert"}>Edit</span>
         </label>
-        <button class="sidebar-theme-toggle load-btn sidebar-label" type="button" on:click={toggleThemeMode} aria-label="Toggle theme">THEME: {activeThemeName}</button>
       </div>
 
       <div class="sidebar-section">

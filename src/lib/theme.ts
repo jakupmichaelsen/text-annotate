@@ -2,8 +2,14 @@ import type { Extension } from "@codemirror/state";
 import { HighlightStyle } from "@codemirror/language";
 import { EditorView } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
+import { basicDark } from "cm6-theme-basic-dark";
+import { basicLight } from "cm6-theme-basic-light";
+import { gruvboxDark } from "cm6-theme-gruvbox-dark";
+import { gruvboxLight } from "cm6-theme-gruvbox-light";
+import { materialDark } from "cm6-theme-material-dark";
 import { nord as nordCodeMirrorTheme } from "cm6-theme-nord";
-import { gruvboxDark as gruvboxDarkCodeMirrorTheme } from "cm6-theme-gruvbox-dark";
+import { solarizedDark } from "cm6-theme-solarized-dark";
+import { solarizedLight } from "cm6-theme-solarized-light";
 
 export const highlightStyles = [
   { name: "red", color: "#fb4934" },
@@ -21,7 +27,22 @@ export const gruvbox = {
   cursor: "#fe8019", comment: "#928374"
 };
 
-export type ThemeMode = "gruvbox" | "nord";
+export const themeOptions = [
+  { value: "basic-light", label: "Basic Light" },
+  { value: "basic-dark", label: "Basic Dark" },
+  { value: "gruvbox-light", label: "Gruvbox Light" },
+  { value: "gruvbox-dark", label: "Gruvbox Dark" },
+  { value: "material-dark", label: "Material Dark" },
+  { value: "nord", label: "Nord" },
+  { value: "solarized-light", label: "Solarized Light" },
+  { value: "solarized-dark", label: "Solarized Dark" }
+] as const;
+
+export type ThemeMode = typeof themeOptions[number]["value"];
+
+export function isThemeMode(value: unknown): value is ThemeMode {
+  return typeof value === "string" && themeOptions.some(option => option.value === value);
+}
 
 export type ThemePalette = typeof gruvbox & {
   dark: boolean;
@@ -33,7 +54,20 @@ export type ThemePalette = typeof gruvbox & {
 };
 
 export const themes: Record<ThemeMode, ThemePalette> = {
-  gruvbox: {
+  "basic-light": {
+    dark: false,
+    bg: "#eceff4", bgSoft: "#e5e9f0", bgHard: "#d8dee9",
+    bgAlt: "#e5e9f0", border: "#cfd7e3", fg: "#2e3440",
+    fgMuted: "#4c566a", yellow: "#ebcb8b", green: "#a3be8c",
+    blue: "#81a1c1", aqua: "#8fbcbb", orange: "#b65f4a",
+    red: "#bf616a", purple: "#b48ead", selection: "#b8c2d4",
+    activeLine: "transparent", gutterText: "#5e6472",
+    cursor: "#5e81ac", comment: "#4c566a",
+    searchMatch: "#d8dee9", searchMatchSelected: "#cfd7e3",
+    blockquoteBg: "#e5e9f0", blockquoteFg: "#5e81ac",
+    plainCodeBg: "#e5e9f0"
+  },
+  "basic-dark": {
     ...gruvbox,
     dark: true,
     activeLine: "transparent",
@@ -42,6 +76,42 @@ export const themes: Record<ThemeMode, ThemePalette> = {
     blockquoteBg: "#4a3520",
     blockquoteFg: "#fabd2f",
     plainCodeBg: "#32302f"
+  },
+  "gruvbox-light": {
+    dark: false,
+    bg: "#fbf1c7", bgSoft: "#f2e5bc", bgHard: "#ebdbb2",
+    bgAlt: "#f2e5bc", border: "#d5c4a1", fg: "#3c3836",
+    fgMuted: "#7c6f64", yellow: "#b57614", green: "#79740e",
+    blue: "#076678", aqua: "#427b58", orange: "#af3a03",
+    red: "#9d0006", purple: "#8f3f71", selection: "#d5c4a1",
+    activeLine: "transparent", gutterText: "#7c6f64",
+    cursor: "#af3a03", comment: "#928374",
+    searchMatch: "#f2e5bc", searchMatchSelected: "#ebdbb2",
+    blockquoteBg: "#f2e5bc", blockquoteFg: "#076678",
+    plainCodeBg: "#f2e5bc"
+  },
+  "gruvbox-dark": {
+    ...gruvbox,
+    dark: true,
+    activeLine: "transparent",
+    searchMatch: "#665c54",
+    searchMatchSelected: "#7c6f64",
+    blockquoteBg: "#4a3520",
+    blockquoteFg: "#fabd2f",
+    plainCodeBg: "#32302f"
+  },
+  "material-dark": {
+    dark: true,
+    bg: "#263238", bgSoft: "#2f3b41", bgHard: "#1e272b",
+    bgAlt: "#37474f", border: "#455a64", fg: "#eeffff",
+    fgMuted: "#90a4ae", yellow: "#ffcb6b", green: "#c3e88d",
+    blue: "#82aaff", aqua: "#89ddff", orange: "#f78c6c",
+    red: "#ff5370", purple: "#c792ea", selection: "#33444e",
+    activeLine: "transparent", gutterText: "#607d8b",
+    cursor: "#82aaff", comment: "#546e7a",
+    searchMatch: "#37474f", searchMatchSelected: "#455a64",
+    blockquoteBg: "#2f3b41", blockquoteFg: "#82aaff",
+    plainCodeBg: "#2f3b41"
   },
   nord: {
     dark: true,
@@ -55,6 +125,32 @@ export const themes: Record<ThemeMode, ThemePalette> = {
     searchMatch: "#3b4252", searchMatchSelected: "#4c566a",
     blockquoteBg: "#3b4252", blockquoteFg: "#88c0d0",
     plainCodeBg: "#3b4252"
+  },
+  "solarized-light": {
+    dark: false,
+    bg: "#fdf6e3", bgSoft: "#eee8d5", bgHard: "#e7e0c7",
+    bgAlt: "#eee8d5", border: "#d8c9a8", fg: "#657b83",
+    fgMuted: "#93a1a1", yellow: "#b58900", green: "#859900",
+    blue: "#268bd2", aqua: "#2aa198", orange: "#cb4b16",
+    red: "#dc322f", purple: "#6c71c4", selection: "#d6cfc0",
+    activeLine: "transparent", gutterText: "#93a1a1",
+    cursor: "#586e75", comment: "#93a1a1",
+    searchMatch: "#eee8d5", searchMatchSelected: "#e7e0c7",
+    blockquoteBg: "#eee8d5", blockquoteFg: "#268bd2",
+    plainCodeBg: "#eee8d5"
+  },
+  "solarized-dark": {
+    dark: true,
+    bg: "#002b36", bgSoft: "#073642", bgHard: "#001f27",
+    bgAlt: "#0b3a46", border: "#586e75", fg: "#eee8d5",
+    fgMuted: "#93a1a1", yellow: "#b58900", green: "#859900",
+    blue: "#268bd2", aqua: "#2aa198", orange: "#cb4b16",
+    red: "#dc322f", purple: "#6c71c4", selection: "#586e75",
+    activeLine: "transparent", gutterText: "#586e75",
+    cursor: "#93a1a1", comment: "#586e75",
+    searchMatch: "#073642", searchMatchSelected: "#0b3a46",
+    blockquoteBg: "#073642", blockquoteFg: "#2aa198",
+    plainCodeBg: "#073642"
   }
 };
 
@@ -102,7 +198,7 @@ export function buildHighlightStyle(theme: ThemePalette) {
   ]);
 }
 
-export const gruvboxHighlight = buildHighlightStyle(themes.gruvbox);
+export const gruvboxHighlight = buildHighlightStyle(themes["gruvbox-dark"]);
 
 export function buildEditorTheme(theme: ThemePalette): Extension {
   return EditorView.theme({
@@ -133,12 +229,27 @@ export function buildEditorTheme(theme: ThemePalette): Extension {
 }
 
 export function buildCodeMirrorTheme(mode: ThemeMode): Extension[] {
+  const theme = mode === "basic-light" || mode === "gruvbox-light" || mode === "solarized-light"
+    ? mode === "basic-light"
+      ? basicLight
+      : mode === "gruvbox-light"
+        ? gruvboxLight
+        : solarizedLight
+    : mode === "basic-dark"
+      ? basicDark
+      : mode === "gruvbox-dark"
+        ? gruvboxDark
+        : mode === "material-dark"
+          ? materialDark
+          : mode === "nord"
+            ? nordCodeMirrorTheme
+            : solarizedDark;
   return [
-    ...(mode === "nord" ? nordCodeMirrorTheme : gruvboxDarkCodeMirrorTheme),
+    theme,
     buildEditorTheme(themes[mode])
   ];
 }
 
 export function buildGruvboxTheme(): Extension {
-  return buildEditorTheme(themes.gruvbox);
+  return buildEditorTheme(themes["gruvbox-dark"]);
 }
