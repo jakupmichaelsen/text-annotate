@@ -106,6 +106,7 @@ export function isAppShortcutCandidate(
   if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key === ",") return true;
   if (event.metaKey) return false;
   if (isModeShortcut(event) || isAudioShortcut(event) || isAudioRateShortcut(event)) return true;
+  if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key === "CapsLock") return true;
   if (event.ctrlKey && !event.altKey && (event.key === "z" || event.key === "y" || event.key === "Z")) return true;
   if (event.ctrlKey && !event.altKey && event.key === "Tab") return true;
   if (event.altKey) return false;
@@ -131,9 +132,10 @@ export type EditorMode = "normal" | "insert";
 
 export type EditorKeymapHandlers = {
   getEditorMode: () => EditorMode;
-  useArrowWordNavigation: () => boolean;
-  useWasdWordNavigation: () => boolean;
-  useHjklWordNavigation: () => boolean;
+  useWordNavigation: () => boolean;
+  useWasdNavigation: () => boolean;
+  useHjklNavigation: () => boolean;
+  toggleWordNavigation: () => boolean;
   getCustomShortcut: (action: CustomShortcutAction) => string;
   handleCustomShortcut: (action: CustomShortcutAction, view: EditorViewType) => boolean;
   handleVariantPickerKey: (view: EditorViewType, event: KeyboardEvent) => boolean;
@@ -207,25 +209,19 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
         key === "h" || key === "l" || key === "q" || key === "e" ||
         key === "a" || key === "d"
       ) {
-        const useWasdNavigation = key === "a" || key === "d";
-        const useHjklNavigation = key === "h" || key === "l" || key === "q" || key === "e";
-        if (useWasdNavigation && !handlers.useWasdWordNavigation()) return false;
-        if (useHjklNavigation && !handlers.useHjklWordNavigation()) return false;
+        const isWasdNavigation = key === "a" || key === "d";
+        const isHjklNavigation = key === "h" || key === "l" || key === "q" || key === "e";
+        if (isWasdNavigation && !handlers.useWasdNavigation()) return false;
+        if (isHjklNavigation && !handlers.useHjklNavigation()) return false;
         if (visualLineSelection) {
           event.preventDefault();
           event.stopImmediatePropagation();
           return true;
         }
         const forward = key === "arrowright" || key === "l" || key === "e" || key === "d";
-        const useWordNavigation =
-          key === "arrowleft" || key === "arrowright"
-            ? handlers.useArrowWordNavigation()
-            : key === "a" || key === "d"
-              ? handlers.useWasdWordNavigation()
-              : handlers.useHjklWordNavigation();
         event.preventDefault();
         event.stopImmediatePropagation();
-        return moveHorizontal(view, forward, extend, useWordNavigation);
+        return moveHorizontal(view, forward, extend, handlers.useWordNavigation());
       }
 
       let direction: "up" | "down" | null = null;
@@ -234,9 +230,9 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       else return false;
 
       if (key === "j" || key === "k") {
-        if (!handlers.useHjklWordNavigation()) return false;
+        if (!handlers.useHjklNavigation()) return false;
       } else if (key === "w" || key === "s") {
-        if (!handlers.useWasdWordNavigation()) return false;
+        if (!handlers.useWasdNavigation()) return false;
       }
 
       event.preventDefault();
@@ -280,6 +276,7 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       { any: (view, event) => handlers.getEditorMode() === "normal" && handlers.handleVariantPickerKey(view, event) },
       { key: "Escape", run: () => handlers.handleEscape() },
       { key: "F2", run: view => { handlers.setMode(handlers.getEditorMode() === "insert" ? "normal" : "insert"); return true; } },
+      { key: "CapsLock", run: normal(() => handlers.toggleWordNavigation()) },
       { key: "F1", run: () => handlers.toggleHelp() },
       { key: "Mod-,", run: () => handlers.toggleSettings() },
       { key: "Ctrl-Tab", run: view => handlers.scrollCurrentLineIntoView(view) },

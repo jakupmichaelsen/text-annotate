@@ -142,9 +142,9 @@
   let currentLineHighlightOpacity = initialLayoutSettings.currentLineHighlightOpacity ?? 0.34;
   let columnGuideThickness = initialLayoutSettings.columnGuideThickness ?? 1;
   let columnStride = initialLayoutSettings.columnStride ?? 40;
-  let arrowWordNavigation = initialLayoutSettings.arrowWordNavigation ?? initialLayoutSettings.wordNavigation ?? false;
-  let wasdWordNavigation = initialLayoutSettings.wasdWordNavigation ?? initialLayoutSettings.wordNavigation ?? false;
-  let hjklWordNavigation = initialLayoutSettings.hjklWordNavigation ?? initialLayoutSettings.wordNavigation ?? false;
+  let wordNavigation = initialLayoutSettings.wordNavigation ?? initialLayoutSettings.arrowWordNavigation ?? false;
+  let wasdNavigation = initialLayoutSettings.wasdNavigation ?? initialLayoutSettings.wasdWordNavigation ?? false;
+  let hjklNavigation = initialLayoutSettings.hjklNavigation ?? initialLayoutSettings.hjklWordNavigation ?? false;
   let layoutFontFamilyName = initialLayoutSettings.fontFamilyName ?? defaultFontFamilyName;
   let layoutFontFavorites = initialLayoutSettings.fontFavorites ?? defaultFontFavorites;
   let randomizeFontOnLoad = initialLayoutSettings.randomizeFontOnLoad ?? false;
@@ -369,9 +369,9 @@
     currentLineHighlightOpacity;
     columnGuideThickness;
     columnStride;
-    arrowWordNavigation;
-    wasdWordNavigation;
-    hjklWordNavigation;
+    wordNavigation;
+    wasdNavigation;
+    hjklNavigation;
     customShortcuts;
     blockquoteAlign;
     blockquoteBgWidth;
@@ -1309,6 +1309,9 @@
     currentLineHighlightOpacity: number;
     columnGuideThickness: number;
     columnStride: number;
+    wordNavigation: boolean;
+    wasdNavigation: boolean;
+    hjklNavigation: boolean;
     arrowWordNavigation: boolean;
     wasdWordNavigation: boolean;
     hjklWordNavigation: boolean;
@@ -1318,7 +1321,6 @@
     blockquoteBgWidth: number;
     importLineMode: ImportLineMode;
     divideImportSentences: boolean;
-    wordNavigation?: boolean;
   };
 
   function normalizeLayoutFontFamilyName(value: string) {
@@ -1449,23 +1451,23 @@
       currentLineHighlightOpacity: Math.round(numberOr("currentLineHighlightOpacity", 0.34, 0.08, 0.7) * 100) / 100,
       columnGuideThickness: Math.round(numberOr("columnGuideThickness", 1, 1, 6)),
       columnStride: Math.round(numberOr("columnStride", 40, 4, 120)),
-      arrowWordNavigation:
-        typeof settings.arrowWordNavigation === "boolean"
-          ? settings.arrowWordNavigation
-          : typeof settings.wordNavigation === "boolean"
-            ? settings.wordNavigation
+      wordNavigation:
+        typeof settings.wordNavigation === "boolean"
+          ? settings.wordNavigation
+          : typeof settings.arrowWordNavigation === "boolean"
+            ? settings.arrowWordNavigation
             : undefined,
-      wasdWordNavigation:
-        typeof settings.wasdWordNavigation === "boolean"
-          ? settings.wasdWordNavigation
-          : typeof settings.wordNavigation === "boolean"
-            ? settings.wordNavigation
+      wasdNavigation:
+        typeof settings.wasdNavigation === "boolean"
+          ? settings.wasdNavigation
+          : typeof settings.wasdWordNavigation === "boolean"
+            ? settings.wasdWordNavigation
             : undefined,
-      hjklWordNavigation:
-        typeof settings.hjklWordNavigation === "boolean"
-          ? settings.hjklWordNavigation
-          : typeof settings.wordNavigation === "boolean"
-            ? settings.wordNavigation
+      hjklNavigation:
+        typeof settings.hjklNavigation === "boolean"
+          ? settings.hjklNavigation
+          : typeof settings.hjklWordNavigation === "boolean"
+            ? settings.hjklWordNavigation
             : undefined,
       fontFavorites: normalizeFontFavorites(settings.fontFavorites),
       customShortcuts: normalizeCustomShortcuts(settings.customShortcuts),
@@ -1497,9 +1499,9 @@
       currentLineHighlightOpacity,
       columnGuideThickness,
       columnStride,
-      arrowWordNavigation,
-      wasdWordNavigation,
-      hjklWordNavigation,
+      wordNavigation,
+      wasdNavigation,
+      hjklNavigation,
       fontFavorites: layoutFontFavorites,
       customShortcuts,
       blockquoteAlign,
@@ -1539,9 +1541,9 @@
     currentLineHighlightOpacity = settings.currentLineHighlightOpacity ?? currentLineHighlightOpacity;
     columnGuideThickness = settings.columnGuideThickness ?? columnGuideThickness;
     columnStride = settings.columnStride ?? columnStride;
-    arrowWordNavigation = settings.arrowWordNavigation ?? arrowWordNavigation;
-    wasdWordNavigation = settings.wasdWordNavigation ?? wasdWordNavigation;
-    hjklWordNavigation = settings.hjklWordNavigation ?? hjklWordNavigation;
+    wordNavigation = settings.wordNavigation ?? wordNavigation;
+    wasdNavigation = settings.wasdNavigation ?? wasdNavigation;
+    hjklNavigation = settings.hjklNavigation ?? hjklNavigation;
     layoutFontFavorites = settings.fontFavorites ?? layoutFontFavorites;
     customShortcuts = settings.customShortcuts ?? customShortcuts;
     blockquoteAlign = settings.blockquoteAlign ?? blockquoteAlign;
@@ -5274,9 +5276,14 @@ ${body}
       highlightActiveLineGutter(),
       buildEditorKeymap({
         getEditorMode: () => editorMode,
-        useArrowWordNavigation: () => arrowWordNavigation,
-        useWasdWordNavigation: () => wasdWordNavigation,
-        useHjklWordNavigation: () => hjklWordNavigation,
+        useWordNavigation: () => wordNavigation,
+        useWasdNavigation: () => wasdNavigation,
+        useHjklNavigation: () => hjklNavigation,
+        toggleWordNavigation: () => {
+          wordNavigation = !wordNavigation;
+          view?.dispatch({});
+          return true;
+        },
         getCustomShortcut: action => customShortcuts[action] ?? defaultCustomShortcutBindings()[action],
         handleCustomShortcut,
         handleVariantPickerKey,
@@ -5681,19 +5688,19 @@ ${body}
               </div>
             </div>
             <label class="settings-toggle-row">
-              <span class="settings-control-icon" aria-hidden="true">↔</span>
-              <span>Arrow keys word navigation</span>
-              <input type="checkbox" checked={arrowWordNavigation} on:change={event => arrowWordNavigation = (event.target as HTMLInputElement).checked} />
+              <span class="settings-control-icon" aria-hidden="true">⇪</span>
+              <span>Word navigation (CapsLock)</span>
+              <input type="checkbox" checked={wordNavigation} on:change={event => wordNavigation = (event.target as HTMLInputElement).checked} />
             </label>
             <label class="settings-toggle-row">
               <span class="settings-control-icon" aria-hidden="true">W</span>
-              <span>WASD word navigation</span>
-              <input type="checkbox" checked={wasdWordNavigation} on:change={event => wasdWordNavigation = (event.target as HTMLInputElement).checked} />
+              <span>WASD navigation keys</span>
+              <input type="checkbox" checked={wasdNavigation} on:change={event => wasdNavigation = (event.target as HTMLInputElement).checked} />
             </label>
             <label class="settings-toggle-row">
               <span class="settings-control-icon" aria-hidden="true">H</span>
-              <span>HJKL word navigation</span>
-              <input type="checkbox" checked={hjklWordNavigation} on:change={event => hjklWordNavigation = (event.target as HTMLInputElement).checked} />
+              <span>HJKL navigation keys</span>
+              <input type="checkbox" checked={hjklNavigation} on:change={event => hjklNavigation = (event.target as HTMLInputElement).checked} />
             </label>
             <div class="shortcut-grid" aria-label="Custom hotkeys">
               {#each customShortcutDefinitions as shortcut}

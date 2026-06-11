@@ -2,33 +2,16 @@ export const helpSections = [
   {
     title: "Navigation",
     items: [
-      ["h j k l", "left / down / up / right"],
       ["← ↓ ↑ →", "left / down / up / right"],
-      ["q e", "left / right"],
-      ["w s", "line up / down"],
-      ["a d", "word left / right"],
+      ["CapsLock", "toggle word navigation"],
       ["Tab / Shift+Tab", "column stride right / left"],
-      ["Ctrl+h/l", "word left / right"],
-      ["Ctrl+k/j", "paragraph start / end"],
-      ["Ctrl+w/s", "paragraph start / end"],
-      ["Ctrl+↑/↓", "paragraph start / end"],
-      ["Ctrl+d", "jump 5 words right"],
-      ["Ctrl+Tab", "scroll current line into view"]
+      ["WASD", "optional navigation keys"],
+      ["HJKL", "optional navigation keys"]
     ]
   },
   {
     title: "Selection",
     items: [
-      ["⇧hjkl", "select by char / line"],
-      ["⇧q ⇧e", "select left / right"],
-      ["⇧Arrows", "select by char / line"],
-      ["⇧w ⇧s", "select by line"],
-      ["⇧a ⇧d", "select by word"],
-      ["Ctrl+⇧h/l", "select by word"],
-      ["Ctrl+⇧k/j", "select to paragraph start / end"],
-      ["Ctrl+⇧w/s", "select to paragraph start / end"],
-      ["Ctrl+⇧↑/↓", "select to paragraph start / end"],
-      ["Ctrl+Shift+a/d", "select 5 words left / right"],
       ["v", "toggle sticky selection"],
       ["V", "visual-line selection"]
     ]
