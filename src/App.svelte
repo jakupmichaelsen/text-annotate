@@ -5244,6 +5244,7 @@ ${body}
         }
       }),
       drawSelection(),
+      EditorState.allowMultipleSelections.of(true),
       history(),
       indentOnInput(),
       bracketMatching(),

@@ -68,3 +68,39 @@ test("annotate mode blocks unhandled editing keys", async ({ page }) => {
   await page.keyboard.press("Control+V");
   expect(await editor.innerText()).toBe(before);
 });
+
+test("edit mode keeps CodeMirror multiple-selection commands active", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.clear();
+    localStorage.setItem("cm6-buffer", "alpha\nbeta\nalpha");
+  });
+  await page.goto("/");
+
+  const editor = page.locator(".cm-content");
+  const editorText = () => editor.evaluate(el => (el as HTMLElement).innerText);
+  await page.locator(".mode-switch").click();
+  await editor.click();
+
+  await page.keyboard.press("Control+Home");
+  await page.keyboard.press("Control+D");
+  await page.keyboard.press("Control+D");
+  await page.keyboard.type("omega");
+  await expect.poll(editorText).toBe("omega\nbeta\nomega");
+});
+
+test("edit mode keeps CodeMirror line movement active", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.clear();
+    localStorage.setItem("cm6-buffer", "alpha\nbeta\ngamma");
+  });
+  await page.goto("/");
+
+  const editor = page.locator(".cm-content");
+  const editorText = () => editor.evaluate(el => (el as HTMLElement).innerText);
+  await page.locator(".mode-switch").click();
+  await editor.click();
+  await page.keyboard.press("Control+Home");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Alt+ArrowUp");
+  await expect.poll(editorText).toBe("beta\nalpha\ngamma");
+});
