@@ -214,6 +214,9 @@ export function buildEditorTheme(theme: ThemePalette): Extension {
       opacity: "0 !important",
       visibility: "hidden !important"
     },
+    ".cm-selectionBackground": { background: `${theme.selection} !important` },
+    "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground": { background: `${theme.selection} !important` },
+    ".cm-content ::selection": { backgroundColor: `${theme.selection} !important` },
     ".cm-formatting-code": { color: theme.orange },
     ".cm-formatting-code-block": { color: theme.orange },
     ".cm-formatting": { color: theme.fgMuted },
