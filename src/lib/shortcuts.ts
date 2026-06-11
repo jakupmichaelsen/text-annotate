@@ -4,7 +4,7 @@ export const helpSections = [
     items: [
       ["← ↓ ↑ →", "left / down / up / right"],
       ["CapsLock", "toggle word navigation"],
-      ["Tab / Shift+Tab", "column stride right / left"],
+      ["c / C", "column stride right / left"],
       ["WASD", "optional navigation keys"],
       ["HJKL", "optional navigation keys"]
     ]
@@ -21,10 +21,9 @@ export const helpSections = [
     items: [
       ["Space", "wrap word / selection"],
       ["n / N", "previous / next annotation"],
-      ["Style keys", "select / recolor style"],
+      ["1 / 2 / 3", "select styles"],
       ["0", "plain annotation"],
-      ["z / c", "style prev / next"],
-      ["f", "variant next"],
+      ["Tab / Shift+Tab", "variant next / previous"],
       ["<", "new blockquote below"],
       [">", "split rest of line to blockquote"],
       ["Enter", "edit note / cue playback"],

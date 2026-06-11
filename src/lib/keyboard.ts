@@ -1,15 +1,13 @@
 import { Prec, type Extension } from "@codemirror/state";
 import { EditorView, keymap, type EditorView as EditorViewType } from "@codemirror/view";
 
-export const reservedStyleKeys = new Set(["h", "j", "k", "l", "w", "a", "s", "d", "q", "e", "r", "f", "n", "u", "v", "x", "z", "c", "?", " "]);
+export const reservedStyleKeys = new Set(["h", "j", "k", "l", "w", "a", "s", "d", "q", "e", "r", "n", "u", "v", "x", "c", "?", " "]);
 
 export const customShortcutActions = [
   "stridePrevious",
   "strideNext",
   "annotationPrevious",
   "annotationNext",
-  "stylePrevious",
-  "styleNext",
   "variantPrevious",
   "variantNext"
 ] as const;
@@ -125,7 +123,7 @@ export function isAppShortcutCandidate(
     event.key === "ArrowRight" ||
     event.key === "ArrowUp" ||
     event.key === "ArrowDown" ||
-    "hjklwasdcqeHJKLWASDCQEfrxvznNuU".includes(event.key);
+    "hjklwasdcqeHJKLWASDCQErxvnNuU".includes(event.key);
 }
 
 export type EditorMode = "normal" | "insert";
@@ -174,8 +172,6 @@ export type EditorKeymapHandlers = {
   toggleMediaPlayback: () => void;
   enterBlockquoteEditMode: (view: EditorViewType) => boolean;
   splitLineEndToBlockquote: (view: EditorViewType) => boolean;
-  cycleAnnotationColor: (view: EditorViewType, delta: 1 | -1) => boolean;
-  cycleStyle: (delta: 1 | -1) => void;
   undo: (view: EditorViewType) => boolean;
   redo: (view: EditorViewType) => boolean;
   handleMediaShortcut: (key: string) => void;
@@ -302,8 +298,6 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       { key: "Ctrl-w", run: normal(view => handlers.navigation.paragraphBoundary(view, "start")) },
       { key: "Ctrl-s", run: normal(view => handlers.navigation.paragraphBoundary(view, "end")) },
       { key: "Ctrl-d", run: normal(view => handlers.navigation.moveByWordCount(view, true, 5)) },
-      { key: "Tab", run: normal(view => handlers.moveCursorByColumnStride(view, 1)) },
-      { key: "Shift-Tab", run: normal(view => handlers.moveCursorByColumnStride(view, -1)) },
       { key: "Shift-Ctrl-h", run: normal(view => handlers.navigation.moveByWordCount(view, false, 1, true)) },
       { key: "Shift-Ctrl-j", run: normal(view => handlers.navigation.paragraphBoundary(view, "end", true)) },
       { key: "Shift-Ctrl-k", run: normal(view => handlers.navigation.paragraphBoundary(view, "start", true)) },

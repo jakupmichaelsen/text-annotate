@@ -114,14 +114,12 @@
   const defaultFontFamilyName = "Calling Code";
   const defaultFontFavorites: string[] = [];
   const customShortcutDefinitions: Array<{ action: CustomShortcutAction; label: string; icon: string; defaultValue: string }> = [
-    { action: "stridePrevious", label: "Stride previous", icon: "←", defaultValue: "Shift+Tab" },
-    { action: "strideNext", label: "Stride next", icon: "→", defaultValue: "Tab" },
+    { action: "stridePrevious", label: "Stride previous", icon: "C", defaultValue: "Shift+c" },
+    { action: "strideNext", label: "Stride next", icon: "c", defaultValue: "c" },
     { action: "annotationPrevious", label: "Annotation previous", icon: "n", defaultValue: "n" },
     { action: "annotationNext", label: "Annotation next", icon: "N", defaultValue: "N" },
-    { action: "stylePrevious", label: "Style previous", icon: "z", defaultValue: "z" },
-    { action: "styleNext", label: "Style next", icon: "c", defaultValue: "c" },
-    { action: "variantPrevious", label: "Variation previous", icon: "F", defaultValue: "Shift+F" },
-    { action: "variantNext", label: "Variation next", icon: "f", defaultValue: "f" }
+    { action: "variantPrevious", label: "Variant previous", icon: "⇧⇥", defaultValue: "Shift+Tab" },
+    { action: "variantNext", label: "Variant next", icon: "⇥", defaultValue: "Tab" }
   ];
 
   let editorEl: HTMLDivElement;
@@ -2365,14 +2363,6 @@
     if (action === "strideNext") return moveCursorByColumnStride(v, 1);
     if (action === "annotationPrevious") return jumpToAdjacentAnnotation(v, -1);
     if (action === "annotationNext") return jumpToAdjacentAnnotation(v, 1);
-    if (action === "stylePrevious") {
-      if (!cycleAnnotationColor(v, -1)) cycleStyle(-1);
-      return true;
-    }
-    if (action === "styleNext") {
-      if (!cycleAnnotationColor(v, +1)) cycleStyle(+1);
-      return true;
-    }
     if (action === "variantPrevious") return cycleAnnotationVariant(v, -1);
     if (action === "variantNext") return cycleAnnotationVariant(v, +1);
     return false;
@@ -2421,21 +2411,6 @@
 
   // Trigger CM6 decoration rebuild when annotationMode changes
   $: annotationMode, view && view.dispatch({});
-
-  function cycleStyle(delta: number) {
-    currentStyle = cycleStyleNumber(currentStyle || 1, delta, false);
-  }
-
-  function cycleStyleNumber(style: number, delta: number, includePlain = true) {
-    if (includePlain) {
-      const styleCount = highlightStyles.length + 1;
-      return ((style + delta) + styleCount) % styleCount;
-    }
-
-    const styleCount = highlightStyles.length;
-    const colorStyle = Math.max(1, style);
-    return (((colorStyle - 1 + delta) + styleCount) % styleCount) + 1;
-  }
 
   function styleName(style: number) {
     return style === 0 ? "" : highlightStyles[style - 1]?.name ?? "";
@@ -4723,26 +4698,6 @@ ${body}
     return true;
   }
 
-  function cycleAnnotationColor(v: EditorView, delta: number) {
-    const cursor = v.state.selection.main.head;
-    const docText = v.state.doc.toString();
-    annotationPattern.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = annotationPattern.exec(docText)) !== null) {
-      const spanStart = m.index, spanEnd = spanStart + m[0].length;
-      if (cursor >= spanStart && cursor <= spanEnd) {
-        const { style: oldStyle, variant } = annotationStyleParts(m[2]);
-        const newStyle = cycleStyleNumber(styleNumberForName(oldStyle), delta, false);
-        const newName = styleName(newStyle);
-        const updated = replaceAnnotationStylePrefix(m[0], annotationStyleToken(newName, variant));
-        currentStyle = newStyle;
-        v.dispatch({ changes: { from: spanStart, to: spanEnd, insert: updated } });
-        return true;
-      }
-    }
-    return false;
-  }
-
   function setAnnotationColorOrStyle(v: EditorView, style: number) {
     const cursor = v.state.selection.main.head;
     const docText = v.state.doc.toString();
@@ -5318,8 +5273,6 @@ ${body}
         toggleMediaPlayback,
         enterBlockquoteEditMode,
         splitLineEndToBlockquote,
-        cycleAnnotationColor,
-        cycleStyle,
         undo,
         redo,
         handleMediaShortcut,
@@ -5880,7 +5833,7 @@ ${body}
 
       <div class="sidebar-section">
         <div class="sidebar-label">Annotation styles</div>
-        <div class="sidebar-hint">Tab / Shift+Tab: stride</div>
+        <div class="sidebar-hint">1 / 2 / 3: styles, Tab / Shift+Tab: variants</div>
         <div class="style-list sidebar-style-list">
           <div
             class="style-row style-row-plain"
