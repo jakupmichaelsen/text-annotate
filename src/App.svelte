@@ -17,8 +17,7 @@
   import { searchKeymap } from "@codemirror/search";
   import { RangeSetBuilder } from "@codemirror/state";
   import {
-    indentOnInput, bracketMatching,
-    syntaxHighlighting
+    indentOnInput, bracketMatching
   } from "@codemirror/language";
   import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
   import JSZip from "jszip";
@@ -31,8 +30,7 @@
   } from "./lib/annotations";
   import { createNavigationCommands } from "./lib/navigation";
   import {
-    buildEditorTheme,
-    buildHighlightStyle,
+    buildCodeMirrorTheme,
     contrastColor,
     getTheme,
     gruvbox,
@@ -1561,18 +1559,17 @@
     themeMode = loadThemeMode();
   }
 
-  function buildThemeExtensions(theme: ThemePalette): Extension[] {
+  function buildThemeExtensions(mode: ThemeMode): Extension[] {
     return [
-      syntaxHighlighting(buildHighlightStyle(theme)),
-      buildHighlightDecorator(theme),
-      buildEditorTheme(theme)
+      ...buildCodeMirrorTheme(mode),
+      buildHighlightDecorator(getTheme(mode))
     ];
   }
 
   function reconfigureTheme(nextMode: ThemeMode) {
     themeMode = nextMode;
     if (typeof localStorage !== "undefined") localStorage.setItem(themeStorageKey, nextMode);
-    view?.dispatch({ effects: themeCompartment.reconfigure(buildThemeExtensions(getTheme(nextMode))) });
+    view?.dispatch({ effects: themeCompartment.reconfigure(buildThemeExtensions(nextMode)) });
   }
 
   function toggleThemeMode() {
@@ -5312,7 +5309,7 @@ ${body}
         ".cm-tooltip": { background: "transparent", border: "none" },
         ".cm-annotation-bubble": { display: "block" }
       }),
-      themeCompartment.of(buildThemeExtensions(activeTheme))
+      themeCompartment.of(buildThemeExtensions(themeMode))
     ];
   }
 

@@ -2,6 +2,8 @@ import type { Extension } from "@codemirror/state";
 import { HighlightStyle } from "@codemirror/language";
 import { EditorView } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
+import { nord as nordCodeMirrorTheme } from "cm6-theme-nord";
+import { gruvboxDark as gruvboxDarkCodeMirrorTheme } from "cm6-theme-gruvbox-dark";
 
 export const highlightStyles = [
   { name: "red", color: "#fb4934" },
@@ -42,17 +44,17 @@ export const themes: Record<ThemeMode, ThemePalette> = {
     plainCodeBg: "#32302f"
   },
   nord: {
-    dark: false,
-    bg: "#eceff4", bgSoft: "#e5e9f0", bgHard: "#d8dee9",
-    bgAlt: "#e5e9f0", border: "#cfd7e3", fg: "#2e3440",
-    fgMuted: "#4c566a", yellow: "#ebcb8b", green: "#a3be8c",
-    blue: "#81a1c1", aqua: "#8fbcbb", orange: "#b65f4a",
-    red: "#bf616a", purple: "#b48ead", selection: "#b8c2d4",
-    activeLine: "transparent", gutterText: "#5e6472",
-    cursor: "#5e81ac", comment: "#4c566a",
-    searchMatch: "#d8dee9", searchMatchSelected: "#cfd7e3",
-    blockquoteBg: "#e5e9f0", blockquoteFg: "#5e81ac",
-    plainCodeBg: "#e5e9f0"
+    dark: true,
+    bg: "#2e3440", bgSoft: "#3b4252", bgHard: "#252a33",
+    bgAlt: "#434c5e", border: "#4c566a", fg: "#d8dee9",
+    fgMuted: "#81a1c1", yellow: "#ebcb8b", green: "#a3be8c",
+    blue: "#5e81ac", aqua: "#8fbcbb", orange: "#d08770",
+    red: "#bf616a", purple: "#b48ead", selection: "#4c566a",
+    activeLine: "transparent", gutterText: "#4c566a",
+    cursor: "#d8dee9", comment: "#616e88",
+    searchMatch: "#3b4252", searchMatchSelected: "#4c566a",
+    blockquoteBg: "#3b4252", blockquoteFg: "#88c0d0",
+    plainCodeBg: "#3b4252"
   }
 };
 
@@ -138,6 +140,13 @@ export function buildEditorTheme(theme: ThemePalette): Extension {
       color: theme.blockquoteFg
     }
   }, { dark: theme.dark });
+}
+
+export function buildCodeMirrorTheme(mode: ThemeMode): Extension[] {
+  return [
+    ...(mode === "nord" ? nordCodeMirrorTheme : gruvboxDarkCodeMirrorTheme),
+    buildEditorTheme(themes[mode])
+  ];
 }
 
 export function buildGruvboxTheme(): Extension {
