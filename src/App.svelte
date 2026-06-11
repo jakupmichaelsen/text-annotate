@@ -4854,10 +4854,6 @@ ${body}
     return false;
   }
 
-  // Status bar reactive values
-  $: annotationStatusLabel = currentStyle === 0
-    ? "plain"
-    : `${styleName(currentStyle)} ${currentAnnotationVariant}`;
   $: currentStyleColor = styleColor(currentStyle);
   $: if (view) {
     currentStyle;
@@ -6291,18 +6287,6 @@ ${body}
     <div class="statusbar" style="--status-accent: {editorMode === 'insert' ? activeTheme.green : activeTheme.orange}">
       <div class="status-cluster status-primary">
         <span class="status-mode">{editorModeLabel}</span>
-        <span class="status-annotation" style={`--swatch-color: ${currentStyleColor}; --swatch-text: ${annotationTextColorForStyle(styleName(currentStyle), currentStyleColor)}; --status-annotation-color: ${currentStyleColor}`}>
-          <span
-            class="status-swatch"
-            class:variant-fill={currentAnnotationVariant === "fill"}
-            class:variant-box={currentAnnotationVariant === "box"}
-            class:variant-underline={currentAnnotationVariant === "underline"}
-            class:variant-rail={currentAnnotationVariant === "rail"}
-            class:variant-bars={currentAnnotationVariant === "bars"}
-            aria-hidden="true"
-          ></span>
-          <span>{annotationStatusLabel}</span>
-        </span>
       </div>
       <div class="status-center" class:empty={!audioUrl && !showTtsWidget}>
         {#if audioUrl}
@@ -6336,17 +6320,22 @@ ${body}
         <span class="status-item">{wordCountInfo}</span>
         <span class="status-item">Ln {line}</span>
         <span class="status-item">Col {column}</span>
-        <span class="status-file">{loadedFileName}</span>
         {#if documentMapPages.length || documentMapLineCount}
           <button
-            class="status-preview-button"
+            class="status-file status-file-preview"
             class:active={documentPreviewOpen}
             type="button"
             bind:this={documentPreviewButtonEl}
             aria-haspopup="dialog"
             aria-expanded={documentPreviewOpen}
+            aria-label={`Open preview for ${loadedFileName}`}
             on:click={toggleDocumentPreview}
-          >PREVIEW</button>
+          >
+            <span aria-hidden="true">▣</span>
+            <span>{loadedFileName}</span>
+          </button>
+        {:else}
+          <span class="status-file">{loadedFileName}</span>
         {/if}
       </div>
     </div>

@@ -2180,8 +2180,7 @@
 
   .status-cluster,
   .status-center,
-  .audio-widget,
-  .status-annotation {
+  .audio-widget {
     display: flex;
     align-items: center;
     min-width: 0;
@@ -2214,8 +2213,7 @@
 
   .status-mode,
   .status-item,
-  .status-file,
-  .status-annotation {
+  .status-file {
     min-height: 22px;
     box-sizing: border-box;
     white-space: nowrap;
@@ -2224,7 +2222,6 @@
   .status-mode,
   .status-item,
   .status-file,
-  .status-annotation,
   .audio-widget {
     padding: 0 2px;
   }
@@ -2237,50 +2234,6 @@
     letter-spacing: 0.02em;
   }
 
-  .status-annotation {
-    gap: 5px;
-    color: var(--status-annotation-color, var(--fg));
-  }
-
-  .status-swatch {
-    width: 16px;
-    height: 12px;
-    box-sizing: border-box;
-    border: 1px solid transparent;
-    border-radius: 2px;
-    background: var(--swatch-color);
-  }
-
-  .status-swatch.variant-fill {
-    background: var(--swatch-color);
-    border-color: var(--swatch-color);
-  }
-
-  .status-swatch.variant-box {
-    background: color-mix(in srgb, var(--swatch-color) 16%, transparent);
-    border-color: var(--swatch-color);
-  }
-
-  .status-swatch.variant-underline {
-    background: transparent;
-    border-color: transparent;
-    border-bottom: 3px solid var(--swatch-color);
-  }
-
-  .status-swatch.variant-rail {
-    background: transparent;
-    border-color: transparent;
-    border-top: 2px solid var(--swatch-color);
-    border-bottom: 2px solid var(--swatch-color);
-  }
-
-  .status-swatch.variant-bars {
-    background: transparent;
-    border-color: transparent;
-    border-left: 3px solid var(--swatch-color);
-    border-right: 3px solid var(--swatch-color);
-  }
-
   .status-item {
     color: var(--fg-muted);
   }
@@ -2288,6 +2241,25 @@
   .status-file {
     color: var(--status-accent);
     font-weight: 600;
+  }
+
+  .status-file-preview {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    max-width: min(340px, 44vw);
+    border: none;
+    background: transparent;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .status-file-preview span:last-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .status-item + .status-item::before,
@@ -2298,30 +2270,9 @@
     font-weight: 400;
   }
 
-  .status-preview-button {
-    min-height: 22px;
-    padding: 0 2px;
-    border: none;
-    background: transparent;
-    color: var(--fg-muted);
-    font: inherit;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    cursor: pointer;
-  }
-
-  .status-preview-button::before {
-    content: "/";
-    margin: 0 7px 0 0;
-    color: var(--border);
-    font-weight: 400;
-    letter-spacing: 0;
-  }
-
-  .status-preview-button:hover,
-  .status-preview-button:focus-visible,
-  .status-preview-button.active {
+  .status-file-preview:hover,
+  .status-file-preview:focus-visible,
+  .status-file-preview.active {
     color: var(--yellow);
     outline: none;
   }
