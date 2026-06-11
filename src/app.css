@@ -259,8 +259,8 @@
   .summary-content {
     min-height: 0;
     flex: 1 1 auto;
-    display: grid;
-    grid-template-rows: auto minmax(0, 1fr);
+    display: flex;
+    flex-direction: column;
   }
 
   .summary-document-panel {
@@ -2259,6 +2259,184 @@
     margin: 0 7px 0 0;
     color: var(--border);
     font-weight: 400;
+  }
+
+  .status-preview-button {
+    min-height: 22px;
+    padding: 0 2px;
+    border: none;
+    background: transparent;
+    color: var(--fg-muted);
+    font: inherit;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    cursor: pointer;
+  }
+
+  .status-preview-button::before {
+    content: "/";
+    margin: 0 7px 0 0;
+    color: var(--border);
+    font-weight: 400;
+    letter-spacing: 0;
+  }
+
+  .status-preview-button:hover,
+  .status-preview-button:focus-visible,
+  .status-preview-button.active {
+    color: var(--yellow);
+    outline: none;
+  }
+
+  .document-preview-popover {
+    position: fixed;
+    right: 12px;
+    bottom: 54px;
+    z-index: 50;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    width: min(560px, calc(100vw - 24px));
+    max-height: min(76vh, 760px);
+    border: 1px solid var(--border);
+    background: var(--bg-hard);
+    color: var(--fg);
+    box-shadow: 0 18px 48px color-mix(in srgb, #000 42%, transparent);
+  }
+
+  .document-preview-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-width: 0;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--internal-border);
+  }
+
+  .document-preview-title {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .document-preview-name {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--status-accent);
+    font-size: 11px;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .document-preview-meta {
+    color: var(--fg-muted);
+    font-size: 10px;
+  }
+
+  .document-preview-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
+  }
+
+  .document-preview-controls button {
+    min-width: 18px;
+    height: 22px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--fg-muted);
+    font: inherit;
+    font-size: 10px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .document-preview-controls button:hover,
+  .document-preview-controls button:focus-visible {
+    color: var(--yellow);
+    outline: none;
+  }
+
+  .document-preview-body {
+    min-height: 0;
+    overflow: auto;
+    padding: 12px;
+    background: var(--bg);
+  }
+
+  .document-preview-pages {
+    display: grid;
+    justify-items: center;
+    gap: 14px;
+    min-width: max-content;
+  }
+
+  .document-preview-page {
+    display: grid;
+    justify-items: center;
+    gap: 5px;
+    padding: 6px;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--fg-muted);
+    cursor: pointer;
+    outline: none;
+  }
+
+  .document-preview-page:hover,
+  .document-preview-page:focus-visible {
+    border-color: var(--yellow);
+    background: color-mix(in srgb, var(--yellow) 7%, transparent);
+    color: var(--fg);
+  }
+
+  .document-preview-page-image,
+  .document-preview-docx-viewport {
+    display: block;
+    max-width: none;
+    background: #fff;
+    border: 1px solid color-mix(in srgb, var(--fg) 18%, transparent);
+    box-shadow: 0 1px 4px color-mix(in srgb, #000 22%, transparent);
+  }
+
+  .document-preview-page-image {
+    object-fit: contain;
+  }
+
+  .document-preview-docx-viewport {
+    overflow: hidden;
+    color: #111;
+  }
+
+  .document-preview-docx-page {
+    transform-origin: top left;
+    pointer-events: none;
+  }
+
+  .document-preview-docx-page .docx-wrapper {
+    background: transparent;
+    padding: 0;
+  }
+
+  .document-preview-page-number {
+    color: var(--fg-muted);
+    font-size: 10px;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .document-preview-map {
+    position: relative;
+    min-width: 260px;
+    min-height: 0;
+    padding: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg-hard);
   }
 
   .audio-widget {

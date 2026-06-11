@@ -309,6 +309,10 @@
   let documentMapCurrentLine = 1;
   let sourceDocumentMapLines: string[] = [];
   let documentMapPages: DocumentMapPagePreview[] = [];
+  let documentPreviewOpen = false;
+  let documentPreviewZoom = 0.42;
+  let documentPreviewButtonEl: HTMLButtonElement | null = null;
+  let documentPreviewPopoverEl: HTMLDivElement | null = null;
   $: orderedSummarySections = orderSummarySections(summarySections, summaryCategoryOrder);
   $: summaryGroupIds = orderedSummarySections.filter(section => section.kind === "group").map(section => section.id);
   $: summaryAnnotationGroupIds = orderedSummarySections
@@ -880,6 +884,13 @@
   }
 
   function handleWindowKeydown(event: KeyboardEvent) {
+    if (event.key === "Escape" && documentPreviewOpen) {
+      documentPreviewOpen = false;
+      event.preventDefault();
+      event.stopPropagation();
+      documentPreviewButtonEl?.focus();
+      return;
+    }
     if (event.key === "Escape" && settingsOpen) {
       settingsOpen = false;
       event.preventDefault();
@@ -1583,6 +1594,30 @@
     return true;
   }
 
+  function toggleDocumentPreview() {
+    if (!documentMapPages.length && !documentMapLines.length) return false;
+    documentPreviewOpen = !documentPreviewOpen;
+    return true;
+  }
+
+  function closeDocumentPreview() {
+    documentPreviewOpen = false;
+    documentPreviewButtonEl?.focus();
+  }
+
+  function setDocumentPreviewZoom(nextZoom: number) {
+    documentPreviewZoom = Math.max(0.16, Math.min(1.2, nextZoom));
+  }
+
+  function documentPreviewScale(page: DocumentMapPagePreview) {
+    return Math.min(1.2, Math.max(0.16, documentPreviewZoom));
+  }
+
+  function fitDocumentPreview() {
+    const widest = documentMapPages.reduce((max, page) => Math.max(max, page.width), 1);
+    setDocumentPreviewZoom(Math.min(0.72, 460 / widest));
+  }
+
   function shortcutBindingFor(action: CustomShortcutAction) {
     return normalizeShortcutBinding(customShortcuts[action] ?? defaultCustomShortcutBindings()[action]) || defaultCustomShortcutBindings()[action];
   }
@@ -2077,7 +2112,7 @@
       for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
         const page = await pdf.getPage(pageNumber);
         const baseViewport = page.getViewport({ scale: 1 });
-        const scale = Math.min(0.22, 180 / Math.max(baseViewport.width, 1));
+        const scale = Math.min(0.85, 520 / Math.max(baseViewport.width, 1));
         const viewport = page.getViewport({ scale });
         const canvas = window.document.createElement("canvas");
         canvas.width = Math.max(1, Math.ceil(viewport.width));
@@ -3553,10 +3588,6 @@ ${body}
     const ratio = pageCount <= 1 ? 0 : (Math.max(1, pageNumber) - 1) / (pageCount - 1);
     const targetLine = Math.max(1, Math.min(doc.lines, Math.round(1 + ratio * (doc.lines - 1))));
     return jumpToDocumentLine(v, targetLine);
-  }
-
-  function documentMapPageScale(page: DocumentMapPagePreview) {
-    return Math.min(1, 148 / Math.max(1, page.width));
   }
 
   function buildSummarySections(items: SummaryItem[]) {
@@ -5319,11 +5350,14 @@ ${body}
     restorePersistedSettings();
     const onWindowKeydown = (event: KeyboardEvent) => handleWindowKeydown(event);
     const onWindowPointerDown = (event: PointerEvent) => {
-      if (!settingsOpen) return;
       const target = event.target;
       if (!(target instanceof Node)) return;
-      if (settingsPopoverEl?.contains(target) || settingsButtonEl?.contains(target)) return;
-      settingsOpen = false;
+      if (settingsOpen) {
+        if (!settingsPopoverEl?.contains(target) && !settingsButtonEl?.contains(target)) settingsOpen = false;
+      }
+      if (documentPreviewOpen) {
+        if (!documentPreviewPopoverEl?.contains(target) && !documentPreviewButtonEl?.contains(target)) documentPreviewOpen = false;
+      }
     };
     window.addEventListener("keydown", onWindowKeydown);
     window.addEventListener("pointerdown", onWindowPointerDown);
@@ -6051,77 +6085,6 @@ ${body}
         <div class="summary-collapsed-count">{summaryItems.length}</div>
       {:else}
       <div class="summary-content">
-        <section class="summary-document-panel">
-          <div class="summary-document-header">
-            <span class="summary-title">Document map</span>
-            <span class="summary-document-meta">
-              {#if documentMapPages.length}
-                {documentMapPages.length} pages
-              {:else}
-                {documentMapLineCount} lines
-              {/if}
-            </span>
-          </div>
-          <div class="document-map" aria-label="Document overview">
-            {#if documentMapPages.length}
-              <div class="document-map-pages">
-                {#each documentMapPages as page}
-                  {@const scale = documentMapPageScale(page)}
-                  <button
-                    class="document-map-page"
-                    type="button"
-                    aria-label={`Jump near page ${page.page}`}
-                    on:click={() => jumpToDocumentPage(view, page.page)}
-                  >
-                    {#if page.kind === "pdf" && page.dataUrl}
-                      <img
-                        class="document-map-page-image"
-                        src={page.dataUrl}
-                        alt=""
-                        width={Math.round(page.width)}
-                        height={Math.round(page.height)}
-                      />
-                    {:else if page.html}
-                      <div
-                        class="document-map-docx-viewport"
-                        style={`width: ${page.width * scale}px; height: ${page.height * scale}px;`}
-                      >
-                        <div
-                          class="document-map-docx-page"
-                          style={`width: ${page.width}px; height: ${page.height}px; transform: scale(${scale});`}
-                        >
-                          {@html page.html}
-                        </div>
-                      </div>
-                    {/if}
-                    <span class="document-map-page-number">{page.page}</span>
-                  </button>
-                {/each}
-              </div>
-            {:else}
-              <div class="document-map-track" style={`height: ${documentMapTotalHeight}px;`}>
-                <div
-                  class="document-map-viewport"
-                  aria-hidden="true"
-                  style={`top: ${documentMapViewportTop}px; height: ${documentMapViewportHeight}px;`}
-                ></div>
-                {#each documentMapLines as line}
-                  <button
-                    class="document-map-line"
-                    class:blank={line.blank}
-                    class:active={line.line === documentMapCurrentLine}
-                    type="button"
-                    aria-label={`Jump to line ${line.line}`}
-                    style={`top: ${line.top}px; height: ${line.height}px;`}
-                    on:click={() => jumpToDocumentLine(view, line.line)}
-                  >
-                    <span class="document-map-line-fill" style={`width: ${line.width}%; margin-left: ${line.indent}px;`}></span>
-                  </button>
-                {/each}
-              </div>
-            {/if}
-          </div>
-        </section>
         <div class="summary-list">
           {#if summaryItems.length === 0}
             <div class="summary-empty">No annotations</div>
@@ -6376,8 +6339,109 @@ ${body}
         <span class="status-item">Ln {line}</span>
         <span class="status-item">Col {column}</span>
         <span class="status-file">{loadedFileName}</span>
+        {#if documentMapPages.length || documentMapLineCount}
+          <button
+            class="status-preview-button"
+            class:active={documentPreviewOpen}
+            type="button"
+            bind:this={documentPreviewButtonEl}
+            aria-haspopup="dialog"
+            aria-expanded={documentPreviewOpen}
+            on:click={toggleDocumentPreview}
+          >PREVIEW</button>
+        {/if}
       </div>
     </div>
+
+    {#if documentPreviewOpen}
+      <div
+        class="document-preview-popover"
+        bind:this={documentPreviewPopoverEl}
+        role="dialog"
+        aria-label="Document preview"
+      >
+        <div class="document-preview-header">
+          <div class="document-preview-title">
+            <span class="document-preview-name">{loadedFileName}</span>
+            <span class="document-preview-meta">
+              {#if documentMapPages.length}
+                {documentMapPages.length} pages
+              {:else}
+                {documentMapLineCount} lines
+              {/if}
+            </span>
+          </div>
+          <div class="document-preview-controls" aria-label="Preview zoom">
+            <button type="button" on:click={() => setDocumentPreviewZoom(documentPreviewZoom - 0.08)} aria-label="Zoom out">−</button>
+            <button type="button" on:click={fitDocumentPreview}>FIT</button>
+            <button type="button" on:click={() => setDocumentPreviewZoom(documentPreviewZoom + 0.08)} aria-label="Zoom in">+</button>
+            <button type="button" on:click={closeDocumentPreview} aria-label="Close document preview">×</button>
+          </div>
+        </div>
+        <div class="document-preview-body">
+          {#if documentMapPages.length}
+            <div class="document-preview-pages">
+              {#each documentMapPages as page}
+                {@const scale = documentPreviewScale(page)}
+                <button
+                  class="document-preview-page"
+                  type="button"
+                  aria-label={`Jump near page ${page.page}`}
+                  on:click={() => jumpToDocumentPage(view, page.page)}
+                >
+                  {#if page.kind === "pdf" && page.dataUrl}
+                    <img
+                      class="document-preview-page-image"
+                      src={page.dataUrl}
+                      alt=""
+                      width={Math.round(page.width * scale)}
+                      height={Math.round(page.height * scale)}
+                      style={`width: ${page.width * scale}px; height: ${page.height * scale}px;`}
+                    />
+                  {:else if page.html}
+                    <div
+                      class="document-preview-docx-viewport"
+                      style={`width: ${page.width * scale}px; height: ${page.height * scale}px;`}
+                    >
+                      <div
+                        class="document-preview-docx-page"
+                        style={`width: ${page.width}px; height: ${page.height}px; transform: scale(${scale});`}
+                      >
+                        {@html page.html}
+                      </div>
+                    </div>
+                  {/if}
+                  <span class="document-preview-page-number">{page.page}</span>
+                </button>
+              {/each}
+            </div>
+          {:else}
+            <div class="document-preview-map" aria-label="Document line overview">
+              <div class="document-map-track" style={`height: ${documentMapTotalHeight}px;`}>
+                <div
+                  class="document-map-viewport"
+                  aria-hidden="true"
+                  style={`top: ${documentMapViewportTop}px; height: ${documentMapViewportHeight}px;`}
+                ></div>
+                {#each documentMapLines as line}
+                  <button
+                    class="document-map-line"
+                    class:blank={line.blank}
+                    class:active={line.line === documentMapCurrentLine}
+                    type="button"
+                    aria-label={`Jump to line ${line.line}`}
+                    style={`top: ${line.top}px; height: ${line.height}px;`}
+                    on:click={() => jumpToDocumentLine(view, line.line)}
+                  >
+                    <span class="document-map-line-fill" style={`width: ${line.width}%; margin-left: ${line.indent}px;`}></span>
+                  </button>
+                {/each}
+              </div>
+            </div>
+          {/if}
+        </div>
+      </div>
+    {/if}
   {/if}
 
   {#if addStyleModalOpen}
