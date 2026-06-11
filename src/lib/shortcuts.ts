@@ -3,7 +3,7 @@ export const helpSections = [
     title: "Navigation",
     items: [
       ["← ↓ ↑ →", "left / down / up / right"],
-      ["CapsLock", "toggle word navigation"],
+      ["CapsLock", "on = word navigation, off = character navigation"],
       ["c / C", "column stride right / left"],
       ["WASD", "optional navigation keys"],
       ["HJKL", "optional navigation keys"]

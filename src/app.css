@@ -1661,6 +1661,10 @@
     outline: none;
   }
 
+  .style-key-action.style-key-empty {
+    color: var(--fg-muted);
+  }
+
   .style-key-input {
     height: 20px;
     width: 22px;

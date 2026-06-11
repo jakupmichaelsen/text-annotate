@@ -2433,7 +2433,10 @@
   }
 
   function styleKeyForName(name: string) {
-    return styleKeys[name] || defaultStyleKeyForName(name);
+    if (Object.prototype.hasOwnProperty.call(styleKeys, name)) {
+      return normalizeStyleKey(styleKeys[name] ?? "");
+    }
+    return defaultStyleKeyForName(name);
   }
 
   function styleNumberForKey(key: string) {
@@ -2793,7 +2796,7 @@
     }
   }
 
-  function loadStyleKeys() {
+  function loadStyleKeys(): Record<string, string | null> {
     const stored = typeof localStorage === "undefined" ? null : localStorage.getItem(styleKeysStorageKey);
     if (!stored) return {};
 
@@ -2801,20 +2804,20 @@
       const parsed = JSON.parse(stored);
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
       const used = new Set<string>();
-      return Object.fromEntries(
-        Object.entries(parsed)
-          .filter((entry): entry is [string, string] =>
-            typeof entry[0] === "string" &&
-            knownStyleName(entry[0]) &&
-            typeof entry[1] === "string"
-          )
-          .map(([name, key]) => [name, normalizeStyleKey(key)])
-          .filter(([, key]) => {
-            if (!key || key === "0" || used.has(key)) return false;
-            used.add(key);
-            return true;
-          })
-      );
+      const result: Record<string, string | null> = {};
+      for (const [name, key] of Object.entries(parsed)) {
+        if (typeof name !== "string" || !knownStyleName(name)) continue;
+        if (key === null) {
+          result[name] = null;
+          continue;
+        }
+        if (typeof key !== "string") continue;
+        const normalized = normalizeStyleKey(key);
+        if (!normalized || normalized === "0" || used.has(normalized)) continue;
+        used.add(normalized);
+        result[name] = normalized;
+      }
+      return result;
     } catch {
       return {};
     }
@@ -2830,7 +2833,7 @@
     }
   }
 
-  function persistStyleKeys(keys: Record<string, string>) {
+  function persistStyleKeys(keys: Record<string, string | null>) {
     styleKeys = keys;
     if (typeof localStorage === "undefined") return;
     if (Object.keys(keys).length) {
@@ -2901,12 +2904,21 @@
   }
 
   function persistStyleKey(name: string, key: string) {
+    const nextKeys = { ...styleKeys };
+    const hadStoredKey = Object.prototype.hasOwnProperty.call(styleKeys, name);
+    const oldKey = hadStoredKey ? normalizeStyleKey(styleKeys[name] ?? "") : defaultStyleKeyForName(name);
+
+    if (!key.trim()) {
+      nextKeys[name] = null;
+      persistStyleKeys(nextKeys);
+      view?.dispatch({});
+      return;
+    }
+
     const captured = captureStyleKey(key, name);
-    const normalized = captured.key || defaultStyleKeyForName(name);
-    const oldKey = styleKeyForName(name);
+    const normalized = captured.key;
     if (!normalized) return;
 
-    const nextKeys = { ...styleKeys };
     const otherStyle = highlightStyles.find(style =>
       style.name !== name && styleKeyForName(style.name) === normalized
     );
@@ -3001,6 +3013,7 @@
       event.preventDefault();
       styleKeyDraft = "";
       styleKeyError = "";
+      saveStyleKey();
       return;
     }
     if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
@@ -5642,7 +5655,7 @@ ${body}
             </div>
             <label class="settings-toggle-row">
               <span class="settings-control-icon" aria-hidden="true">⇪</span>
-              <span>Word navigation (CapsLock)</span>
+              <span>CapsLock on = word navigation</span>
               <input type="checkbox" checked={wordNavigation} on:change={event => wordNavigation = (event.target as HTMLInputElement).checked} />
             </label>
             <label class="settings-toggle-row">
@@ -5868,11 +5881,17 @@ ${body}
                   bind:this={styleKeyInput}
                   bind:value={styleKeyDraft}
                   aria-label={`Shortcut key for ${styleDisplayTitle(style.name)}`}
-                  title={styleKeyError || "Press a key"}
+                  title={styleKeyError || "Press a key or Backspace/Delete to clear"}
                   readonly
                   on:click={event => event.stopPropagation()}
                   on:input={event => {
-                    const result = captureStyleKey((event.target as HTMLInputElement).value.slice(-1), style.name);
+                    const value = (event.target as HTMLInputElement).value.slice(-1);
+                    if (!value.trim()) {
+                      styleKeyDraft = "";
+                      styleKeyError = "";
+                      return;
+                    }
+                    const result = captureStyleKey(value, style.name);
                     styleKeyError = result.error;
                     if (result.key) styleKeyDraft = result.key;
                   }}
@@ -5882,12 +5901,15 @@ ${body}
               {:else}
                 <button
                   class="style-key-badge style-key-action"
+                  class:style-key-empty={!styleKeyForName(style.name)}
                   type="button"
-                  title={`Edit shortcut key for ${styleDisplayTitle(style.name)}`}
+                  title={styleKeyForName(style.name)
+                    ? `Edit shortcut key for ${styleDisplayTitle(style.name)}`
+                    : `Assign shortcut key for ${styleDisplayTitle(style.name)}`}
                   on:click={event => startStyleKeyEdit(event, style.name)}
                   on:keydown={event => event.stopPropagation()}
                 >
-                  {styleKeyForName(style.name)}
+                  {styleKeyForName(style.name) || "–"}
                 </button>
               {/if}
               <div class="style-title-cell">
