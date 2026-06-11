@@ -2211,7 +2211,6 @@
     min-width: 0;
   }
 
-  .status-mode,
   .status-item,
   .status-file {
     min-height: 22px;
@@ -2219,19 +2218,10 @@
     white-space: nowrap;
   }
 
-  .status-mode,
   .status-item,
   .status-file,
   .audio-widget {
     padding: 0 2px;
-  }
-
-  .status-mode {
-    display: inline-flex;
-    align-items: center;
-    color: var(--status-accent);
-    font-weight: 700;
-    letter-spacing: 0.02em;
   }
 
   .status-item {
@@ -2248,22 +2238,27 @@
     align-items: center;
     gap: 5px;
     min-width: 0;
-    max-width: min(340px, 44vw);
+    max-width: min(420px, 42vw);
     border: none;
     background: transparent;
+    color: var(--status-accent);
     font: inherit;
     font-weight: 600;
     cursor: pointer;
   }
 
-  .status-file-preview span:last-child {
+  .status-file-preview span:first-child {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
-  .status-item + .status-item::before,
-  .status-file::before {
+  .status-file-preview span:last-child {
+    flex: 0 0 auto;
+    color: var(--fg-muted);
+  }
+
+  .status-item + .status-item::before {
     content: "/";
     margin: 0 7px 0 0;
     color: var(--border);
@@ -2275,6 +2270,12 @@
   .status-file-preview.active {
     color: var(--yellow);
     outline: none;
+  }
+
+  .status-file-preview:hover span:last-child,
+  .status-file-preview:focus-visible span:last-child,
+  .status-file-preview.active span:last-child {
+    color: var(--yellow);
   }
 
   .document-preview-popover {
