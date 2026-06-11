@@ -272,6 +272,15 @@
   type SummaryItem =
     | SummaryAnnotationItem
     | { type: "blockquote"; id: string; text: string; line: number; from: number; to: number };
+  type DocumentMapLine = {
+    line: number;
+    from: number;
+    blank: boolean;
+    width: number;
+    indent: number;
+    top: number;
+    height: number;
+  };
   type SummarySection =
     | { kind: "item"; id: string; item: SummaryItem }
     | { kind: "group"; id: string; label: string; count: number; color: string; itemType: SummaryItem["type"]; items: SummaryItem[] };
@@ -281,6 +290,12 @@
   let summarySections: SummarySection[] = [];
   let summaryCategoryOrder: string[] = [];
   let expandedSummaryCategories: Record<string, boolean> = {};
+  let documentMapLines: DocumentMapLine[] = [];
+  let documentMapLineCount = 0;
+  let documentMapTotalHeight = 0;
+  let documentMapViewportTop = 0;
+  let documentMapViewportHeight = 0;
+  let documentMapCurrentLine = 1;
   $: orderedSummarySections = orderSummarySections(summarySections, summaryCategoryOrder);
   $: summaryGroupIds = orderedSummarySections.filter(section => section.kind === "group").map(section => section.id);
   $: summaryAnnotationGroupIds = orderedSummarySections
@@ -2912,6 +2927,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
     const selectedWords = sel.empty ? 0 : countWords(v.state.doc.sliceString(sel.from, sel.to));
     wordCountInfo = sel.empty ? `${totalWords} words` : `${totalWords} words (${selectedWords} selected)`;
     updateSummaryFromView(v);
+    updateDocumentMapFromView(v);
   }
 
   let editingSpan: number | null = null;
@@ -3321,6 +3337,55 @@ ${body}
     summaryItems = sortedItems;
     summarySections = buildSummarySections(sortedItems);
     summaryCategoryOrder = reconcileSummaryCategoryOrder(summarySections, summaryCategoryOrder);
+  }
+
+  function updateDocumentMapFromView(v: EditorView) {
+    const doc = v.state.doc;
+    const lines: DocumentMapLine[] = [];
+    let maxLength = 1;
+
+    for (let lineNumber = 1; lineNumber <= doc.lines; lineNumber += 1) {
+      const line = doc.line(lineNumber);
+      const visibleLength = line.text.replace(/\s+$/g, "").length;
+      if (visibleLength > maxLength) maxLength = visibleLength;
+    }
+
+    let top = 0;
+    for (let lineNumber = 1; lineNumber <= doc.lines; lineNumber += 1) {
+      const line = doc.line(lineNumber);
+      const trimmed = line.text.trim();
+      const blank = trimmed.length === 0;
+      const visibleLength = line.text.replace(/\s+$/g, "").length;
+      const indent = blank ? 0 : Math.min(24, line.text.match(/^\s*/)?.[0].length ?? 0);
+      const width = blank ? 16 : Math.max(14, Math.min(100, 18 + (visibleLength / maxLength) * 82));
+      const height = blank ? 7 : 4;
+      lines.push({ line: lineNumber, from: line.from, blank, width, indent, top, height });
+      top += height + 1;
+    }
+
+    const ranges = v.visibleRanges.length ? v.visibleRanges : [{ from: 0, to: doc.length }];
+    const firstVisibleLine = doc.lineAt(ranges[0].from).number;
+    const lastVisibleLine = doc.lineAt(ranges[ranges.length - 1].to).number;
+    const viewportStart = lines[firstVisibleLine - 1]?.top ?? 0;
+    const viewportEnd = (lines[lastVisibleLine - 1]?.top ?? viewportStart) + (lines[lastVisibleLine - 1]?.height ?? 0);
+
+    documentMapLines = lines;
+    documentMapLineCount = doc.lines;
+    documentMapTotalHeight = top;
+    documentMapViewportTop = viewportStart;
+    documentMapViewportHeight = Math.max(lines[firstVisibleLine - 1]?.height ?? 0, viewportEnd - viewportStart);
+    documentMapCurrentLine = doc.lineAt(v.state.selection.main.head).number;
+  }
+
+  function jumpToDocumentLine(v: EditorView, lineNumber: number) {
+    const doc = v.state.doc;
+    const line = doc.line(Math.max(1, Math.min(doc.lines, lineNumber)));
+    v.dispatch({
+      selection: { anchor: line.from },
+      effects: cursorScrollEffect(v, line.from)
+    });
+    v.focus();
+    return true;
   }
 
   function buildSummarySections(items: SummaryItem[]) {
@@ -5814,11 +5879,40 @@ ${body}
       {#if summaryCollapsed}
         <div class="summary-collapsed-count">{summaryItems.length}</div>
       {:else}
-      <div class="summary-list">
-        {#if summaryItems.length === 0}
-          <div class="summary-empty">No annotations</div>
-        {:else}
-          {#each orderedSummarySections as section (section.id)}
+      <div class="summary-content">
+        <section class="summary-document-panel">
+          <div class="summary-document-header">
+            <span class="summary-title">Document map</span>
+            <span class="summary-document-meta">{documentMapLineCount} lines</span>
+          </div>
+          <div class="document-map" aria-label="Document overview">
+            <div class="document-map-track" style={`height: ${documentMapTotalHeight}px;`}>
+              <div
+                class="document-map-viewport"
+                aria-hidden="true"
+                style={`top: ${documentMapViewportTop}px; height: ${documentMapViewportHeight}px;`}
+              ></div>
+              {#each documentMapLines as line}
+                <button
+                  class="document-map-line"
+                  class:blank={line.blank}
+                  class:active={line.line === documentMapCurrentLine}
+                  type="button"
+                  aria-label={`Jump to line ${line.line}`}
+                  style={`top: ${line.top}px; height: ${line.height}px;`}
+                  on:click={() => jumpToDocumentLine(view, line.line)}
+                >
+                  <span class="document-map-line-fill" style={`width: ${line.width}%; margin-left: ${line.indent}px;`}></span>
+                </button>
+              {/each}
+            </div>
+          </div>
+        </section>
+        <div class="summary-list">
+          {#if summaryItems.length === 0}
+            <div class="summary-empty">No annotations</div>
+          {:else}
+            {#each orderedSummarySections as section (section.id)}
             {#if section.kind === "item"}
               <div
                 class="summary-item"
@@ -6010,8 +6104,9 @@ ${body}
                 {/each}
               {/if}
             {/if}
-          {/each}
-        {/if}
+            {/each}
+          {/if}
+        </div>
       </div>
       {/if}
     </aside>

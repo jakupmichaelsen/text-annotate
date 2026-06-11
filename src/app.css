@@ -256,8 +256,96 @@
     font-weight: 600;
   }
 
+  .summary-content {
+    min-height: 0;
+    flex: 1 1 auto;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .summary-document-panel {
+    display: grid;
+    gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--internal-border);
+    background: var(--bg-hard);
+  }
+
+  .summary-document-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .summary-document-meta {
+    color: var(--fg-muted);
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
+  .document-map {
+    position: relative;
+    min-height: 0;
+    max-height: 180px;
+    overflow: auto;
+    padding: 6px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+  }
+
+  .document-map-track {
+    position: relative;
+    min-width: 100%;
+  }
+
+  .document-map-viewport {
+    position: absolute;
+    left: 0;
+    right: 0;
+    border: 1px solid color-mix(in srgb, var(--yellow) 65%, transparent);
+    background: color-mix(in srgb, var(--yellow) 10%, transparent);
+    border-radius: 2px;
+    pointer-events: none;
+    box-sizing: border-box;
+  }
+
+  .document-map-line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    outline: none;
+  }
+
+  .document-map-line-fill {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: var(--fg-muted);
+    opacity: 0.26;
+  }
+
+  .document-map-line.blank .document-map-line-fill {
+    opacity: 0.1;
+    background: var(--border);
+  }
+
+  .document-map-line.active .document-map-line-fill,
+  .document-map-line:hover .document-map-line-fill,
+  .document-map-line:focus-visible .document-map-line-fill {
+    opacity: 1;
+    background: var(--yellow);
+  }
+
   .summary-list {
     min-height: 0;
+    flex: 1 1 auto;
     overflow-y: auto;
     overflow-x: hidden;
     padding: var(--summary-content-pad-top, 0) var(--summary-content-pad-right, 0) var(--summary-content-pad-bottom, 0) var(--summary-content-pad-left, 0);
