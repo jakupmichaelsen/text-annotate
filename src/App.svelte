@@ -2362,11 +2362,14 @@
   function jumpToAdjacentAnnotation(v: EditorView, direction: 1 | -1) {
     const annotations = summaryItems.filter(isSummaryAnnotationItem);
     if (!annotations.length) return false;
-    const head = v.state.selection.main.head;
+    const selection = v.state.selection.main;
+    const from = Math.min(selection.from, selection.to);
+    const to = Math.max(selection.from, selection.to);
+    const boundary = selection.empty ? selection.head : direction > 0 ? to : from;
     const target =
       direction > 0
-        ? annotations.find(item => item.spanStart > head) ?? annotations[0]
-        : [...annotations].reverse().find(item => item.spanStart < head) ?? annotations[annotations.length - 1];
+        ? annotations.find(item => item.from > boundary) ?? annotations[0]
+        : [...annotations].reverse().find(item => item.to < boundary) ?? annotations[annotations.length - 1];
     jumpToSummaryItem(target);
     return true;
   }

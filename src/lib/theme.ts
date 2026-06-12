@@ -58,7 +58,7 @@ export const themes: Record<ThemeMode, ThemePalette> = {
     dark: false,
     bg: "#eceff4", bgSoft: "#e5e9f0", bgHard: "#d8dee9",
     bgAlt: "#e5e9f0", border: "#cfd7e3", fg: "#2e3440",
-    fgMuted: "#4c566a", yellow: "#ebcb8b", green: "#a3be8c",
+    fgMuted: "#4c566a", yellow: "#8f5f00", green: "#4f7d33",
     blue: "#81a1c1", aqua: "#8fbcbb", orange: "#b65f4a",
     red: "#bf616a", purple: "#b48ead", selection: "#b8c2d4",
     activeLine: "transparent", gutterText: "#5e6472",
@@ -68,14 +68,18 @@ export const themes: Record<ThemeMode, ThemePalette> = {
     plainCodeBg: "#e5e9f0"
   },
   "basic-dark": {
-    ...gruvbox,
     dark: true,
+    bg: "#2e3235", bgSoft: "#292d30", bgHard: "#202325",
+    bgAlt: "#383d40", border: "#4a5054", fg: "#dddddd",
+    fgMuted: "#b0b0b0", yellow: "#fda331", green: "#b5bd68",
+    blue: "#6fb3d2", aqua: "#8abeb7", orange: "#fc6d24",
+    red: "#a54543", purple: "#cc99cc", selection: "#202325",
     activeLine: "transparent",
-    searchMatch: "#665c54",
-    searchMatchSelected: "#7c6f64",
-    blockquoteBg: "#4a3520",
-    blockquoteFg: "#fabd2f",
-    plainCodeBg: "#32302f"
+    gutterText: "#808080",
+    cursor: "#dddddd", comment: "#808080",
+    searchMatch: "#b9d2ff", searchMatchSelected: "#e0e0e0",
+    blockquoteBg: "#292d30", blockquoteFg: "#fda331",
+    plainCodeBg: "#292d30"
   },
   "gruvbox-light": {
     dark: false,

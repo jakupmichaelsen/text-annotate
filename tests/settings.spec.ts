@@ -249,4 +249,7 @@ test("annotation previous follows user-configured shortcut", async ({ page }) =>
 
   await page.keyboard.press("Shift+P");
   await expect.poll(selectedText).toBe("beta");
+
+  await page.keyboard.press("Shift+P");
+  await expect.poll(selectedText).toBe("alpha");
 });
