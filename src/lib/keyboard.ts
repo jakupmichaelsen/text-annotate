@@ -17,8 +17,8 @@ export type CustomShortcutAction = typeof customShortcutActions[number];
 export const customShortcutDefinitions: Array<{ action: CustomShortcutAction; label: string; icon: string; defaultValue: string }> = [
   { action: "stridePrevious", label: "Stride previous", icon: "C", defaultValue: "Shift+c" },
   { action: "strideNext", label: "Stride next", icon: "c", defaultValue: "c" },
-  { action: "annotationPrevious", label: "Annotation previous", icon: "n", defaultValue: "n" },
-  { action: "annotationNext", label: "Annotation next", icon: "N", defaultValue: "N" },
+  { action: "annotationPrevious", label: "Annotation previous", icon: "N", defaultValue: "Shift+n" },
+  { action: "annotationNext", label: "Annotation next", icon: "n", defaultValue: "n" },
   { action: "variantPrevious", label: "Variant previous", icon: "⇧⇥", defaultValue: "Shift+Tab" },
   { action: "variantNext", label: "Variant next", icon: "⇥", defaultValue: "Tab" }
 ];
@@ -65,7 +65,7 @@ export const annotateHandledKeySections: readonly KeyboardHelpSection[] = [
     title: "Annotations",
     items: [
       ["Space", "wrap word / selection"],
-      ["n / N", "previous / next annotation"],
+      ["n / N", "next / previous annotation"],
       ["1 / 2 / 3", "select styles"],
       ["0", "plain annotation"],
       ["Tab / Shift+Tab", "variant next / previous"],
@@ -97,6 +97,30 @@ export const annotateHandledKeySections: readonly KeyboardHelpSection[] = [
 ];
 
 export const keyboardHelpSections: readonly KeyboardHelpSection[] = [
+  {
+    title: "File Types",
+    items: [
+      [".docx / .pdf", "document preview and import"],
+      [".odt / .txt / .md", "text import"],
+      [".srt", "subtitle timestamps"],
+      ["audio / video", "transcription and playback"]
+    ]
+  },
+  {
+    title: "Annotation Styles",
+    items: [
+      ["Style keys", "editable per style"],
+      ["Tab / Shift+Tab", "variant next / previous"],
+      ["+", "create a style with a color"]
+    ]
+  },
+  {
+    title: "Notes",
+    items: [
+      ["Notes", "local scratchpad for follow-up ideas"],
+      ["Blockquotes", "export as notes"]
+    ]
+  },
   ...annotateHandledKeySections,
   {
     title: "Passthrough",
@@ -223,7 +247,7 @@ export function isAppShortcutCandidate(
     event.key === "ArrowRight" ||
     event.key === "ArrowUp" ||
     event.key === "ArrowDown" ||
-    "hjklwasdcHJKLWASDCxvnNuU".includes(event.key);
+    "hjklwasdcHJKLWASDCxXvVnNuU<>".includes(event.key);
 }
 
 export type EditorMode = "normal" | "insert";
@@ -234,6 +258,7 @@ export type EditorKeymapHandlers = {
   useWasdNavigation: () => boolean;
   useHjklNavigation: () => boolean;
   toggleWordNavigation: () => boolean;
+  setWordNavigation: (active: boolean) => boolean;
   getCustomShortcut: (action: CustomShortcutAction) => string;
   handleCustomShortcut: (action: CustomShortcutAction, view: EditorViewType) => boolean;
   handleVariantPickerKey: (view: EditorViewType, event: KeyboardEvent) => boolean;
@@ -297,6 +322,12 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       if (event.ctrlKey || event.metaKey || event.altKey) return false;
 
       const key = event.key.toLowerCase();
+      if (key === "capslock") {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return handlers.setWordNavigation(event.getModifierState("CapsLock"));
+      }
+
       const visualLineSelection = handlers.isVisualLineSelectionActive();
       const extend = event.shiftKey || handlers.isStickySelectionActive();
 
@@ -381,7 +412,6 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       { any: (view, event) => handlers.getEditorMode() === "normal" && handlers.handleVariantPickerKey(view, event) },
       { key: "Escape", run: () => handlers.handleEscape() },
       { key: "F2", run: normal(view => { handlers.setMode("insert"); return true; }) },
-      { key: "CapsLock", run: normal(() => handlers.toggleWordNavigation()) },
       { key: "F1", run: normal(() => handlers.toggleHelp()) },
       { key: "Mod-,", run: normal(() => handlers.toggleSettings()) },
       { key: "Ctrl-Tab", run: normal(view => handlers.scrollCurrentLineIntoView(view)) },
@@ -418,11 +448,11 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       { key: "x",      run: normal(view => handlers.removeAnnotationOrDelete(view)) },
       { key: "Backspace", run: normal(() => true) },
       { key: "Delete",    run: normal(() => true) },
-      { key: "X",      run: normal(view => handlers.deleteCurrentLine(view)) },
+      { key: "Shift-x", run: normal(view => handlers.deleteCurrentLine(view)) },
       { key: "v",      run: normal(view => handlers.toggleStickySelection(view)) },
-      { key: "V",      run: normal(view => handlers.startVisualLineSelection(view)) },
-      { key: "<",      run: normal(view => handlers.enterBlockquoteEditMode(view)) },
-      { key: ">",      run: normal(view => handlers.splitLineEndToBlockquote(view)) },
+      { key: "Shift-v", run: normal(view => handlers.startVisualLineSelection(view)) },
+      { key: "Shift-,", run: normal(view => handlers.enterBlockquoteEditMode(view)) },
+      { key: "Shift-.", run: normal(view => handlers.splitLineEndToBlockquote(view)) },
       { key: "u",      run: normal(view => handlers.undo(view)) },
       { key: "U",      run: normal(view => handlers.redo(view)) },
       { key: "Ctrl-z", run: normal(view => handlers.undo(view)) },

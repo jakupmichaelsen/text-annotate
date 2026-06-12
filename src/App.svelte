@@ -1344,9 +1344,9 @@
     const parsed = value as Record<string, unknown>;
     return Object.fromEntries(customShortcutDefinitions.map(definition => {
       const raw = typeof parsed[definition.action] === "string" ? parsed[definition.action] as string : definition.defaultValue;
-      const migrated = definition.action === "annotationPrevious" && raw === "["
+      const migrated = definition.action === "annotationPrevious" && (raw === "[" || raw === "n")
         ? definition.defaultValue
-        : definition.action === "annotationNext" && raw === "]"
+        : definition.action === "annotationNext" && (raw === "]" || raw === "N")
           ? definition.defaultValue
           : normalizeShortcutBinding(raw) || definition.defaultValue;
       return [definition.action, migrated];
@@ -5253,6 +5253,11 @@ ${body}
           view?.dispatch({});
           return true;
         },
+        setWordNavigation: active => {
+          wordNavigation = active;
+          view?.dispatch({});
+          return true;
+        },
         getCustomShortcut: action => customShortcuts[action] ?? defaultCustomShortcutBindings()[action],
         handleCustomShortcut,
         handleVariantPickerKey,
@@ -5411,7 +5416,6 @@ ${body}
 >
   <div class="toolbar">
     <div class="title">textAnnotate</div>
-    <span class="subtitle">.docx, .pdf, .odt, .srt, .txt, .md</span>
     <button class="toolbar-btn help-btn" on:click={() => showHelp = !showHelp} title="Keyboard shortcuts (?)">?</button>
   </div>
 
@@ -5817,14 +5821,6 @@ ${body}
           <button class="sidebar-label load-btn" on:click={saveDocument}>SAVE</button>
           <button class="sidebar-label load-btn" on:click={exportCleanHtml}>EXPORT</button>
         </div>
-        <button
-          class="sidebar-label load-btn sidebar-settings-btn"
-          bind:this={settingsButtonEl}
-          class:active={settingsOpen}
-          on:click={toggleSettings}
-          aria-label="Settings"
-          aria-expanded={settingsOpen}
-        >SETTINGS</button>
         {#if audioSourceFile}
           <button class="sidebar-label load-btn" on:click={transcribeLoadedAudio} disabled={transcriptionBusy}>
             {transcriptionBusy ? "Transcribing..." : "Transcribe"}
@@ -5854,7 +5850,6 @@ ${body}
 
       <div class="sidebar-section">
         <div class="sidebar-label">Annotation styles</div>
-        <div class="sidebar-hint">style keys are editable; Tab / Shift+Tab: variants</div>
         <div class="style-list sidebar-style-list">
           <div
             class="style-row style-row-plain"
@@ -5977,7 +5972,6 @@ ${body}
           </button>
         </div>
         {#if sidebarNotesOpen}
-          <div class="sidebar-hint">Persistent scratchpad for follow-up ideas, synced locally.</div>
           <textarea
             class="settings-input settings-textarea sidebar-notes"
             rows="10"
@@ -5990,6 +5984,7 @@ ${body}
       </div>
       {/if}
       <div class="sidebar-header">
+        <button class="summary-icon-btn sidebar-settings-btn" type="button" bind:this={settingsButtonEl} class:active={settingsOpen} title="Settings" aria-label="Settings" aria-expanded={settingsOpen} on:click={toggleSettings}>☰</button>
         <button class="summary-icon-btn sidebar-collapse-btn" type="button" title={leftSidebarCollapsed ? "Show controls" : "Hide controls"} aria-label={leftSidebarCollapsed ? "Show controls" : "Hide controls"} on:click={() => leftSidebarCollapsed = !leftSidebarCollapsed}>
           {leftSidebarCollapsed ? "›" : "‹"}
         </button>
