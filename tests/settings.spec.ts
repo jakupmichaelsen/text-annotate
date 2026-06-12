@@ -152,3 +152,101 @@ test("editor selection color follows the CM theme", async ({ page }) => {
   const gruvboxColor = await selectionColor();
   expect(gruvboxColor).not.toBe(nordColor);
 });
+
+test("annotate mode handles shifted action keys", async ({ page }) => {
+  const loadBuffer = async (text: string) => {
+    await page.evaluate(value => {
+      localStorage.clear();
+      localStorage.setItem("cm6-buffer", value);
+      location.reload();
+    }, text);
+    await page.waitForLoadState("networkidle");
+    await page.locator(".cm-content").click();
+  };
+  const editorText = () => page.locator(".cm-content").evaluate(el => (el as HTMLElement).innerText);
+  const selectedText = () => page.evaluate(() => getSelection()?.toString() ?? "");
+
+  await page.goto("/");
+
+  await loadBuffer("one two three\nfour five six");
+  await page.keyboard.press("Shift+V");
+  await expect.poll(selectedText).toBe("four five six");
+
+  await loadBuffer("one two three\nfour five six");
+  await page.keyboard.press("Shift+X");
+  await expect.poll(editorText).toBe("one two three\n\n");
+
+  await loadBuffer("top\n`alpha`<!-- red, now: \"\" -->\nmiddle\n`beta`<!-- green, now: \"\" -->\nend");
+  await page.keyboard.press("Shift+N");
+  await expect.poll(selectedText).toBe("beta");
+
+  await loadBuffer("one two three\nfour five six");
+  await page.keyboard.press("Shift+,");
+  await expect.poll(editorText).toBe("one two three\nfour five six\n> ");
+  await expect(page.locator(".mode-switch input")).toBeChecked();
+  await page.keyboard.press("Escape");
+
+  await loadBuffer("one two three\nfour five six");
+  const firstLine = page.locator(".cm-line").first();
+  const firstLineBox = await firstLine.boundingBox();
+  if (!firstLineBox) throw new Error("First editor line was not visible");
+  await page.mouse.click(firstLineBox.x + 35, firstLineBox.y + firstLineBox.height / 2);
+  await page.keyboard.press("Shift+.");
+  await expect.poll(editorText).toBe("one \n> two three\nfour five six");
+  await expect(page.locator(".mode-switch input")).toBeChecked();
+});
+
+test("capslock state controls word navigation", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.clear();
+    localStorage.setItem("cm6-buffer", "alpha beta");
+  });
+  await page.goto("/");
+  await page.locator(".cm-content").click();
+
+  const dispatchCapsLock = async (active: boolean) => {
+    await page.locator(".cm-content").evaluate((target, capsActive) => {
+      const event = new KeyboardEvent("keyup", { key: "CapsLock", bubbles: true, cancelable: true });
+      Object.defineProperty(event, "getModifierState", {
+        value: (key: string) => key === "CapsLock" ? capsActive : false
+      });
+      target.dispatchEvent(event);
+    }, active);
+  };
+  const wordNavigationToggle = () =>
+    page.locator(".settings-toggle-row", { hasText: "CapsLock on = word navigation" }).locator("input");
+
+  await dispatchCapsLock(true);
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("button", { name: "hotkeys" }).click();
+  await expect(wordNavigationToggle()).toBeChecked();
+
+  await page.keyboard.press("Escape");
+  await page.locator(".cm-content").click();
+  await dispatchCapsLock(false);
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("button", { name: "hotkeys" }).click();
+  await expect(wordNavigationToggle()).not.toBeChecked();
+});
+
+test("annotation previous follows user-configured shortcut", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.clear();
+    localStorage.setItem("cm6-buffer", "top\n`alpha`<!-- red, now: \"\" -->\nmiddle\n`beta`<!-- green, now: \"\" -->\nend");
+    localStorage.setItem("cm6-layout-settings", JSON.stringify({
+      customShortcuts: {
+        annotationPrevious: "Shift+p",
+        annotationNext: "n"
+      }
+    }));
+  });
+  await page.goto("/");
+  await page.locator(".cm-content").click();
+  const selectedText = () => page.evaluate(() => getSelection()?.toString() ?? "");
+
+  await page.keyboard.press("Shift+N");
+  await expect.poll(selectedText).toBe("");
+
+  await page.keyboard.press("Shift+P");
+  await expect.poll(selectedText).toBe("beta");
+});

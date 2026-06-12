@@ -6532,7 +6532,7 @@ ${body}
     <div class="help-overlay" on:click|self={() => showHelp = false}>
       <div class="help-panel">
         <div class="help-header">
-          <span class="help-title">Keyboard Shortcuts</span>
+          <span class="help-title">Help Menu</span>
           <button class="help-close" on:click={() => showHelp = false}>✕</button>
         </div>
         <div class="keybinds">

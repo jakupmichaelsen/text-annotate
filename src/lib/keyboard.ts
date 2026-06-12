@@ -316,6 +316,34 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
     return extend ? handlers.selectCharLeft(view) : handlers.cursorCharLeft(view);
   };
 
+  const handleShiftedAnnotationKey = (view: EditorViewType, event: KeyboardEvent) => {
+    if (
+      handlers.getEditorMode() !== "normal" ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.altKey
+    ) return false;
+
+    const key = event.key.toLowerCase();
+    if (event.shiftKey && key === "x") return handlers.deleteCurrentLine(view);
+    if (event.shiftKey && key === "v") return handlers.startVisualLineSelection(view);
+    if (event.key === "<" || event.key === ">" || (event.shiftKey && (event.code === "Comma" || event.code === "Period"))) {
+      return event.key === "<" || event.code === "Comma"
+        ? handlers.enterBlockquoteEditMode(view)
+        : handlers.splitLineEndToBlockquote(view);
+    }
+    return false;
+  };
+
+  const handleUserShortcutKey = (view: EditorViewType, event: KeyboardEvent) => {
+    if (handlers.getEditorMode() !== "normal") return false;
+    for (const action of customShortcutActions) {
+      if (!shortcutBindingMatchesEvent(event, handlers.getCustomShortcut(action))) continue;
+      return handlers.handleCustomShortcut(action, view);
+    }
+    return false;
+  };
+
   const normalNavigationBehavior = EditorView.domEventHandlers({
     keydown(event, view) {
       if (handlers.getEditorMode() !== "normal") return false;
@@ -325,7 +353,13 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       if (key === "capslock") {
         event.preventDefault();
         event.stopImmediatePropagation();
-        return handlers.setWordNavigation(event.getModifierState("CapsLock"));
+        return true;
+      }
+
+      if (handleShiftedAnnotationKey(view, event)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return true;
       }
 
       const visualLineSelection = handlers.isVisualLineSelectionActive();
@@ -367,6 +401,13 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       handlers.setShiftSelectionActive(event.shiftKey);
       if (visualLineSelection) return handlers.extendVisualLineSelection(view, direction);
       return handlers.navigation.moveLineSkippingSrt(view, direction, extend);
+    },
+    keyup(event) {
+      if (handlers.getEditorMode() !== "normal") return false;
+      if (event.ctrlKey || event.metaKey || event.altKey || event.key !== "CapsLock") return false;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return handlers.setWordNavigation(event.getModifierState("CapsLock"));
     }
   });
 
@@ -384,12 +425,10 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
 
   const customShortcutBehavior = EditorView.domEventHandlers({
     keydown(event, view) {
-      if (handlers.getEditorMode() !== "normal") return false;
-      for (const action of customShortcutActions) {
-        if (!shortcutBindingMatchesEvent(event, handlers.getCustomShortcut(action))) continue;
+      if (handleUserShortcutKey(view, event)) {
         event.preventDefault();
         event.stopImmediatePropagation();
-        return handlers.handleCustomShortcut(action, view);
+        return true;
       }
       return false;
     }
@@ -410,6 +449,8 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
     normalPrintableKeyBehavior,
     Prec.high(keymap.of([
       { any: (view, event) => handlers.getEditorMode() === "normal" && handlers.handleVariantPickerKey(view, event) },
+      { any: (view, event) => handleUserShortcutKey(view, event) },
+      { any: (view, event) => handleShiftedAnnotationKey(view, event) },
       { key: "Escape", run: () => handlers.handleEscape() },
       { key: "F2", run: normal(view => { handlers.setMode("insert"); return true; }) },
       { key: "F1", run: normal(() => handlers.toggleHelp()) },

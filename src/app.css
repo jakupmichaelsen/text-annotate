@@ -138,9 +138,8 @@
     padding: 0 8px 0 12px;
     display: flex;
     align-items: center;
-    justify-content: center;
-    flex-direction: column;
-    gap: 4px;
+    justify-content: space-between;
+    gap: 8px;
     margin-top: auto;
     border-top: 1px solid var(--internal-border);
     background: var(--bg-hard);
@@ -148,7 +147,7 @@
 
   .sidebar.collapsed .sidebar-header {
     justify-content: center;
-    padding: 6px 0;
+    padding: 0;
   }
 
   .sidebar-title {
