@@ -353,7 +353,8 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       if (key === "capslock") {
         event.preventDefault();
         event.stopImmediatePropagation();
-        return true;
+        if (event.repeat) return true;
+        return handlers.toggleWordNavigation();
       }
 
       if (handleShiftedAnnotationKey(view, event)) {
@@ -407,7 +408,7 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       if (event.ctrlKey || event.metaKey || event.altKey || event.key !== "CapsLock") return false;
       event.preventDefault();
       event.stopImmediatePropagation();
-      return handlers.setWordNavigation(event.getModifierState("CapsLock"));
+      return true;
     }
   });
 

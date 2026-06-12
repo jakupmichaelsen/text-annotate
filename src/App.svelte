@@ -3977,22 +3977,29 @@ ${body}
     return `display: block; box-sizing: border-box; width: ${width}% !important; margin-left: ${left}% !important; margin-right: ${right}% !important;`;
   }
 
+  function blockquoteTrailingBlankLine(docText: string, to: number) {
+    if (to >= docText.length) return "\n";
+    const nextTwo = docText.slice(to, to + 2);
+    if (nextTwo === "\n\n") return "";
+    return docText.slice(to, to + 1) === "\n" ? "\n" : "\n\n";
+  }
+
   function enterBlockquoteEditMode(v: EditorView) {
     const selection = v.state.selection.main;
     const returnAnchor = selection.head;
+    const docText = v.state.doc.toString();
 
     if (!selection.empty) {
       const from = Math.min(selection.from, selection.to);
       const to = Math.max(selection.from, selection.to);
       const beforeNeedsBreak = from > 0 && v.state.doc.sliceString(from - 1, from) !== "\n";
-      const afterNeedsBreak = to < v.state.doc.length && v.state.doc.sliceString(to, to + 1) !== "\n";
       const selectedText = v.state.doc.sliceString(from, to).replace(/\r\n?/g, "\n");
       const quotedText = selectedText
         .split("\n")
         .map(line => line.startsWith(">") ? line : `> ${line}`)
         .join("\n");
       const prefix = beforeNeedsBreak ? "\n" : "";
-      const suffix = afterNeedsBreak ? "\n" : "";
+      const suffix = blockquoteTrailingBlankLine(docText, to);
       const insert = `${prefix}${quotedText}${suffix}`;
       const cursor = from + prefix.length + quotedText.length;
       const tr = v.state.update({
@@ -4018,13 +4025,13 @@ ${body}
     } else if (line.text.trim().length === 0) {
       cursor = line.from + 2;
       v.dispatch({
-        changes: { from: line.from, to: line.to, insert: "> " },
+        changes: { from: line.from, to: line.to, insert: "> \n" },
         selection: { anchor: cursor }
       });
     } else {
       cursor = line.to + 3;
       v.dispatch({
-        changes: { from: line.to, insert: "\n> " },
+        changes: { from: line.to, insert: "\n> \n" },
         selection: { anchor: cursor }
       });
     }
@@ -4047,7 +4054,7 @@ ${body}
       .map((text, index) => `${index === 0 ? text.trimStart() : text}`.replace(/^> ?/, ""))
       .map(text => `> ${text}`)
       .join("\n");
-    const insert = `\n${quotedText || "> "}`;
+    const insert = `\n${quotedText || "> "}\n`;
     const changeFrom = selection.empty ? head : from;
     const changeTo = selection.empty ? line.to : to;
     const cursor = changeFrom + insert.length;

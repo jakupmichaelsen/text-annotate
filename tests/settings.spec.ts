@@ -182,7 +182,7 @@ test("annotate mode handles shifted action keys", async ({ page }) => {
 
   await loadBuffer("one two three\nfour five six");
   await page.keyboard.press("Shift+,");
-  await expect.poll(editorText).toBe("one two three\nfour five six\n> ");
+  await expect.poll(editorText).toBe("one two three\nfour five six\n> \n\n");
   await expect(page.locator(".mode-switch input")).toBeChecked();
   await page.keyboard.press("Escape");
 
@@ -192,7 +192,7 @@ test("annotate mode handles shifted action keys", async ({ page }) => {
   if (!firstLineBox) throw new Error("First editor line was not visible");
   await page.mouse.click(firstLineBox.x + 35, firstLineBox.y + firstLineBox.height / 2);
   await page.keyboard.press("Shift+.");
-  await expect.poll(editorText).toBe("one \n> two three\nfour five six");
+  await expect.poll(editorText).toBe("one \n> two three\n\n\nfour five six");
   await expect(page.locator(".mode-switch input")).toBeChecked();
 });
 
@@ -204,26 +204,23 @@ test("capslock state controls word navigation", async ({ page }) => {
   await page.goto("/");
   await page.locator(".cm-content").click();
 
-  const dispatchCapsLock = async (active: boolean) => {
-    await page.locator(".cm-content").evaluate((target, capsActive) => {
-      const event = new KeyboardEvent("keyup", { key: "CapsLock", bubbles: true, cancelable: true });
-      Object.defineProperty(event, "getModifierState", {
-        value: (key: string) => key === "CapsLock" ? capsActive : false
-      });
+  const pressCapsLock = async () => {
+    await page.locator(".cm-content").evaluate(target => {
+      const event = new KeyboardEvent("keydown", { key: "CapsLock", bubbles: true, cancelable: true, repeat: false });
       target.dispatchEvent(event);
-    }, active);
+    });
   };
   const wordNavigationToggle = () =>
     page.locator(".settings-toggle-row", { hasText: "CapsLock on = word navigation" }).locator("input");
 
-  await dispatchCapsLock(true);
+  await pressCapsLock();
   await page.getByRole("button", { name: "Settings" }).click();
   await page.getByRole("button", { name: "hotkeys" }).click();
   await expect(wordNavigationToggle()).toBeChecked();
 
   await page.keyboard.press("Escape");
   await page.locator(".cm-content").click();
-  await dispatchCapsLock(false);
+  await pressCapsLock();
   await page.getByRole("button", { name: "Settings" }).click();
   await page.getByRole("button", { name: "hotkeys" }).click();
   await expect(wordNavigationToggle()).not.toBeChecked();
