@@ -119,3 +119,36 @@ test("escape exits edit mode", async ({ page }) => {
   await page.keyboard.press("Escape");
   await expect(modeSwitch).not.toBeChecked();
 });
+
+test("editor selection color follows the CM theme", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.clear();
+    localStorage.setItem("cm6-buffer", "alpha beta");
+    localStorage.setItem("cm6-theme", "nord");
+  });
+  await page.goto("/");
+
+  const selectionColor = async () => {
+    const selection = page.locator(".cm-selectionBackground").first();
+    return selection.evaluate(el => getComputedStyle(el).backgroundColor);
+  };
+
+  const editor = page.locator(".cm-content");
+  await page.locator(".mode-switch").click();
+  await editor.click();
+  await page.keyboard.press("Control+A");
+
+  const nordColor = await selectionColor();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.evaluate(() => {
+    const select = document.querySelector('select[aria-label="Theme"]') as HTMLSelectElement | null;
+    if (!select) throw new Error("Theme select not found");
+    select.value = "gruvbox-dark";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await page.keyboard.press("Escape");
+  await page.locator(".cm-content").click();
+  await page.keyboard.press("Control+A");
+  const gruvboxColor = await selectionColor();
+  expect(gruvboxColor).not.toBe(nordColor);
+});

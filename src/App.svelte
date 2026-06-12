@@ -5396,7 +5396,7 @@ ${body}
     --bg-alt: ${activeTheme.bgAlt}; --border: ${activeTheme.border}; --fg: ${activeTheme.fg};
     --internal-border: transparent;
     --fg-muted: ${activeTheme.fgMuted}; --yellow: ${activeTheme.yellow}; --green: ${activeTheme.green};
-    --blue: ${activeTheme.blue}; --orange: ${activeTheme.orange}; --selection: ${activeTheme.selection};
+    --blue: ${activeTheme.blue}; --orange: ${activeTheme.orange};
     --comment-fg: ${activeTheme.blockquoteFg};
     --active-style-color: ${currentStyleColor};
     --active-line-opacity-percent: ${Math.round(currentLineHighlightOpacity * 100)}%;
