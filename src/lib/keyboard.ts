@@ -1,11 +1,9 @@
 import { Prec, type Extension } from "@codemirror/state";
 import { EditorView, keymap, type EditorView as EditorViewType } from "@codemirror/view";
 
-export const reservedStyleKeys = new Set(["h", "j", "k", "l", "w", "a", "s", "d", "n", "u", "v", "x", "c", "?", " "]);
+export const reservedStyleKeys = new Set(["h", "j", "k", "l", "w", "a", "s", "d", "q", "e", "z", "c", "n", "u", "v", "x", "?", " "]);
 
 export const customShortcutActions = [
-  "stridePrevious",
-  "strideNext",
   "annotationPrevious",
   "annotationNext",
   "variantPrevious",
@@ -15,8 +13,6 @@ export const customShortcutActions = [
 export type CustomShortcutAction = typeof customShortcutActions[number];
 
 export const customShortcutDefinitions: Array<{ action: CustomShortcutAction; label: string; icon: string; defaultValue: string }> = [
-  { action: "stridePrevious", label: "Stride previous", icon: "C", defaultValue: "Shift+c" },
-  { action: "strideNext", label: "Stride next", icon: "c", defaultValue: "c" },
   { action: "annotationPrevious", label: "Annotation previous", icon: "N", defaultValue: "Shift+n" },
   { action: "annotationNext", label: "Annotation next", icon: "n", defaultValue: "n" },
   { action: "variantPrevious", label: "Variant previous", icon: "⇧⇥", defaultValue: "Shift+Tab" },
@@ -48,9 +44,10 @@ export const annotateHandledKeySections: readonly KeyboardHelpSection[] = [
     title: "Navigation",
     items: [
       ["← ↓ ↑ →", "left / down / up / right"],
-      ["CapsLock", "optional word navigation toggle"],
-      ["c / C", "column stride right / left"],
-      ["WASD", "optional navigation keys"],
+      ["Q/E", "WASD cluster character left / right"],
+      ["A/D", "WASD cluster word left / right"],
+      ["Z/C", "WASD cluster stride left / right"],
+      ["W/S", "WASD cluster line up / down"],
       ["HJKL", "optional navigation keys"]
     ]
   },
@@ -228,7 +225,6 @@ export function isAppShortcutCandidate(
   if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key === ",") return true;
   if (event.metaKey) return false;
   if (isModeShortcut(event) || isAudioShortcut(event)) return true;
-  if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key === "CapsLock") return true;
   if (event.ctrlKey && !event.altKey && (event.key === "z" || event.key === "y" || event.key === "Z")) return true;
   if (event.ctrlKey && !event.altKey && event.key === "Tab") return true;
   if (event.altKey) return false;
@@ -247,19 +243,17 @@ export function isAppShortcutCandidate(
     event.key === "ArrowRight" ||
     event.key === "ArrowUp" ||
     event.key === "ArrowDown" ||
-    "hjklwasdcHJKLWASDCxXvVnNuU<>".includes(event.key);
+    "hjklwasdqezcHJKLWASDQEZCxXvVnNuU<>".includes(event.key);
 }
 
 export type EditorMode = "normal" | "insert";
 
 export type EditorKeymapHandlers = {
   getEditorMode: () => EditorMode;
-  useWordNavigation: () => boolean;
-  useCapsLockWordNavigation: () => boolean;
+  useArrowWordNavigation: () => boolean;
+  useHjklWordNavigation: () => boolean;
   useWasdNavigation: () => boolean;
   useHjklNavigation: () => boolean;
-  toggleWordNavigation: () => boolean;
-  setWordNavigation: (active: boolean) => boolean;
   getCustomShortcut: (action: CustomShortcutAction) => string;
   handleCustomShortcut: (action: CustomShortcutAction, view: EditorViewType) => boolean;
   handleVariantPickerKey: (view: EditorViewType, event: KeyboardEvent) => boolean;
@@ -352,13 +346,6 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       if (event.ctrlKey || event.metaKey || event.altKey) return false;
 
       const key = event.key.toLowerCase();
-      if (key === "capslock") {
-        if (!handlers.useCapsLockWordNavigation()) return false;
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        if (event.repeat) return true;
-        return handlers.toggleWordNavigation();
-      }
 
       if (handleShiftedAnnotationKey(view, event)) {
         event.preventDefault();
@@ -372,9 +359,11 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       if (
         key === "arrowleft" || key === "arrowright" ||
         key === "h" || key === "l" ||
-        key === "a" || key === "d"
+        key === "a" || key === "d" ||
+        key === "q" || key === "e" ||
+        key === "z" || key === "c"
       ) {
-        const isWasdNavigation = key === "a" || key === "d";
+        const isWasdNavigation = key === "a" || key === "d" || key === "q" || key === "e" || key === "z" || key === "c";
         const isHjklNavigation = key === "h" || key === "l";
         if (isWasdNavigation && !handlers.useWasdNavigation()) return false;
         if (isHjklNavigation && !handlers.useHjklNavigation()) return false;
@@ -383,10 +372,18 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
           event.stopImmediatePropagation();
           return true;
         }
-        const forward = key === "arrowright" || key === "l" || key === "d";
+        const forward = key === "arrowright" || key === "l" || key === "d" || key === "e" || key === "c";
         event.preventDefault();
         event.stopImmediatePropagation();
-        return moveHorizontal(view, forward, extend, handlers.useWordNavigation());
+        if (key === "z" || key === "c") return handlers.moveCursorByColumnStride(view, forward ? 1 : -1);
+        const useWordNavigation = key === "a" || key === "d"
+          ? true
+          : isHjklNavigation
+            ? handlers.useHjklWordNavigation()
+            : key === "arrowleft" || key === "arrowright"
+              ? handlers.useArrowWordNavigation()
+              : false;
+        return moveHorizontal(view, forward, extend, useWordNavigation);
       }
 
       let direction: "up" | "down" | null = null;
@@ -405,14 +402,6 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       handlers.setShiftSelectionActive(event.shiftKey);
       if (visualLineSelection) return handlers.extendVisualLineSelection(view, direction);
       return handlers.navigation.moveLineSkippingSrt(view, direction, extend);
-    },
-    keyup(event) {
-      if (handlers.getEditorMode() !== "normal") return false;
-      if (event.ctrlKey || event.metaKey || event.altKey || event.key !== "CapsLock") return false;
-      if (!handlers.useCapsLockWordNavigation()) return false;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      return true;
     }
   });
 

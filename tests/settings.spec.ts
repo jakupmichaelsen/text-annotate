@@ -278,13 +278,16 @@ test("annotates exact short selections", async ({ page }) => {
   await expect.poll(editorText).toBe("play`ed`");
 });
 
-test("capslock shortcut setting controls word navigation toggle", async ({ page }) => {
+test("navigation settings split arrows, WASD cluster, and HJKL word movement", async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.clear();
-    localStorage.setItem("cm6-buffer", "alpha beta");
+    localStorage.setItem("cm6-buffer", "alpha beta gamma");
     localStorage.setItem("cm6-layout-settings", JSON.stringify({
-      capsLockWordNavigation: false,
-      wordNavigation: false
+      arrowWordNavigation: false,
+      wasdNavigation: true,
+      hjklNavigation: true,
+      hjklWordNavigation: false,
+      columnStride: 6
     }));
   });
   await page.goto("/");
@@ -295,36 +298,39 @@ test("capslock shortcut setting controls word navigation toggle", async ({ page 
     await page.keyboard.press("Control+Home");
     await page.keyboard.press("Escape");
   };
-  const pressCapsLock = async () => {
-    await page.locator(".cm-content").evaluate(target => {
-      const event = new KeyboardEvent("keydown", { key: "CapsLock", bubbles: true, cancelable: true, repeat: false });
-      target.dispatchEvent(event);
-    });
-  };
   const selectedText = () => page.evaluate(() => getSelection()?.toString() ?? "");
-  const capsLockToggle = () =>
-    page.locator(".settings-toggle-row", { hasText: "CapsLock toggles word navigation" }).locator("input");
 
   await resetCursor();
-  await pressCapsLock();
   await page.keyboard.press("Shift+ArrowRight");
+  await expect.poll(selectedText).toBe("a");
+
+  await resetCursor();
+  await page.keyboard.press("Shift+q");
+  await expect.poll(selectedText).toBe("");
+  await page.keyboard.press("Shift+e");
+  await expect.poll(selectedText).toBe("a");
+
+  await resetCursor();
+  await page.keyboard.press("Shift+d");
+  await expect.poll(selectedText).toBe("alpha");
+
+  await resetCursor();
+  await page.keyboard.press("Shift+l");
   await expect.poll(selectedText).toBe("a");
 
   await page.getByRole("button", { name: "Settings" }).click();
   await page.getByRole("button", { name: "hotkeys" }).click();
-  await expect(capsLockToggle()).not.toBeChecked();
-  await capsLockToggle().check();
-  await expect(capsLockToggle()).toBeChecked();
+  await page.locator(".settings-toggle-row", { hasText: "arrows use word navigation" }).locator("input").check();
+  await page.locator(".settings-toggle-row", { hasText: "HJKL uses word navigation" }).locator("input").check();
 
   await page.keyboard.press("Escape");
   await page.locator(".cm-content").click();
   await resetCursor();
   await page.keyboard.press("Shift+ArrowRight");
-  await expect.poll(selectedText).toBe("a");
+  await expect.poll(selectedText).toBe("alpha");
 
   await resetCursor();
-  await pressCapsLock();
-  await page.keyboard.press("Shift+ArrowRight");
+  await page.keyboard.press("Shift+l");
   await expect.poll(selectedText).toBe("alpha");
 });
 
