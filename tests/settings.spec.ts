@@ -182,7 +182,7 @@ test("annotate mode handles shifted action keys", async ({ page }) => {
 
   await loadBuffer("one two three\nfour five six");
   await page.keyboard.press("Shift+,");
-  await expect.poll(editorText).toBe("one two three\nfour five six\n> \n\n");
+  await expect.poll(editorText).toBe("one two three\nfour five six\n> \n> ");
   await expect(page.locator(".mode-switch input")).toBeChecked();
   await page.keyboard.press("Escape");
 
@@ -192,8 +192,52 @@ test("annotate mode handles shifted action keys", async ({ page }) => {
   if (!firstLineBox) throw new Error("First editor line was not visible");
   await page.mouse.click(firstLineBox.x + 35, firstLineBox.y + firstLineBox.height / 2);
   await page.keyboard.press("Shift+.");
-  await expect.poll(editorText).toBe("one \n> two three\n\n\nfour five six");
+  await expect.poll(editorText).toBe("one \n> two three\n> \nfour five six");
   await expect(page.locator(".mode-switch input")).toBeChecked();
+});
+
+test("blockquote edit mode keeps a visible trailing quote line", async ({ page }) => {
+  const loadBufferAtEnd = async (text: string) => {
+    await page.evaluate(value => {
+      localStorage.clear();
+      localStorage.setItem("cm6-buffer", value);
+      location.reload();
+    }, text);
+    await page.waitForLoadState("networkidle");
+    await page.locator(".cm-content").click();
+    await page.keyboard.press("F2");
+    await page.keyboard.press("Control+End");
+    await page.keyboard.press("Escape");
+  };
+  const editorText = () => page.locator(".cm-content").evaluate(el => (el as HTMLElement).innerText);
+
+  await page.goto("/");
+
+  await loadBufferAtEnd("alpha");
+  await page.keyboard.press("Shift+,");
+  await page.keyboard.type("note");
+  await expect.poll(editorText).toBe("alpha\n> note\n> ");
+
+  await page.keyboard.press("Shift+Enter");
+  await page.keyboard.type("more");
+  await expect.poll(editorText).toBe("alpha\n> note\n> more\n> ");
+
+  await page.keyboard.press("Tab");
+  await expect.poll(editorText).toBe("alpha\n> note\n> > more\n> ");
+  await page.keyboard.press("Shift+Tab");
+  await expect.poll(editorText).toBe("alpha\n> note\n> more\n> ");
+
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("F2");
+  await page.keyboard.type("after");
+  await expect.poll(editorText).toBe("alpha\n> note\n> more\nafter");
+
+  await loadBufferAtEnd("beta");
+  await page.keyboard.press("Shift+,");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("F2");
+  await page.keyboard.type("X");
+  await expect.poll(editorText).toBe("betaX\n> \n> ");
 });
 
 test("annotates exact short selections", async ({ page }) => {

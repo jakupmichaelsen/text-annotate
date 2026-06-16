@@ -28,6 +28,15 @@
     annotationWithTitle,
     summaryVisibleText
   } from "./lib/annotations";
+  import {
+    cancelBlockquoteEdit,
+    enterBlockquoteEdit,
+    finishBlockquoteEdit,
+    indentBlockquoteLine,
+    insertBlockquoteLineBreak as insertBlockquoteEditLineBreak,
+    outdentBlockquoteLine,
+    splitLineEndToBlockquote as splitLineEndToBlockquoteEdit
+  } from "./lib/blockquoteEdit";
   import { createNavigationCommands } from "./lib/navigation";
   import {
     buildCodeMirrorTheme,
@@ -1678,6 +1687,7 @@
       view?.focus();
       return true;
     }
+    if (view && cancelBlockquoteEditMode(view)) return true;
     setMode("normal");
     return true;
   }
@@ -3983,103 +3993,35 @@ ${body}
     return `display: block; box-sizing: border-box; width: ${width}% !important; margin-left: ${left}% !important; margin-right: ${right}% !important; border-left: 4px solid ${activeTheme.orange}; background: color-mix(in srgb, ${activeTheme.bgAlt} 86%, ${activeTheme.orange} 14%); color: ${activeTheme.blockquoteFg}; border-radius: 0 6px 6px 0; padding: 0.08rem 0.45rem 0.08rem 0.7rem; margin-top: 0; margin-bottom: 0; box-shadow: inset 0 0 0 1px color-mix(in srgb, ${activeTheme.border} 70%, transparent);`;
   }
 
-  function blockquoteTrailingBlankLine(docText: string, to: number) {
-    if (to >= docText.length) return "\n";
-    const nextTwo = docText.slice(to, to + 2);
-    if (nextTwo === "\n\n") return "";
-    return docText.slice(to, to + 1) === "\n" ? "\n" : "\n\n";
-  }
-
   function enterBlockquoteEditMode(v: EditorView) {
-    const selection = v.state.selection.main;
-    const returnAnchor = selection.head;
-    const docText = v.state.doc.toString();
-
-    if (!selection.empty) {
-      const from = Math.min(selection.from, selection.to);
-      const to = Math.max(selection.from, selection.to);
-      const beforeNeedsBreak = from > 0 && v.state.doc.sliceString(from - 1, from) !== "\n";
-      const selectedText = v.state.doc.sliceString(from, to).replace(/\r\n?/g, "\n");
-      const quotedText = selectedText
-        .split("\n")
-        .map(line => line.startsWith(">") ? line : `> ${line}`)
-        .join("\n");
-      const prefix = beforeNeedsBreak ? "\n" : "";
-      const suffix = blockquoteTrailingBlankLine(docText, to);
-      const insert = `${prefix}${quotedText}${suffix}`;
-      const cursor = from + prefix.length + quotedText.length;
-      const tr = v.state.update({
-        changes: { from, to, insert },
-        selection: { anchor: cursor }
-      });
-      blockquoteEditReturnAnchor = tr.changes.mapPos(returnAnchor, 1);
-      v.dispatch(tr);
-      setMode("insert");
-      return true;
-    }
-
-    const head = v.state.selection.main.head;
-    const line = v.state.doc.lineAt(head);
-    let cursor = head;
-    blockquoteEditReturnAnchor = head;
-
-    if (line.text.startsWith(">")) {
-      const cleaned = cleanBlockquoteLineText(line.text);
-      const contentEnd = line.from + cleaned.length;
-      cursor = Math.max(line.from + (line.text.startsWith("> ") ? 2 : 1), contentEnd);
-      v.dispatch({ selection: { anchor: cursor } });
-    } else if (line.text.trim().length === 0) {
-      cursor = line.from + 2;
-      v.dispatch({
-        changes: { from: line.from, to: line.to, insert: "> \n" },
-        selection: { anchor: cursor }
-      });
-    } else {
-      cursor = line.to + 3;
-      v.dispatch({
-        changes: { from: line.to, insert: "\n> \n" },
-        selection: { anchor: cursor }
-      });
-    }
-
+    const result = enterBlockquoteEdit(v);
+    if (!result.handled) return false;
+    blockquoteEditReturnAnchor = result.returnAnchor;
     setMode("insert");
     return true;
   }
 
   function splitLineEndToBlockquote(v: EditorView) {
-    const selection = v.state.selection.main;
-    const head = selection.head;
-    const line = v.state.doc.lineAt(head);
-    const from = Math.min(selection.from, selection.to);
-    const to = Math.max(selection.from, selection.to);
-    const selectedText = selection.empty
-      ? v.state.doc.sliceString(head, line.to)
-      : v.state.doc.sliceString(from, to);
-    const quotedText = selectedText.replace(/\r\n?/g, "\n")
-      .split("\n")
-      .map((text, index) => `${index === 0 ? text.trimStart() : text}`.replace(/^> ?/, ""))
-      .map(text => `> ${text}`)
-      .join("\n");
-    const insert = `\n${quotedText || "> "}\n`;
-    const changeFrom = selection.empty ? head : from;
-    const changeTo = selection.empty ? line.to : to;
-    const cursor = changeFrom + insert.length;
-
-    blockquoteEditReturnAnchor = head;
-    v.dispatch({
-      changes: { from: changeFrom, to: changeTo, insert },
-      selection: EditorSelection.cursor(cursor)
-    });
+    const result = splitLineEndToBlockquoteEdit(v);
+    if (!result.handled) return false;
+    blockquoteEditReturnAnchor = result.returnAnchor;
     setMode("insert");
     return true;
   }
 
   function finishBlockquoteEditMode(v: EditorView) {
-    if (editorMode !== "insert" || blockquoteEditReturnAnchor === null) return false;
-    const returnAnchor = Math.max(0, Math.min(blockquoteEditReturnAnchor, v.state.doc.length));
+    if (editorMode !== "insert") return false;
+    if (!finishBlockquoteEdit(v, blockquoteEditReturnAnchor)) return false;
     blockquoteEditReturnAnchor = null;
     setMode("normal");
-    v.dispatch({ selection: EditorSelection.cursor(returnAnchor) });
+    return true;
+  }
+
+  function cancelBlockquoteEditMode(v: EditorView) {
+    if (editorMode !== "insert") return false;
+    if (!cancelBlockquoteEdit(v, blockquoteEditReturnAnchor)) return false;
+    blockquoteEditReturnAnchor = null;
+    setMode("normal");
     return true;
   }
 
@@ -4090,35 +4032,18 @@ ${body}
   }
 
   function insertBlockquoteLineBreak(v: EditorView) {
-    if (editorMode !== "insert" || blockquoteEditReturnAnchor === null) return false;
-    const selection = v.state.selection.main;
-    const from = Math.min(selection.from, selection.to);
-    const to = Math.max(selection.from, selection.to);
-    const line = v.state.doc.lineAt(from);
-    const insert = line.text.startsWith(">") ? "\n> " : "\n";
-    const cursor = from + insert.length;
-    v.dispatch({
-      changes: { from, to, insert },
-      selection: { anchor: cursor }
-    });
-    return true;
+    if (editorMode !== "insert") return false;
+    return insertBlockquoteEditLineBreak(v, blockquoteEditReturnAnchor);
   }
 
   function insertBlockquoteLevel(v: EditorView) {
-    if (editorMode !== "insert") return false;
-    const selection = v.state.selection.main;
-    if (!selection.empty) return false;
-    const head = selection.head;
-    const line = v.state.doc.lineAt(head);
-    if (!line.text.startsWith(">")) return false;
+    if (editorMode !== "insert" || blockquoteEditReturnAnchor === null) return false;
+    return indentBlockquoteLine(v);
+  }
 
-    const match = /^(?:>\s*)+/.exec(line.text);
-    const insertAt = line.from + (match?.[0].length ?? 0);
-    v.dispatch({
-      changes: { from: insertAt, insert: "> " },
-      selection: { anchor: head + (insertAt <= head ? 2 : 0) }
-    });
-    return true;
+  function removeBlockquoteLevel(v: EditorView) {
+    if (editorMode !== "insert" || blockquoteEditReturnAnchor === null) return false;
+    return outdentBlockquoteLine(v);
   }
 
   // Annotation tooltip StateField
@@ -4921,7 +4846,6 @@ ${body}
       const currentLineStart = v.state.doc.lineAt(v.state.selection.main.head).from;
       for (const { from, to } of v.visibleRanges) {
         let pos = from;
-        let previousWasBlockquote = false;
         while (pos <= to) {
           const line = v.state.doc.lineAt(pos);
           const isBlockquoteLine = line.text.startsWith(">");
@@ -4930,14 +4854,6 @@ ${body}
               class: "cm-blockquote-line",
               attributes: { style: blockquoteStyle() }
             }));
-            previousWasBlockquote = true;
-          } else {
-            if (previousWasBlockquote && line.text.trim().length === 0) {
-              builder.add(line.from, line.from, Decoration.line({ class: "cm-blockquote-gap" }));
-            }
-            previousWasBlockquote = false;
-          }
-          if (isBlockquoteLine) {
             const showMarkup = annotationMode === "all" || (annotationMode === "raw" && line.from === currentLineStart);
             const comment = /<!--\s*align:(?:left|center|right)\s+width:\d{1,3}\s*-->/i.exec(line.text);
             if (comment && !showMarkup) builder.add(line.from + comment.index, line.from + comment.index + comment[0].length, Decoration.replace({ widget: new EmptyWidget(), inclusive: false }));
@@ -5305,6 +5221,7 @@ ${body}
         finishBlockquoteEditMode,
         insertBlockquoteLineBreak,
         insertBlockquoteLevel,
+        removeBlockquoteLevel,
         exitBlockquoteEditForNavigation,
         cursorCharLeft,
         cursorCharRight,
@@ -5345,13 +5262,7 @@ ${body}
       annotationTooltipField,
       EditorView.theme({
         ".cm-tooltip": { background: "transparent", border: "none" },
-        ".cm-annotation-bubble": { display: "block" },
-        ".cm-blockquote-gap": {
-          lineHeight: "0.45 !important",
-          minHeight: "0.45em",
-          paddingTop: "0 !important",
-          paddingBottom: "0 !important"
-        }
+        ".cm-annotation-bubble": { display: "block" }
       }),
       themeCompartment.of(buildThemeExtensions(themeMode))
     ];

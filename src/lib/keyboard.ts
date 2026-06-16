@@ -271,6 +271,7 @@ export type EditorKeymapHandlers = {
   finishBlockquoteEditMode: (view: EditorViewType) => boolean;
   insertBlockquoteLineBreak: (view: EditorViewType) => boolean;
   insertBlockquoteLevel: (view: EditorViewType) => boolean;
+  removeBlockquoteLevel: (view: EditorViewType) => boolean;
   exitBlockquoteEditForNavigation: (view: EditorViewType) => boolean;
   cursorCharLeft: (view: EditorViewType) => boolean;
   cursorCharRight: (view: EditorViewType) => boolean;
@@ -460,12 +461,13 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       { key: "F1", run: normal(() => handlers.toggleHelp()) },
       { key: "Mod-,", run: normal(() => handlers.toggleSettings()) },
       { key: "Ctrl-Tab", run: normal(view => handlers.scrollCurrentLineIntoView(view)) },
-      { key: "Enter", run: normal(view => handlers.finishBlockquoteEditMode(view)) },
-      { key: "Shift-Enter", run: normal(view => handlers.insertBlockquoteLineBreak(view)) },
-      { key: "Alt-Enter", run: normal(view => handlers.insertBlockquoteLineBreak(view)) },
-      { key: "Tab", run: normal(view => handlers.insertBlockquoteLevel(view)) },
-      { key: "ArrowUp", run: normal(view => handlers.exitBlockquoteEditForNavigation(view)) },
-      { key: "ArrowDown", run: normal(view => handlers.exitBlockquoteEditForNavigation(view)) },
+      { key: "Enter", run: view => handlers.finishBlockquoteEditMode(view) },
+      { key: "Shift-Enter", run: view => handlers.insertBlockquoteLineBreak(view) },
+      { key: "Alt-Enter", run: view => handlers.insertBlockquoteLineBreak(view) },
+      { key: "Tab", run: view => handlers.insertBlockquoteLevel(view) },
+      { key: "Shift-Tab", run: view => handlers.removeBlockquoteLevel(view) },
+      { key: "ArrowUp", run: view => handlers.exitBlockquoteEditForNavigation(view) },
+      { key: "ArrowDown", run: view => handlers.exitBlockquoteEditForNavigation(view) },
 
       { key: "Ctrl-ArrowLeft",        run: normal(view => handlers.navigation.moveByWordCount(view, false, 1)) },
       { key: "Ctrl-ArrowRight",       run: normal(view => handlers.navigation.moveByWordCount(view, true, 1)) },
