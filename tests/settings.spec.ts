@@ -196,34 +196,92 @@ test("annotate mode handles shifted action keys", async ({ page }) => {
   await expect(page.locator(".mode-switch input")).toBeChecked();
 });
 
-test("capslock state controls word navigation", async ({ page }) => {
+test("annotates exact short selections", async ({ page }) => {
+  const loadBuffer = async (text: string) => {
+    await page.evaluate(value => {
+      localStorage.clear();
+      localStorage.setItem("cm6-buffer", value);
+      location.reload();
+    }, text);
+    await page.waitForLoadState("networkidle");
+    await page.locator(".cm-content").click();
+    await page.keyboard.press("F2");
+    await page.keyboard.press("Control+Home");
+    await page.keyboard.press("Escape");
+  };
+  const editorText = () => page.locator(".cm-content").evaluate(el => (el as HTMLElement).innerText);
+  const selectedText = () => page.evaluate(() => getSelection()?.toString() ?? "");
+
+  await page.goto("/");
+
+  await loadBuffer("abc de");
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("Shift+ArrowRight");
+  await page.keyboard.press("Space");
+  await expect.poll(editorText).toBe("abc` `de");
+
+  await loadBuffer("played");
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("Shift+ArrowRight");
+  await page.keyboard.press("Shift+ArrowRight");
+  await expect.poll(selectedText).toBe("ed");
+  await page.keyboard.press("Space");
+  await expect.poll(editorText).toBe("play`ed`");
+});
+
+test("capslock shortcut setting controls word navigation toggle", async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.clear();
     localStorage.setItem("cm6-buffer", "alpha beta");
+    localStorage.setItem("cm6-layout-settings", JSON.stringify({
+      capsLockWordNavigation: false,
+      wordNavigation: false
+    }));
   });
   await page.goto("/");
   await page.locator(".cm-content").click();
 
+  const resetCursor = async () => {
+    await page.keyboard.press("F2");
+    await page.keyboard.press("Control+Home");
+    await page.keyboard.press("Escape");
+  };
   const pressCapsLock = async () => {
     await page.locator(".cm-content").evaluate(target => {
       const event = new KeyboardEvent("keydown", { key: "CapsLock", bubbles: true, cancelable: true, repeat: false });
       target.dispatchEvent(event);
     });
   };
-  const wordNavigationToggle = () =>
-    page.locator(".settings-toggle-row", { hasText: "CapsLock on = word navigation" }).locator("input");
+  const selectedText = () => page.evaluate(() => getSelection()?.toString() ?? "");
+  const capsLockToggle = () =>
+    page.locator(".settings-toggle-row", { hasText: "CapsLock toggles word navigation" }).locator("input");
 
+  await resetCursor();
   await pressCapsLock();
+  await page.keyboard.press("Shift+ArrowRight");
+  await expect.poll(selectedText).toBe("a");
+
   await page.getByRole("button", { name: "Settings" }).click();
   await page.getByRole("button", { name: "hotkeys" }).click();
-  await expect(wordNavigationToggle()).toBeChecked();
+  await expect(capsLockToggle()).not.toBeChecked();
+  await capsLockToggle().check();
+  await expect(capsLockToggle()).toBeChecked();
 
   await page.keyboard.press("Escape");
   await page.locator(".cm-content").click();
+  await resetCursor();
+  await page.keyboard.press("Shift+ArrowRight");
+  await expect.poll(selectedText).toBe("a");
+
+  await resetCursor();
   await pressCapsLock();
-  await page.getByRole("button", { name: "Settings" }).click();
-  await page.getByRole("button", { name: "hotkeys" }).click();
-  await expect(wordNavigationToggle()).not.toBeChecked();
+  await page.keyboard.press("Shift+ArrowRight");
+  await expect.poll(selectedText).toBe("alpha");
 });
 
 test("annotation previous follows user-configured shortcut", async ({ page }) => {

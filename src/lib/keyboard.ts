@@ -48,7 +48,7 @@ export const annotateHandledKeySections: readonly KeyboardHelpSection[] = [
     title: "Navigation",
     items: [
       ["← ↓ ↑ →", "left / down / up / right"],
-      ["CapsLock", "on = word navigation, off = character navigation"],
+      ["CapsLock", "optional word navigation toggle"],
       ["c / C", "column stride right / left"],
       ["WASD", "optional navigation keys"],
       ["HJKL", "optional navigation keys"]
@@ -255,6 +255,7 @@ export type EditorMode = "normal" | "insert";
 export type EditorKeymapHandlers = {
   getEditorMode: () => EditorMode;
   useWordNavigation: () => boolean;
+  useCapsLockWordNavigation: () => boolean;
   useWasdNavigation: () => boolean;
   useHjklNavigation: () => boolean;
   toggleWordNavigation: () => boolean;
@@ -351,6 +352,7 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
 
       const key = event.key.toLowerCase();
       if (key === "capslock") {
+        if (!handlers.useCapsLockWordNavigation()) return false;
         event.preventDefault();
         event.stopImmediatePropagation();
         if (event.repeat) return true;
@@ -406,6 +408,7 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
     keyup(event) {
       if (handlers.getEditorMode() !== "normal") return false;
       if (event.ctrlKey || event.metaKey || event.altKey || event.key !== "CapsLock") return false;
+      if (!handlers.useCapsLockWordNavigation()) return false;
       event.preventDefault();
       event.stopImmediatePropagation();
       return true;

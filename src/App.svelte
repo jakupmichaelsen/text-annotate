@@ -133,6 +133,7 @@
   let columnGuideThickness = initialLayoutSettings.columnGuideThickness ?? 1;
   let columnStride = initialLayoutSettings.columnStride ?? 40;
   let wordNavigation = initialLayoutSettings.wordNavigation ?? initialLayoutSettings.arrowWordNavigation ?? false;
+  let capsLockWordNavigation = initialLayoutSettings.capsLockWordNavigation ?? true;
   let wasdNavigation = initialLayoutSettings.wasdNavigation ?? initialLayoutSettings.wasdWordNavigation ?? false;
   let hjklNavigation = initialLayoutSettings.hjklNavigation ?? initialLayoutSettings.hjklWordNavigation ?? false;
   let layoutFontFamilyName = initialLayoutSettings.fontFamilyName ?? defaultFontFamilyName;
@@ -362,6 +363,7 @@
     columnGuideThickness;
     columnStride;
     wordNavigation;
+    capsLockWordNavigation;
     wasdNavigation;
     hjklNavigation;
     customShortcuts;
@@ -1297,6 +1299,7 @@
     columnGuideThickness: number;
     columnStride: number;
     wordNavigation: boolean;
+    capsLockWordNavigation: boolean;
     wasdNavigation: boolean;
     hjklNavigation: boolean;
     arrowWordNavigation: boolean;
@@ -1444,6 +1447,7 @@
           : typeof settings.arrowWordNavigation === "boolean"
             ? settings.arrowWordNavigation
             : undefined,
+      capsLockWordNavigation: typeof settings.capsLockWordNavigation === "boolean" ? settings.capsLockWordNavigation : undefined,
       wasdNavigation:
         typeof settings.wasdNavigation === "boolean"
           ? settings.wasdNavigation
@@ -1487,6 +1491,7 @@
       columnGuideThickness,
       columnStride,
       wordNavigation,
+      capsLockWordNavigation,
       wasdNavigation,
       hjklNavigation,
       fontFavorites: layoutFontFavorites,
@@ -1529,6 +1534,7 @@
     columnGuideThickness = settings.columnGuideThickness ?? columnGuideThickness;
     columnStride = settings.columnStride ?? columnStride;
     wordNavigation = settings.wordNavigation ?? wordNavigation;
+    capsLockWordNavigation = settings.capsLockWordNavigation ?? capsLockWordNavigation;
     wasdNavigation = settings.wasdNavigation ?? wasdNavigation;
     hjklNavigation = settings.hjklNavigation ?? hjklNavigation;
     layoutFontFavorites = settings.fontFavorites ?? layoutFontFavorites;
@@ -3974,7 +3980,7 @@ ${body}
     const available = 100 - width;
     const left = Math.round((available * clampNumber(blockquoteAlign, 0, 100)) / 100);
     const right = available - left;
-    return `display: block; box-sizing: border-box; width: ${width}% !important; margin-left: ${left}% !important; margin-right: ${right}% !important;`;
+    return `display: block; box-sizing: border-box; width: ${width}% !important; margin-left: ${left}% !important; margin-right: ${right}% !important; border-left: 4px solid ${activeTheme.orange}; background: color-mix(in srgb, ${activeTheme.bgAlt} 86%, ${activeTheme.orange} 14%); color: ${activeTheme.blockquoteFg}; border-radius: 0 6px 6px 0; padding: 0.08rem 0.45rem 0.08rem 0.7rem; margin-top: 0; margin-bottom: 0; box-shadow: inset 0 0 0 1px color-mix(in srgb, ${activeTheme.border} 70%, transparent);`;
   }
 
   function blockquoteTrailingBlankLine(docText: string, to: number) {
@@ -4691,9 +4697,18 @@ ${body}
       const nextTo = Math.max(nextFrom, to - trailing);
       return { from: nextFrom, to: nextTo, text: state.doc.sliceString(nextFrom, nextTo) };
     };
+    const shouldPreserveExactSelection = (text: string) =>
+      text.length <= 3 ||
+      /^\s+$/.test(text) ||
+      /^[\p{P}\p{S}\s]+$/u.test(text);
 
     if (!range.empty) {
-      const { from, to, text: selectedText } = trimAnnotationPunctuation(range.from, range.to);
+      const rawFrom = Math.min(range.from, range.to);
+      const rawTo = Math.max(range.from, range.to);
+      const rawText = state.doc.sliceString(rawFrom, rawTo);
+      const { from, to, text: selectedText } = shouldPreserveExactSelection(rawText)
+        ? { from: rawFrom, to: rawTo, text: rawText }
+        : trimAnnotationPunctuation(rawFrom, rawTo);
       if (!selectedText) return true;
       const insert = makeInsert(selectedText);
       annotationPreview = null;
@@ -4906,13 +4921,23 @@ ${body}
       const currentLineStart = v.state.doc.lineAt(v.state.selection.main.head).from;
       for (const { from, to } of v.visibleRanges) {
         let pos = from;
+        let previousWasBlockquote = false;
         while (pos <= to) {
           const line = v.state.doc.lineAt(pos);
-          if (line.text.startsWith(">")) {
+          const isBlockquoteLine = line.text.startsWith(">");
+          if (isBlockquoteLine) {
             builder.add(line.from, line.from, Decoration.line({
               class: "cm-blockquote-line",
               attributes: { style: blockquoteStyle() }
             }));
+            previousWasBlockquote = true;
+          } else {
+            if (previousWasBlockquote && line.text.trim().length === 0) {
+              builder.add(line.from, line.from, Decoration.line({ class: "cm-blockquote-gap" }));
+            }
+            previousWasBlockquote = false;
+          }
+          if (isBlockquoteLine) {
             const showMarkup = annotationMode === "all" || (annotationMode === "raw" && line.from === currentLineStart);
             const comment = /<!--\s*align:(?:left|center|right)\s+width:\d{1,3}\s*-->/i.exec(line.text);
             if (comment && !showMarkup) builder.add(line.from + comment.index, line.from + comment.index + comment[0].length, Decoration.replace({ widget: new EmptyWidget(), inclusive: false }));
@@ -5256,6 +5281,7 @@ ${body}
       buildEditorKeymap({
         getEditorMode: () => editorMode,
         useWordNavigation: () => wordNavigation,
+        useCapsLockWordNavigation: () => capsLockWordNavigation,
         useWasdNavigation: () => wasdNavigation,
         useHjklNavigation: () => hjklNavigation,
         toggleWordNavigation: () => {
@@ -5319,7 +5345,13 @@ ${body}
       annotationTooltipField,
       EditorView.theme({
         ".cm-tooltip": { background: "transparent", border: "none" },
-        ".cm-annotation-bubble": { display: "block" }
+        ".cm-annotation-bubble": { display: "block" },
+        ".cm-blockquote-gap": {
+          lineHeight: "0.45 !important",
+          minHeight: "0.45em",
+          paddingTop: "0 !important",
+          paddingBottom: "0 !important"
+        }
       }),
       themeCompartment.of(buildThemeExtensions(themeMode))
     ];
@@ -5678,8 +5710,8 @@ ${body}
             </div>
             <label class="settings-toggle-row">
               <span class="settings-control-icon" aria-hidden="true">⇪</span>
-              <span>CapsLock on = word navigation</span>
-              <input type="checkbox" checked={wordNavigation} on:change={event => wordNavigation = (event.target as HTMLInputElement).checked} />
+              <span>CapsLock toggles word navigation</span>
+              <input type="checkbox" checked={capsLockWordNavigation} on:change={event => capsLockWordNavigation = (event.target as HTMLInputElement).checked} />
             </label>
             <label class="settings-toggle-row">
               <span class="settings-control-icon" aria-hidden="true">W</span>
