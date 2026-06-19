@@ -134,8 +134,13 @@
   let padTop = initialLayoutSettings.padTop ?? 16;
   let padBottom = initialLayoutSettings.padBottom ?? 64;
   let editorViewportHeight = 0;
+  let editorScrollTop = 0;
+  let editorScrollBottom = 0;
   let cursorScrollMarginTopLines = initialLayoutSettings.cursorScrollMarginTopLines ?? initialLayoutSettings.cursorScrollMarginLines ?? 4;
   let cursorScrollMarginBottomLines = initialLayoutSettings.cursorScrollMarginBottomLines ?? initialLayoutSettings.cursorScrollMarginLines ?? 4;
+  type ScrollBorderTone = "background" | "border" | "muted" | "accent" | "style";
+  let scrollBorderTone: ScrollBorderTone = initialLayoutSettings.scrollBorderTone ?? "muted";
+  let scrollBorderOpacity = initialLayoutSettings.scrollBorderOpacity ?? 0.35;
   let lineHeight = initialLayoutSettings.lineHeight ?? 1.6;
   let fontSize = initialLayoutSettings.fontSize ?? 14;
   let paragraphSpacing = initialLayoutSettings.paragraphSpacing ?? 0;
@@ -364,6 +369,8 @@
     padBottom;
     cursorScrollMarginTopLines;
     cursorScrollMarginBottomLines;
+    scrollBorderTone;
+    scrollBorderOpacity;
     lineHeight;
     fontSize;
     paragraphSpacing;
@@ -408,6 +415,26 @@
   $: scrollBorderBottomEffectiveLines = Math.min(cursorScrollMarginBottomLines, scrollBorderLineLimit);
   $: scrollBorderTopViewportPercent = editorViewportHeight > 1 ? Math.round(Math.min(editorViewportHeight - 1, scrollBorderTopEffectiveLines * scrollBorderEstimatedLinePx) / editorViewportHeight * 100) : 0;
   $: scrollBorderBottomViewportPercent = editorViewportHeight > 1 ? Math.round(Math.min(editorViewportHeight - 1, scrollBorderBottomEffectiveLines * scrollBorderEstimatedLinePx) / editorViewportHeight * 100) : 0;
+
+  $: scrollBorderTopPx = Math.min(
+    editorScrollTop,
+    Math.min(Math.max(0, editorViewportHeight - 1), scrollBorderTopEffectiveLines * scrollBorderEstimatedLinePx)
+  );
+
+  $: scrollBorderBottomPx = Math.min(
+    editorScrollBottom,
+    Math.min(Math.max(0, editorViewportHeight - 1), scrollBorderBottomEffectiveLines * scrollBorderEstimatedLinePx)
+  );
+
+  $: scrollBorderColor = scrollBorderTone === "background"
+    ? activeTheme.bg
+    : scrollBorderTone === "border"
+      ? activeTheme.border
+      : scrollBorderTone === "accent"
+        ? activeTheme.orange
+        : scrollBorderTone === "style"
+          ? currentStyleColor
+          : activeTheme.fgMuted;
   $: if (editorViewportHeight > 1 && cursorScrollMarginTopLines > scrollBorderLineLimit) cursorScrollMarginTopLines = scrollBorderLineLimit;
   $: if (editorViewportHeight > 1 && cursorScrollMarginBottomLines > scrollBorderLineLimit) cursorScrollMarginBottomLines = scrollBorderLineLimit;
   function clearAudioTarget() {
@@ -1255,6 +1282,10 @@
     return isThemeMode(mode) ? mode : "nord";
   }
 
+  function normalizeScrollBorderTone(value: unknown): ScrollBorderTone {
+    return value === "background" || value === "border" || value === "accent" || value === "style" ? value : "muted";
+  }
+
   function normalizeSettingsTab(value: unknown): SettingsTab {
     if (value === "layout" || value === "shortcuts" || value === "import") return value;
     if (value === "annotation" || value === "editor") return "layout";
@@ -1301,6 +1332,8 @@
     cursorScrollMarginLines?: number;
     cursorScrollMarginTopLines: number;
     cursorScrollMarginBottomLines: number;
+    scrollBorderTone: ScrollBorderTone;
+    scrollBorderOpacity: number;
     lineHeight: number;
     fontSize: number;
     paragraphSpacing: number;
@@ -1444,6 +1477,8 @@
       cursorScrollMarginLines: Math.round(numberOr("cursorScrollMarginLines", 4, 0, 16)),
       cursorScrollMarginTopLines: Math.round(numberOr("cursorScrollMarginTopLines", numberOr("cursorScrollMarginLines", 4, 0, 16), 0, 16)),
       cursorScrollMarginBottomLines: Math.round(numberOr("cursorScrollMarginBottomLines", numberOr("cursorScrollMarginLines", 4, 0, 16), 0, 16)),
+      scrollBorderTone: normalizeScrollBorderTone(settings.scrollBorderTone),
+      scrollBorderOpacity: Math.round(numberOr("scrollBorderOpacity", 0.35, 0, 1) * 100) / 100,
       lineHeight: Math.round(numberOr("lineHeight", 1.6, 1, 3) * 100) / 100,
       fontSize: Math.round(numberOr("fontSize", 14, 10, 28)),
       paragraphSpacing: Math.round(numberOr("paragraphSpacing", 0, 0, 2) * 100) / 100,
@@ -1495,6 +1530,8 @@
       padBottom,
       cursorScrollMarginTopLines,
       cursorScrollMarginBottomLines,
+      scrollBorderTone,
+      scrollBorderOpacity,
       lineHeight,
       fontSize,
       paragraphSpacing,
@@ -1538,6 +1575,8 @@
     padBottom = settings.padBottom ?? padBottom;
     cursorScrollMarginTopLines = settings.cursorScrollMarginTopLines ?? settings.cursorScrollMarginLines ?? cursorScrollMarginTopLines;
     cursorScrollMarginBottomLines = settings.cursorScrollMarginBottomLines ?? settings.cursorScrollMarginLines ?? cursorScrollMarginBottomLines;
+    scrollBorderTone = settings.scrollBorderTone ?? scrollBorderTone;
+    scrollBorderOpacity = settings.scrollBorderOpacity ?? scrollBorderOpacity;
     lineHeight = settings.lineHeight ?? lineHeight;
     fontSize = settings.fontSize ?? fontSize;
     paragraphSpacing = settings.paragraphSpacing ?? paragraphSpacing;
@@ -1841,6 +1880,7 @@
       | "paragraphSpacing"
       | "columnStride"
       | "currentLineHighlightOpacity"
+      | "scrollBorderOpacity"
       | "columnGuideThickness"
       | "padTop"
       | "padBottom"
@@ -1862,6 +1902,8 @@
       columnStride = Math.round(clampNumber(columnStride + delta * 2, 4, 120));
     } else if (kind === "currentLineHighlightOpacity") {
       currentLineHighlightOpacity = Math.round(clampNumber(currentLineHighlightOpacity + delta * 0.02, 0.08, 0.7) * 100) / 100;
+    } else if (kind === "scrollBorderOpacity") {
+      scrollBorderOpacity = Math.round(clampNumber(scrollBorderOpacity + delta * 0.05, 0, 1) * 100) / 100;
     } else if (kind === "columnGuideThickness") {
       columnGuideThickness = Math.round(clampNumber(columnGuideThickness + delta, 1, 6));
     } else if (kind === "padTop") {
@@ -1910,8 +1952,13 @@
     window.addEventListener("pointercancel", finish);
   }
 
-  function updateEditorViewportHeight() {
-    editorViewportHeight = view?.scrollDOM.clientHeight ?? editorEl?.clientHeight ?? 0;
+  function updateEditorScrollMetrics() {
+    const scroller = view?.scrollDOM;
+    editorViewportHeight = scroller?.clientHeight ?? editorEl?.clientHeight ?? 0;
+    editorScrollTop = scroller?.scrollTop ?? 0;
+    editorScrollBottom = scroller
+      ? Math.max(0, scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop)
+      : 0;
   }
 
   function clearActiveSaveTarget() {
@@ -4860,6 +4907,7 @@ ${body}
       if (u.docChanged || u.selectionSet || u.focusChanged || u.viewportChanged)
         updateStatusFromView(u.view);
       if (u.docChanged) {
+        requestAnimationFrame(() => updateEditorScrollMetrics());
         const text = u.state.doc.toString();
         localStorage.setItem("cm6-buffer", text);
         scheduleFileAutosave(text);
@@ -5347,7 +5395,8 @@ ${body}
       refreshTtsVoices();
       synth.addEventListener("voiceschanged", onVoicesChanged);
     }
-    const editorResizeObserver = new ResizeObserver(() => updateEditorViewportHeight());
+    const editorResizeObserver = new ResizeObserver(() => updateEditorScrollMetrics());
+    const onEditorScroll = () => updateEditorScrollMetrics();
 
     view = new EditorView({
       state: EditorState.create({
@@ -5360,7 +5409,8 @@ ${body}
     view.dom.classList.add("mode-normal");
     removeBlockquoteMetaMarkup(view);
     view.focus();
-    updateEditorViewportHeight();
+    updateEditorScrollMetrics();
+    view.scrollDOM.addEventListener("scroll", onEditorScroll, { passive: true });
     if (editorEl) editorResizeObserver.observe(editorEl);
     updateStatusFromView(view);
     openAiApiKey = loadOpenAiApiKey();
@@ -5378,6 +5428,7 @@ ${body}
       finishSummaryResize?.();
       finishRightPaddingDrag?.();
       editorResizeObserver.disconnect();
+      view?.scrollDOM.removeEventListener("scroll", onEditorScroll);
       setMediaAction("seekbackward", null);
       setMediaAction("seekforward", null);
       setMediaAction("previoustrack", null);
@@ -5607,7 +5658,25 @@ ${body}
           </section>
           <section class="settings-section">
             <div class="settings-section-heading">scroll border</div>
+            <label class="settings-row">
+              <span class="settings-row-label">color</span>
+              <select class="settings-input settings-select settings-row-value" bind:value={scrollBorderTone} aria-label="Scroll border color">
+                <option value="background">Theme background</option>
+                <option value="border">Theme border</option>
+                <option value="muted">Theme muted</option>
+                <option value="accent">Theme accent</option>
+                <option value="style">Active style</option>
+              </select>
+            </label>
             <div class="settings-row-grid">
+              <div class="settings-row">
+                <span class="settings-row-label">opacity</span>
+                <span class="settings-row-value">{Math.round(scrollBorderOpacity * 100)}%</span>
+                <span class="settings-row-controls">
+                  <button type="button" on:click={() => adjustLayoutValue("scrollBorderOpacity", -1)} aria-label="Decrease scroll border opacity">−</button>
+                  <button type="button" on:click={() => adjustLayoutValue("scrollBorderOpacity", 1)} aria-label="Increase scroll border opacity">+</button>
+                </span>
+              </div>
               <div class="settings-row">
                 <span class="settings-row-label">top</span>
                 <span class="settings-row-value">{cursorScrollMarginTopLines} · {scrollBorderTopViewportPercent}%</span>
@@ -6006,7 +6075,17 @@ ${body}
 
     </div>
 
-    <div class="editor" bind:this={editorEl} style={`--editor-right-padding: ${padRight}px;`}>
+    <div
+      class="editor"
+      bind:this={editorEl}
+      style={`--editor-right-padding: ${padRight}px; --scroll-border-top: ${scrollBorderTopPx}px; --scroll-border-bottom: ${scrollBorderBottomPx}px; --scroll-border-color: ${scrollBorderColor}; --scroll-border-opacity: ${scrollBorderOpacity};`}
+    >
+      {#if scrollBorderOpacity > 0 && cursorScrollMarginTopLines > 0}
+        <span class="scroll-border-guide scroll-border-guide-top" aria-hidden="true"></span>
+      {/if}
+      {#if scrollBorderOpacity > 0 && cursorScrollMarginBottomLines > 0}
+        <span class="scroll-border-guide scroll-border-guide-bottom" aria-hidden="true"></span>
+      {/if}
       <button
         class="right-padding-handle"
         type="button"

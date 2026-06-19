@@ -412,3 +412,55 @@ test("hyphenated styles keep multi-word inline comments and editable colors", as
   await page.getByLabel("Markup visibility").selectOption("all");
   await expect(page.locator(".cm-content")).toContainText("now: \"new note\", title: \"Custom title\"");
 });
+
+test("scroll border guides use theme colors and configurable opacity", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.clear();
+    localStorage.setItem("cm6-layout-settings", JSON.stringify({
+      cursorScrollMarginTopLines: 3,
+      cursorScrollMarginBottomLines: 5,
+      scrollBorderTone: "accent",
+      scrollBorderOpacity: 0.2
+    }));
+    localStorage.setItem("cm6-theme", "nord");
+  });
+  await page.goto("/");
+
+  const topGuide = page.locator(".scroll-border-guide-top");
+  const bottomGuide = page.locator(".scroll-border-guide-bottom");
+  await expect(topGuide).toHaveCSS("opacity", "0.2");
+  await expect(bottomGuide).toHaveCSS("opacity", "0.2");
+  await expect(topGuide).toHaveCSS("background-color", "rgb(208, 135, 112)");
+  const topHeight = Number.parseFloat(await topGuide.evaluate(el => getComputedStyle(el).height));
+  const bottomHeight = Number.parseFloat(await bottomGuide.evaluate(el => getComputedStyle(el).height));
+  await expect(topGuide).toHaveCSS("top", "0px");
+  await expect(bottomGuide).toHaveCSS("bottom", "0px");
+  expect(topHeight).toBe(0);
+  expect(bottomHeight).toBeGreaterThan(0);
+
+  await page.locator(".cm-scroller").evaluate(el => {
+    el.scrollTop = Math.min(120, el.scrollHeight - el.clientHeight);
+    el.dispatchEvent(new Event("scroll"));
+  });
+  await expect.poll(async () => Number.parseFloat(await topGuide.evaluate(el => getComputedStyle(el).height))).toBeGreaterThan(0);
+
+  await page.locator(".cm-scroller").evaluate(el => {
+    el.scrollTop = el.scrollHeight;
+    el.dispatchEvent(new Event("scroll"));
+  });
+  await expect.poll(async () => Number.parseFloat(await bottomGuide.evaluate(el => getComputedStyle(el).height))).toBe(0);
+
+  await page.getByRole("button", { name: "Settings" }).click();
+  const colorSelect = page.getByLabel("Scroll border color");
+  await expect(colorSelect).toHaveValue("accent");
+  await colorSelect.selectOption("background");
+  await expect(topGuide).toHaveCSS("background-color", "rgb(46, 52, 64)");
+  await colorSelect.selectOption("accent");
+  const opacityRow = page.locator(".settings-row", { hasText: "opacity" }).last();
+  await expect(opacityRow).toContainText("20%");
+  await opacityRow.getByRole("button", { name: "Increase scroll border opacity" }).click();
+  await expect(topGuide).toHaveCSS("opacity", "0.25");
+
+  await page.getByLabel("Theme").selectOption("gruvbox-dark");
+  await expect(topGuide).toHaveCSS("background-color", "rgb(254, 128, 25)");
+});
