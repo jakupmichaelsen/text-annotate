@@ -25,6 +25,8 @@
   import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
   import {
     annotationPattern,
+    annotationWithComment,
+    annotationWithStyle,
     annotationWithTitle,
     summaryVisibleText
   } from "./lib/annotations";
@@ -168,7 +170,7 @@
   type ImportLineMode = "original" | "sentences" | "reflow";
   let importLineMode: ImportLineMode = initialLayoutSettings.importLineMode ?? (initialLayoutSettings.divideImportSentences === false ? "original" : "sentences");
   const annotationCommentOpen = "<" + "!--";
-  const annotationStylePrefixPattern = new RegExp("^`([^`]+)`" + annotationCommentOpen + "\\s*\\w+(?:\\s+\\w+)?,");
+  const annotationStylePrefixPattern = new RegExp("^`([^`]+)`" + annotationCommentOpen + "\\s*[\\w-]+(?:\\s+[\\w-]+)?,");
   let pdfModalOpen = false;
   let pdfDraftText = "";
   let pdfSourceLines: string[] = [];
@@ -333,6 +335,8 @@
   let editingStyleTitleName: string | null = null;
   let styleTitleDraft = "";
   let styleTitleInput: HTMLInputElement | null = null;
+  let editingStyleColorName: string | null = null;
+  let styleColorDraft = "";
   let editingStyleKeyName: string | null = null;
   let styleKeyDraft = "";
   let styleKeyError = "";
@@ -2744,6 +2748,29 @@
     }));
   }
 
+  function openStyleColorModal(event: MouseEvent, name: string) {
+    event.preventDefault();
+    event.stopPropagation();
+    editingStyleColorName = name;
+    styleColorDraft = normalizeNamedStyleColor(
+      customStyles.find(style => style.name === name)?.colorName ?? name
+    );
+  }
+
+  function saveStyleColor() {
+    if (!editingStyleColorName) return;
+    const name = editingStyleColorName;
+    const colorName = normalizeNamedStyleColor(styleColorDraft);
+    persistCustomStyles(customStyles.map(style =>
+      style.name === name
+        ? { ...style, colorName, color: namedStyleColor(colorName) }
+        : style
+    ));
+    editingStyleColorName = null;
+    view?.dispatch({});
+    view?.focus();
+  }
+
   function handleNewStyleColorName(event: Event) {
     const colorName = normalizeNamedStyleColor((event.target as HTMLSelectElement).value);
     newStyleColorName = colorName;
@@ -2878,6 +2905,22 @@
       nextTitles[name] = normalized;
     }
     persistStyleTitles(nextTitles);
+    if (!view) return;
+    const docText = view.state.doc.toString();
+    const displayTitle = normalized || defaultStyleTitle(name);
+    const changes: Array<{ from: number; to: number; insert: string }> = [];
+    annotationPattern.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = annotationPattern.exec(docText)) !== null) {
+      if (annotationStyleParts(match[2]).style !== name) continue;
+      changes.push({
+        from: match.index,
+        to: match.index + match[0].length,
+        insert: annotationWithTitle(match, displayTitle)
+      });
+    }
+    annotationPattern.lastIndex = 0;
+    if (changes.length) view.dispatch({ changes });
   }
 
   function startStyleTitleEdit(event: MouseEvent, name: string) {
@@ -3133,7 +3176,7 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
   let editingSpan: number | null = null;
   function countWords(text: string) {
     const visibleText = text
-      .replace(/`([^`]+)`<!--\s*\w+(?:\s+\w+)?,\s*.+?:\s*"[^"]*"\s*-->/g, "$1")
+      .replace(/`([^`]+)`<!--\s*[\w-]+(?:\s+[\w-]+)?,\s*.+?:\s*"[^"]*"\s*-->/g, "$1")
       .replace(/<!--[\s\S]*?-->/g, " ")
       .replace(/`([^`\n]+)`/g, "$1");
     return visibleText.match(/[\p{L}\p{N}]+(?:[’'-][\p{L}\p{N}]+)*/gu)?.length ?? 0;
@@ -4113,10 +4156,17 @@ ${body}
       input.value = this.comment;
       input.placeholder = "add note…";
       input.style.cssText = `background:transparent;border:none;outline:none;color:${activeTheme.blockquoteFg};font-family:inherit;font-size:inherit;width:${Math.max(this.comment.length || 8, 8)}ch;min-width:8ch;`;
+      let saved = false;
       const save = () => {
+        if (saved) return;
+        saved = true;
         editingSpan = null;
         const full = this.editorView.state.doc.sliceString(this.spanStart, this.spanEnd);
-        const updated = full.replace(/"[^"]*"(\s*-->)$/, `"${input.value}"$1`);
+        annotationPattern.lastIndex = 0;
+        const match = annotationPattern.exec(full);
+        annotationPattern.lastIndex = 0;
+        if (!match || match.index !== 0) return;
+        const updated = annotationWithComment(match, input.value);
         this.editorView.dispatch({ changes: { from: this.spanStart, to: this.spanEnd, insert: updated } });
         this.editorView.focus();
       };
@@ -4680,7 +4730,11 @@ ${body}
           return true;
         }
         const newName = styleName(style);
-        const updated = replaceAnnotationStylePrefix(m[0], annotationStyleToken(newName, variant));
+        const updated = annotationWithStyle(
+          m,
+          annotationStyleToken(newName, variant),
+          styleDisplayTitle(newName)
+        );
         currentStyle = style;
         currentAnnotationVariant = variant;
         v.dispatch({
@@ -5808,6 +5862,7 @@ ${body}
             role="listitem"
           >
             <span class="style-key-badge">0</span>
+            <span class="style-swatch-placeholder" aria-hidden="true"></span>
             <div class="style-title-cell">
               <button
                 class="style-name style-title-action"
@@ -5866,6 +5921,14 @@ ${body}
                   {styleKeyForName(style.name) || "–"}
                 </button>
               {/if}
+              <button
+                class="style-swatch"
+                type="button"
+                title={`Edit color for ${styleDisplayTitle(style.name)}`}
+                aria-label={`Edit color for ${styleDisplayTitle(style.name)}`}
+                on:click={event => openStyleColorModal(event, style.name)}
+                on:keydown={event => event.stopPropagation()}
+              ></button>
               <div class="style-title-cell">
                 {#if editingStyleTitleName === style.name}
                   <input
@@ -6452,6 +6515,49 @@ ${body}
         </div>
       </div>
 
+    </div>
+  {/if}
+
+  {#if editingStyleColorName}
+    <div class="style-modal-overlay" role="presentation">
+      <div
+        class="style-modal"
+        role="dialog"
+        tabindex="-1"
+        aria-label={`Edit color for ${styleDisplayTitle(editingStyleColorName)}`}
+        on:keydown={event => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            editingStyleColorName = null;
+          } else if (event.key === "Enter") {
+            event.preventDefault();
+            saveStyleColor();
+          }
+        }}
+      >
+        <div class="style-modal-header">
+          <div>Edit color</div>
+          <button type="button" on:click={() => editingStyleColorName = null} aria-label="Close edit color dialog">×</button>
+        </div>
+        <div class="style-modal-colors" role="listbox" aria-label="Annotation style colors">
+          {#each namedStyleColors as color}
+            <button
+              class="style-modal-color"
+              class:active={styleColorDraft === color.name}
+              type="button"
+              style={`--swatch-color: ${namedStyleColor(color.name)}`}
+              on:click={() => styleColorDraft = color.name}
+            >
+              <span aria-hidden="true"></span>
+              <span>{color.name}</span>
+            </button>
+          {/each}
+        </div>
+        <div class="style-modal-actions">
+          <button type="button" on:click={() => editingStyleColorName = null}>Cancel</button>
+          <button type="button" class="primary" on:click={saveStyleColor}>Save</button>
+        </div>
+      </div>
     </div>
   {/if}
 

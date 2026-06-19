@@ -358,3 +358,57 @@ test("annotation previous follows user-configured shortcut", async ({ page }) =>
   await page.keyboard.press("Shift+P");
   await expect.poll(selectedText).toBe("alpha");
 });
+
+test("style title changes update existing annotation markup", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.clear();
+    localStorage.setItem("cm6-buffer", "`alpha beta`<!-- red underline, now: \"note\" -->");
+  });
+  await page.goto("/");
+
+  await page.locator('button[title="Edit red title"]').click();
+  const titleInput = page.getByLabel("Title for red");
+  await titleInput.fill("Urgent review");
+  await titleInput.press("Enter");
+
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByLabel("Markup visibility").selectOption("all");
+  await expect(page.locator(".cm-content")).toContainText("red underline, now: \"note\", title: \"Urgent review\"");
+});
+
+test("hyphenated styles keep multi-word inline comments and editable colors", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.clear();
+    localStorage.setItem("cm6-buffer", "`multiple word selection`<!-- custom-style fill, now: \"old note\", title: \"Custom title\" -->");
+    localStorage.setItem("cm6-custom-styles", JSON.stringify({
+      version: 2,
+      styles: [{ name: "custom-style", colorName: "steel" }]
+    }));
+    localStorage.setItem("cm6-style-titles", JSON.stringify({ "custom-style": "Custom title" }));
+    localStorage.setItem("textAnnotate-settings", JSON.stringify({ annotationMode: "sticky" }));
+  });
+  await page.goto("/");
+
+  await expect(page.locator(".cm-annotation-comment")).toHaveText("old note");
+  await page.locator(".cm-content").click();
+  await page.keyboard.press("Control+Home");
+  await page.keyboard.press("Enter");
+  const commentInput = page.getByPlaceholder("add note…");
+  await expect(commentInput).toBeVisible();
+  await commentInput.fill("new note");
+  await commentInput.press("Enter");
+  await page.getByRole("button", { name: "Edit color for Custom title" }).click();
+  const colorDialog = page.getByRole("dialog", { name: "Edit color for Custom title" });
+  await colorDialog.getByRole("button", { name: "mint" }).click();
+  await colorDialog.getByRole("button", { name: "Save" }).click();
+
+  const storedColor = await page.evaluate(() => {
+    const stored = JSON.parse(localStorage.getItem("cm6-custom-styles") || "{}");
+    return stored.styles?.[0]?.colorName;
+  });
+  expect(storedColor).toBe("mint");
+
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByLabel("Markup visibility").selectOption("all");
+  await expect(page.locator(".cm-content")).toContainText("now: \"new note\", title: \"Custom title\"");
+});

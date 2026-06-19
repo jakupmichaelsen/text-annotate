@@ -1424,7 +1424,7 @@
 
   .style-row {
     display: grid;
-    grid-template-columns: 22px minmax(0, 1fr) 14px;
+    grid-template-columns: 22px 14px minmax(0, 1fr) 14px;
     column-gap: 6px;
     align-items: center;
     padding: 0;
