@@ -18,20 +18,11 @@ export function annotationWithComment(match: RegExpExecArray, comment: string) {
 }
 
 export function annotationWithStyle(match: RegExpExecArray, styleToken: string, title: string) {
-  const colorName = styleToken.trim().split(/\s+/, 1)[0];
-  const normalizedTitle = normalizeSummaryTitle(title, colorName);
+  const normalizedTitle = normalizeAnnotationTitle(title);
   const titlePart = normalizedTitle ? `, title: "${normalizedTitle}"` : "";
   return `\`${match[1]}\`<!-- ${styleToken}, ${match[3]}: "${match[4]}"${titlePart} -->`;
 }
 
-function normalizeSummaryTitle(title: string, colorName: string) {
-  const normalized = title.trim().replace(/\s+/g, " ").replace(/"/g, "'").replace(/[<>]/g, "").replace(/--+/g, "-");
-  return normalized.toLowerCase() === colorName.toLowerCase() ? "" : normalized;
-}
-
-export function annotationWithTitle(match: RegExpExecArray, title: string) {
-  const colorName = match[2].trim().split(/\s+/, 1)[0];
-  const normalizedTitle = normalizeSummaryTitle(title, colorName);
-  const titlePart = normalizedTitle ? `, title: "${normalizedTitle}"` : "";
-  return `\`${match[1]}\`<!-- ${match[2]}, ${match[3]}: "${match[4]}"${titlePart} -->`;
+function normalizeAnnotationTitle(title: string) {
+  return title.trim().replace(/\s+/g, " ").replace(/"/g, "'").replace(/[<>]/g, "").replace(/--+/g, "-");
 }

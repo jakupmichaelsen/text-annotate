@@ -27,7 +27,6 @@
     annotationPattern,
     annotationWithComment,
     annotationWithStyle,
-    annotationWithTitle,
     summaryVisibleText
   } from "./lib/annotations";
   import {
@@ -335,8 +334,6 @@
   let leftSidebarCollapsed = false;
   let summaryFullscreen = false;
   let summarySidebarWidth = 320;
-  let editingSummaryTitleKey: string | null = null;
-  let summaryTitleDraft = "";
   let editingStyleTitleName: string | null = null;
   let styleTitleDraft = "";
   let styleTitleInput: HTMLInputElement | null = null;
@@ -2705,10 +2702,6 @@
     return true;
   }
 
-  function customStyleTitle(name: string) {
-    return styleTitles[name] || "";
-  }
-
   function normalizeStyleTitle(title: string) {
     return title.trim().replace(/\s+/g, " ").replace(/"/g, "'").replace(/[<>]/g, "").replace(/--+/g, "-");
   }
@@ -2952,22 +2945,7 @@
       nextTitles[name] = normalized;
     }
     persistStyleTitles(nextTitles);
-    if (!view) return;
-    const docText = view.state.doc.toString();
-    const displayTitle = normalized || defaultStyleTitle(name);
-    const changes: Array<{ from: number; to: number; insert: string }> = [];
-    annotationPattern.lastIndex = 0;
-    let match: RegExpExecArray | null;
-    while ((match = annotationPattern.exec(docText)) !== null) {
-      if (annotationStyleParts(match[2]).style !== name) continue;
-      changes.push({
-        from: match.index,
-        to: match.index + match[0].length,
-        insert: annotationWithTitle(match, displayTitle)
-      });
-    }
-    annotationPattern.lastIndex = 0;
-    if (changes.length) view.dispatch({ changes });
+    view?.dispatch({});
   }
 
   function startStyleTitleEdit(event: MouseEvent, name: string) {
@@ -3957,75 +3935,6 @@ ${body}
     toggleSummaryCategory(section.id);
   }
 
-  function summaryAnnotationItems(items: SummaryItem[]) {
-    return items.filter(isSummaryAnnotationItem);
-  }
-
-  function startSummaryTitleEdit(event: MouseEvent, key: string, item: SummaryAnnotationItem) {
-    event.preventDefault();
-    event.stopPropagation();
-    editingSummaryTitleKey = key;
-    summaryTitleDraft = item.title || item.colorName;
-  }
-
-  function startSummaryGroupTitleEdit(event: MouseEvent, section: Extract<SummarySection, { kind: "group" }>) {
-    event.preventDefault();
-    event.stopPropagation();
-    const firstAnnotation = summaryAnnotationItems(section.items)[0];
-    if (!firstAnnotation) return;
-    editingSummaryTitleKey = section.id;
-    summaryTitleDraft = firstAnnotation.title || firstAnnotation.colorName;
-  }
-
-  function annotationMatchAt(docText: string, spanStart: number) {
-    annotationPattern.lastIndex = spanStart;
-    const match = annotationPattern.exec(docText);
-    annotationPattern.lastIndex = 0;
-    return match?.index === spanStart ? match : null;
-  }
-
-  function saveSummaryTitle(items: SummaryAnnotationItem[]) {
-    if (!editingSummaryTitleKey) return;
-    if (!view || items.length === 0) {
-      editingSummaryTitleKey = null;
-      return;
-    }
-
-    const docText = view.state.doc.toString();
-    const changes = items
-      .map(item => {
-        const match = annotationMatchAt(docText, item.spanStart);
-        if (!match) return null;
-        return {
-          from: item.spanStart,
-          to: item.spanStart + match[0].length,
-          insert: annotationWithTitle(match, summaryTitleDraft)
-        };
-      })
-      .filter((change): change is { from: number; to: number; insert: string } => !!change)
-      .sort((a, b) => a.from - b.from);
-
-    editingSummaryTitleKey = null;
-    if (changes.length) {
-      view.dispatch({ changes });
-    }
-  }
-
-  function cancelSummaryTitleEdit() {
-    editingSummaryTitleKey = null;
-  }
-
-  function handleSummaryTitleKeydown(event: KeyboardEvent, items: SummaryAnnotationItem[]) {
-    event.stopPropagation();
-    if (event.key === "Enter") {
-      event.preventDefault();
-      saveSummaryTitle(items);
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      cancelSummaryTitleEdit();
-    }
-  }
-
   function editSummaryAnnotationComment(event: MouseEvent, item: SummaryAnnotationItem) {
     event.stopPropagation();
     if (!view) return;
@@ -4706,9 +4615,8 @@ ${body}
       const now = new Date();
       const ts = now.toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).replace(/,/g, "");
       const name = styleName(appliedStyle);
-      const title = customStyleTitle(name);
-      const titlePart = title ? `, title: "${title}"` : "";
-      return `\`${text}\`<!-- ${annotationStyleToken(name, appliedVariant)}, ${ts}: ""${titlePart} -->`;
+      const title = styleDisplayTitle(name);
+      return `\`${text}\`<!-- ${annotationStyleToken(name, appliedVariant)}, ${ts}: "", title: "${title}" -->`;
     };
 
     const trimAnnotationPunctuation = (from: number, to: number) => {
@@ -6170,27 +6078,7 @@ ${body}
                   <span class="summary-swatch" style="background: {section.item.color}"></span>
                     <span class="summary-body">
                       <span class="summary-meta">
-                      {#if editingSummaryTitleKey === section.item.id}
-                        <input
-                          class="summary-title-input"
-                          bind:value={summaryTitleDraft}
-                          aria-label="Annotation title"
-                          autofocus
-                          on:click={event => event.stopPropagation()}
-                          on:focus={event => (event.target as HTMLInputElement).select()}
-                          on:blur={() => saveSummaryTitle([section.item])}
-                          on:keydown={event => handleSummaryTitleKeydown(event, [section.item])}
-                        />
-                      {:else}
-                        <button
-                          class="summary-title-action"
-                          type="button"
-                          on:click={event => startSummaryTitleEdit(event, section.item.id, section.item)}
-                          on:keydown={event => event.stopPropagation()}
-                        >
-                          {summaryAnnotationTitle(section.item)}
-                        </button>
-                      {/if}
+                      <span class="summary-title-label">{summaryAnnotationTitle(section.item)}</span>
                       <span class="summary-heading-timestamp">{section.item.timestamp}</span>
                     </span>
                     <span class="summary-text summary-sentence">
@@ -6245,29 +6133,7 @@ ${body}
                 {:else}
                   <span class="summary-swatch" style="background: {section.color}"></span>
                 {/if}
-                {#if section.itemType === "annotation" && editingSummaryTitleKey === section.id}
-                  <input
-                    class="summary-title-input summary-group-title-input"
-                    bind:value={summaryTitleDraft}
-                    aria-label="Annotation group title"
-                    autofocus
-                    on:click={event => event.stopPropagation()}
-                    on:focus={event => (event.target as HTMLInputElement).select()}
-                    on:blur={() => saveSummaryTitle(summaryAnnotationItems(section.items))}
-                    on:keydown={event => handleSummaryTitleKeydown(event, summaryAnnotationItems(section.items))}
-                  />
-                {:else if section.itemType === "annotation"}
-                  <button
-                    class="summary-group-label summary-title-action"
-                    type="button"
-                    on:click={event => startSummaryGroupTitleEdit(event, section)}
-                    on:keydown={event => event.stopPropagation()}
-                  >
-                    {section.label}
-                  </button>
-                {:else}
-                  <span class="summary-group-label">{section.label}</span>
-                {/if}
+                <span class="summary-group-label">{section.label}</span>
                 <span class="summary-group-count">{section.count}</span>
                 {#if section.itemType === "annotation"}
                   <button
@@ -6299,27 +6165,7 @@ ${body}
                       <span class="summary-swatch" style="background: {item.color}"></span>
                       <span class="summary-body">
                         <span class="summary-meta">
-                          {#if editingSummaryTitleKey === item.id}
-                            <input
-                              class="summary-title-input"
-                              bind:value={summaryTitleDraft}
-                              aria-label="Annotation title"
-                              autofocus
-                              on:click={event => event.stopPropagation()}
-                              on:focus={event => (event.target as HTMLInputElement).select()}
-                              on:blur={() => saveSummaryTitle([item])}
-                              on:keydown={event => handleSummaryTitleKeydown(event, [item])}
-                            />
-                          {:else}
-                            <button
-                              class="summary-title-action"
-                              type="button"
-                              on:click={event => startSummaryTitleEdit(event, item.id, item)}
-                              on:keydown={event => event.stopPropagation()}
-                            >
-                              {summaryAnnotationTitle(item)}
-                            </button>
-                          {/if}
+                          <span class="summary-title-label">{summaryAnnotationTitle(item)}</span>
                           <span class="summary-heading-timestamp">{item.timestamp}</span>
                         </span>
                         <span class="summary-text summary-sentence">

@@ -359,21 +359,40 @@ test("annotation previous follows user-configured shortcut", async ({ page }) =>
   await expect.poll(selectedText).toBe("alpha");
 });
 
-test("style title changes update existing annotation markup", async ({ page }) => {
+test("new annotations copy the current sidebar style title", async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.clear();
-    localStorage.setItem("cm6-buffer", "`alpha beta`<!-- red underline, now: \"note\" -->");
+    localStorage.setItem("cm6-buffer", "alpha\nbeta");
+    localStorage.setItem("cm6-style-titles", JSON.stringify({ red: "Review this" }));
   });
   await page.goto("/");
 
-  await page.locator('button[title="Edit red title"]').click();
+  await page.locator(".cm-content").click();
+  await page.keyboard.press("F2");
+  await page.keyboard.press("Control+Home");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("1");
+  await page.keyboard.press("Space");
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("cm6-buffer") || ""))
+    .toContain('title: "Review this"');
+
+  await page.locator('button[title="Edit Review this title"]').click();
   const titleInput = page.getByLabel("Title for red");
   await titleInput.fill("Urgent review");
   await titleInput.press("Enter");
 
-  await page.getByRole("button", { name: "Settings" }).click();
-  await page.getByLabel("Markup visibility").selectOption("all");
-  await expect(page.locator(".cm-content")).toContainText("red underline, now: \"note\", title: \"Urgent review\"");
+  await page.locator(".cm-content").click();
+  await page.keyboard.press("F2");
+  await page.keyboard.press("Control+End");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("1");
+  await page.keyboard.press("Space");
+
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("cm6-buffer") || ""))
+    .toContain('title: "Urgent review"');
+  const buffer = await page.evaluate(() => localStorage.getItem("cm6-buffer") || "");
+  expect(buffer).toContain('title: "Review this"');
+  expect(buffer).toContain('title: "Urgent review"');
 });
 
 test("hyphenated styles keep multi-word inline comments and editable colors", async ({ page }) => {
