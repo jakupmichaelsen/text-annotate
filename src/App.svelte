@@ -279,7 +279,7 @@
   let selectionInfo = "0 selected";
   let wordCountInfo = "0 words";
   type SummaryAnnotationContext = { before: string; text: string; after: string };
-  type SummaryAnnotationItem = { type: "annotation"; id: string; colorName: string; title: string; color: string; text: string; context: SummaryAnnotationContext; comment: string; timestamp: string; line: number; from: number; to: number; spanStart: number };
+  type SummaryAnnotationItem = { type: "annotation"; id: string; colorName: string; color: string; text: string; context: SummaryAnnotationContext; comment: string; timestamp: string; line: number; from: number; to: number; spanStart: number };
   type SummaryItem =
     | SummaryAnnotationItem
     | { type: "blockquote"; id: string; text: string; line: number; from: number; to: number };
@@ -349,15 +349,14 @@
   const summarySidebarMinWidth = 240;
   const summarySidebarMaxWidth = 720;
   const customStylesStorageKey = "cm6-custom-styles";
-  const styleTitlesStorageKey = "cm6-style-titles";
+  const legacyStyleTitlesStorageKey = "cm6-style-titles";
   const styleKeysStorageKey = "cm6-style-keys";
   const defaultStyleKeyOrder = ["1", "2", "3"];
-  let customStyles = loadCustomStyles();
-  let styleTitles = loadStyleTitles();
+  let customStyles = migrateLegacyStyleTitles(loadCustomStyles());
   let styleKeys = loadStyleKeys();
   const themeCompartment = new Compartment();
   $: activeTheme = getTheme(themeMode);
-  $: highlightStyles = currentHighlightStyles(activeTheme);
+  $: highlightStyles = currentHighlightStyles(customStyles, activeTheme);
   $: layoutFontFamilyCss = fontFamilyCssForName(layoutFontFamilyName);
   $: if (settingsPersistenceReady) {
     padLeft;
@@ -2482,8 +2481,8 @@
     }));
   }
 
-  function currentHighlightStyles(theme = activeTheme): AnnotationStyle[] {
-    return customStyles.map(style => ({
+  function currentHighlightStyles(styles: AnnotationStyle[], theme = activeTheme): AnnotationStyle[] {
+    return styles.map(style => ({
       ...style,
       color: namedStyleColor(style.colorName ?? style.name, theme)
     }));
@@ -2491,11 +2490,6 @@
 
   function styleColor(style: number) {
     return style === 0 ? activeTheme.orange : annotationColorForStyle(highlightStyles[style - 1]?.name ?? "");
-  }
-
-  function styleNumberForName(name: string) {
-    const index = highlightStyles.findIndex(s => s.name === name);
-    return index < 0 ? 1 : index + 1;
   }
 
   function styleKeyForName(name: string) {
@@ -2517,14 +2511,6 @@
     const index = highlightStyles.findIndex(style => style.name === name);
     const key = index < 0 ? "" : defaultStyleKeyOrder[index] ?? "";
     return reservedStyleKeys.has(key) ? "" : key;
-  }
-
-  function defaultStyleTitle(name: string) {
-    return name === "callout" ? "callout" : name;
-  }
-
-  function styleDisplayTitle(name: string) {
-    return styleTitles[name] || defaultStyleTitle(name);
   }
 
   function normalizeAnnotationVariant(value: string | undefined): AnnotationVariant {
@@ -2702,10 +2688,6 @@
     return true;
   }
 
-  function normalizeStyleTitle(title: string) {
-    return title.trim().replace(/\s+/g, " ").replace(/"/g, "'").replace(/[<>]/g, "").replace(/--+/g, "-");
-  }
-
   function normalizeCustomStyleName(value: string) {
     return value
       .trim()
@@ -2740,6 +2722,55 @@
       if (!used.has(candidate)) return candidate;
     }
     return `${base}-${Date.now().toString(36)}`;
+  }
+
+  function uniqueStyleNameForRename(value: string, currentName: string) {
+    const base = normalizeCustomStyleName(value) || currentName;
+    const used = new Set(customStyles.filter(style => style.name !== currentName).map(style => style.name));
+    if (!used.has(base)) return base;
+    for (let index = 2; index < 100; index += 1) {
+      const candidate = `${base}-${index}`;
+      if (!used.has(candidate)) return candidate;
+    }
+    return `${base}-${Date.now().toString(36)}`;
+  }
+
+  function migrateLegacyStyleTitles(styles: AnnotationStyle[]) {
+    if (typeof localStorage === "undefined") return styles;
+    const stored = localStorage.getItem(legacyStyleTitlesStorageKey);
+    if (!stored) return styles;
+    try {
+      const parsed = JSON.parse(stored);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return styles;
+      const used = new Set<string>();
+      const renameMap = new Map<string, string>();
+      const migrated = styles.map(style => {
+        const rawTitle = typeof parsed[style.name] === "string" ? parsed[style.name] : style.name;
+        const base = normalizeCustomStyleName(rawTitle) || style.name;
+        let name = base;
+        for (let index = 2; used.has(name); index += 1) name = `${base}-${index}`;
+        used.add(name);
+        renameMap.set(style.name, name);
+        return { ...style, name };
+      });
+      const rawKeys = localStorage.getItem(styleKeysStorageKey);
+      if (rawKeys) {
+        const parsedKeys = JSON.parse(rawKeys);
+        if (parsedKeys && typeof parsedKeys === "object" && !Array.isArray(parsedKeys)) {
+          localStorage.setItem(styleKeysStorageKey, JSON.stringify(Object.fromEntries(
+            Object.entries(parsedKeys).map(([name, key]) => [renameMap.get(name) ?? name, key])
+          )));
+        }
+      }
+      localStorage.setItem(customStylesStorageKey, JSON.stringify({
+        version: 2,
+        styles: migrated.map(({ name, colorName }) => ({ name, colorName }))
+      }));
+      localStorage.removeItem(legacyStyleTitlesStorageKey);
+      return migrated;
+    } catch {
+      return styles;
+    }
   }
 
   function normalizeStoredStyle(entry: unknown, used: Set<string>): AnnotationStyle | null {
@@ -2847,9 +2878,6 @@
     if (index < 0) return;
     const nextCustomStyles = customStyles.filter(style => style.name !== name);
     persistCustomStyles(nextCustomStyles);
-    const nextTitles = { ...styleTitles };
-    delete nextTitles[name];
-    persistStyleTitles(nextTitles);
     const nextKeys = { ...styleKeys };
     delete nextKeys[name];
     persistStyleKeys(nextKeys);
@@ -2864,29 +2892,6 @@
 
   function knownStyleName(name: string) {
     return customStyles.some(style => style.name === name);
-  }
-
-  function loadStyleTitles() {
-    const stored = typeof localStorage === "undefined" ? null : localStorage.getItem(styleTitlesStorageKey);
-    if (!stored) return {};
-
-    try {
-      const parsed = JSON.parse(stored);
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-      return Object.fromEntries(
-        Object.entries(parsed)
-          .filter((entry): entry is [string, string] =>
-            typeof entry[0] === "string" &&
-            knownStyleName(entry[0]) &&
-            typeof entry[1] === "string" &&
-            entry[1].trim().length > 0
-          )
-          .map(([name, title]) => [name, normalizeStyleTitle(title)])
-          .filter(([name, title]) => title.length > 0 && title.toLowerCase() !== defaultStyleTitle(name).toLowerCase())
-      );
-    } catch {
-      return {};
-    }
   }
 
   function loadStyleKeys(): Record<string, string | null> {
@@ -2916,35 +2921,27 @@
     }
   }
 
-  function persistStyleTitles(titles: Record<string, string>) {
-    styleTitles = titles;
-    if (typeof localStorage === "undefined") return;
-    if (Object.keys(titles).length) {
-      localStorage.setItem(styleTitlesStorageKey, JSON.stringify(titles));
-    } else {
-      localStorage.removeItem(styleTitlesStorageKey);
-    }
-  }
-
   function persistStyleKeys(keys: Record<string, string | null>) {
     styleKeys = keys;
     if (typeof localStorage === "undefined") return;
-    if (Object.keys(keys).length) {
-      localStorage.setItem(styleKeysStorageKey, JSON.stringify(keys));
-    } else {
-      localStorage.removeItem(styleKeysStorageKey);
-    }
+    if (Object.keys(keys).length) localStorage.setItem(styleKeysStorageKey, JSON.stringify(keys));
+    else localStorage.removeItem(styleKeysStorageKey);
   }
 
-  function persistStyleTitle(name: string, title: string) {
-    const normalized = normalizeStyleTitle(title);
-    const nextTitles = { ...styleTitles };
-    if (!normalized || normalized.toLowerCase() === defaultStyleTitle(name).toLowerCase()) {
-      delete nextTitles[name];
-    } else {
-      nextTitles[name] = normalized;
+  function renameStyle(name: string, value: string) {
+    const nextName = uniqueStyleNameForRename(value, name);
+    if (nextName === name) return;
+    const wasActive = styleName(currentStyle) === name;
+    persistCustomStyles(customStyles.map(style => style.name === name ? { ...style, name: nextName } : style));
+    const nextKeys = { ...styleKeys };
+    if (Object.prototype.hasOwnProperty.call(nextKeys, name)) {
+      nextKeys[nextName] = nextKeys[name];
+      delete nextKeys[name];
+      persistStyleKeys(nextKeys);
     }
-    persistStyleTitles(nextTitles);
+    if (editingStyleColorName === name) editingStyleColorName = nextName;
+    if (editingStyleKeyName === name) editingStyleKeyName = nextName;
+    if (wasActive) currentStyle = customStyles.findIndex(style => style.name === nextName) + 1;
     view?.dispatch({});
   }
 
@@ -2952,7 +2949,7 @@
     event.preventDefault();
     event.stopPropagation();
     editingStyleTitleName = name;
-    styleTitleDraft = styleDisplayTitle(name);
+    styleTitleDraft = name;
     void focusStyleTitleInput();
   }
 
@@ -2972,7 +2969,7 @@
     if (!editingStyleTitleName) return;
     const name = editingStyleTitleName;
     editingStyleTitleName = null;
-    persistStyleTitle(name, styleTitleDraft);
+    renameStyle(name, styleTitleDraft);
   }
 
   function startStyleKeyEdit(event: MouseEvent, name: string) {
@@ -3043,7 +3040,7 @@
     );
     return {
       key: normalized,
-      error: conflict ? `Will swap with ${styleDisplayTitle(conflict.name)}.` : ""
+      error: conflict ? `Will swap with ${conflict.name}.` : ""
     };
   }
 
@@ -3471,7 +3468,7 @@ ${body}
   }
 
   function renderInlineHtml(text: string) {
-    const pattern = /`([^`]+)`<!--\s*(\w+(?:\s+\w+)?),\s*(.+?):\s*"([^"]*)"(?:,\s*title:\s*"([^"]*)")?\s*-->/g;
+    const pattern = new RegExp(annotationPattern.source, "g");
     let html = "";
     let lastIndex = 0;
     let match: RegExpExecArray | null;
@@ -3496,11 +3493,11 @@ ${body}
   }
 
   function summaryAnnotationTitle(item: SummaryAnnotationItem) {
-    return item.title || item.colorName.toUpperCase();
+    return item.colorName.toUpperCase();
   }
 
   function annotationTitleKey(item: SummaryAnnotationItem) {
-    return item.title.trim() || item.colorName;
+    return item.colorName;
   }
 
   function isSummaryAnnotationItem(item: SummaryItem): item is SummaryAnnotationItem {
@@ -3584,7 +3581,6 @@ ${body}
         type: "annotation",
         id: `annotation-${spanStart}`,
         colorName,
-        title: annotation[5]?.trim() ?? "",
         color: annotationColorForStyle(colorName),
         text: annotation[1],
         context: annotationSentenceContext(docText, spanStart, spanStart + annotation[0].length),
@@ -4615,8 +4611,7 @@ ${body}
       const now = new Date();
       const ts = now.toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).replace(/,/g, "");
       const name = styleName(appliedStyle);
-      const title = styleDisplayTitle(name);
-      return `\`${text}\`<!-- ${annotationStyleToken(name, appliedVariant)}, ${ts}: "", title: "${title}" -->`;
+      return `\`${text}\`<!-- ${annotationStyleToken(name, appliedVariant)}, ${ts}: "" -->`;
     };
 
     const trimAnnotationPunctuation = (from: number, to: number) => {
@@ -4685,11 +4680,7 @@ ${body}
           return true;
         }
         const newName = styleName(style);
-        const updated = annotationWithStyle(
-          m,
-          annotationStyleToken(newName, variant),
-          styleDisplayTitle(newName)
-        );
+        const updated = annotationWithStyle(m, annotationStyleToken(newName, variant));
         currentStyle = style;
         currentAnnotationVariant = variant;
         v.dispatch({
@@ -5866,7 +5857,7 @@ ${body}
                   class="style-key-badge style-key-input"
                   bind:this={styleKeyInput}
                   bind:value={styleKeyDraft}
-                  aria-label={`Shortcut key for ${styleDisplayTitle(style.name)}`}
+                  aria-label={`Shortcut key for ${style.name}`}
                   title={styleKeyError || "Press a key or Backspace/Delete to clear"}
                   readonly
                   on:click={event => event.stopPropagation()}
@@ -5890,8 +5881,8 @@ ${body}
                   class:style-key-empty={!styleKeyForName(style.name)}
                   type="button"
                   title={styleKeyForName(style.name)
-                    ? `Edit shortcut key for ${styleDisplayTitle(style.name)}`
-                    : `Assign shortcut key for ${styleDisplayTitle(style.name)}`}
+                    ? `Edit shortcut key for ${style.name}`
+                    : `Assign shortcut key for ${style.name}`}
                   on:click={event => startStyleKeyEdit(event, style.name)}
                   on:keydown={event => event.stopPropagation()}
                 >
@@ -5901,8 +5892,8 @@ ${body}
               <button
                 class="style-swatch"
                 type="button"
-                title={`Edit color for ${styleDisplayTitle(style.name)}`}
-                aria-label={`Edit color for ${styleDisplayTitle(style.name)}`}
+                title={`Edit color for ${style.name}`}
+                aria-label={`Edit color for ${style.name}`}
                 on:click={event => openStyleColorModal(event, style.name)}
                 on:keydown={event => event.stopPropagation()}
               ></button>
@@ -5912,7 +5903,7 @@ ${body}
                     class="style-name style-title-input"
                     bind:this={styleTitleInput}
                     bind:value={styleTitleDraft}
-                    aria-label={`Title for ${style.name}`}
+                    aria-label={`Name for ${style.name}`}
                     on:click={event => event.stopPropagation()}
                     on:focus={event => focusInputAtEnd(event.target as HTMLInputElement)}
                     on:blur={saveStyleTitle}
@@ -5927,19 +5918,19 @@ ${body}
                     class:variant-rail={currentStyle === index + 1 && currentAnnotationVariant === "rail"}
                     class:variant-bars={currentStyle === index + 1 && currentAnnotationVariant === "bars"}
                     type="button"
-                    title={`Edit ${styleDisplayTitle(style.name)} title`}
+                    title={`Edit ${style.name} name`}
                     on:click={event => startStyleTitleEdit(event, style.name)}
                     on:keydown={event => event.stopPropagation()}
                   >
-                    {styleDisplayTitle(style.name)}
+                    {style.name}
                   </button>
                 {/if}
               </div>
               <button
                 class="style-remove-button"
                 type="button"
-                title={`Remove ${styleDisplayTitle(style.name)}`}
-                aria-label={`Remove ${styleDisplayTitle(style.name)}`}
+                title={`Remove ${style.name}`}
+                aria-label={`Remove ${style.name}`}
                 on:click={event => { event.stopPropagation(); removeCustomStyle(style.name); }}
               >×</button>
             </div>
@@ -6449,7 +6440,7 @@ ${body}
         class="style-modal"
         role="dialog"
         tabindex="-1"
-        aria-label={`Edit color for ${styleDisplayTitle(editingStyleColorName)}`}
+        aria-label={`Edit color for ${editingStyleColorName}`}
         on:keydown={event => {
           if (event.key === "Escape") {
             event.preventDefault();
