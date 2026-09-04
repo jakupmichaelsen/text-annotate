@@ -2531,18 +2531,22 @@
   }
 
   function annotationTextColorForStyle(name: string, color: string, theme = activeTheme) {
-    return (name === "callout" || color === "currentColor") ? theme.bg : contrastColor(color, theme.bg, theme.fg);
+    const resolvedColor = color === "currentColor" ? theme.fg : color;
+    return contrastColor(resolvedColor, theme.bg, theme.fg);
   }
 
   function annotationMarkCss(styleName: string, variant: AnnotationVariant, color: string, theme = activeTheme) {
-    const textColor = annotationTextColorForStyle(styleName, color, theme);
-    const softFill = `color-mix(in srgb, ${color} 16%, transparent)`;
-    const base = `border-radius:3px;padding:0 2px;`;
-    if (variant === "fill") return `${base}background-color:${color};color:${textColor};`;
-    if (variant === "box") return `${base}background-color:${softFill};color:${theme.fg};border:1px solid ${color};`;
-    if (variant === "underline") return `${base}color:${theme.fg};border-bottom:2px solid ${color};`;
-    if (variant === "rail") return `${base}color:${theme.fg};border-top:1px solid ${color};border-bottom:1px solid ${color};`;
-    return `${base}color:${theme.fg};border-left:2px solid ${color};border-right:2px solid ${color};`;
+    // `currentColor` is useful for the sidebar swatch, but using it directly
+    // in an editor decoration makes the fill depend on the element's final
+    // text color. Resolve it first so callouts have a predictable contrast.
+    const resolvedColor = color === "currentColor" ? theme.fg : color;
+    const textColor = annotationTextColorForStyle(styleName, resolvedColor, theme);
+    const base = `--annotation-color:${resolvedColor};--annotation-text-color:${textColor};--annotation-editor-color:${theme.fg};font-style:normal !important;border-radius:3px;padding:0 2px;`;
+    if (variant === "fill") return `${base}background-color:${resolvedColor};color:${textColor} !important;`;
+    if (variant === "box") return `${base}background-color:transparent;color:${theme.fg};border:1px solid ${resolvedColor};`;
+    if (variant === "underline") return `${base}color:${theme.fg};border-bottom:2px solid ${resolvedColor};`;
+    if (variant === "rail") return `${base}color:${theme.fg};border-top:1px solid ${resolvedColor};border-bottom:1px solid ${resolvedColor};`;
+    return `${base}color:${theme.fg};border-left:2px solid ${resolvedColor};border-right:2px solid ${resolvedColor};`;
   }
 
   function annotationStyleForPreview(style: number) {
@@ -4420,13 +4424,13 @@ ${body}
                 builder.add(spanStart, spanEnd, Decoration.mark({ attributes: { style: `background-color:color-mix(in srgb, ${color} 18%, transparent);border-radius:3px;` } }));
               } else {
                 builder.add(spanStart, wordStart, Decoration.replace({ widget: new EmptyWidget(color), inclusive: false }));
-                builder.add(wordStart, wordEnd, Decoration.mark({ attributes: { style: annotationMarkCss(colorName, variant, color, theme) } }));
+                builder.add(wordStart, wordEnd, Decoration.mark({ attributes: { class: `cm-annotation-mark cm-annotation-mark-${variant === "fill" ? "fill" : "outline"}`, style: annotationMarkCss(colorName, variant, color, theme) } }));
                 builder.add(wordEnd, spanEnd, Decoration.replace({ widget: new EmptyWidget() }));
               }
               continue;
             }
             builder.add(spanStart, wordStart, Decoration.replace({ widget: new EmptyWidget(color), inclusive: false }));
-            builder.add(wordStart, wordEnd, Decoration.mark({ attributes: { style: annotationMarkCss(colorName, variant, color, theme) } }));
+            builder.add(wordStart, wordEnd, Decoration.mark({ attributes: { class: `cm-annotation-mark cm-annotation-mark-${variant === "fill" ? "fill" : "outline"}`, style: annotationMarkCss(colorName, variant, color, theme) } }));
             if (isEditing) {
               builder.add(wordEnd, spanEnd, Decoration.replace({ widget: new EditWidget(color, comment, spanStart, spanEnd, v) }));
             } else if (annotationModeUsesInlineComments(mode) && comment.trim()) {
@@ -4631,6 +4635,30 @@ ${body}
       const rawFrom = Math.min(range.from, range.to);
       const rawTo = Math.max(range.from, range.to);
       const rawText = state.doc.sliceString(rawFrom, rawTo);
+
+      // Collapse selected line breaks into spaces before annotating. This keeps
+      // the annotation on the first line while leaving the unselected tail of
+      // the final line in its original place.
+      if (rawText.includes("\n")) {
+        const joinedText = rawText.replace(/\r?\n[ \t]*/g, " ");
+        if (!joinedText.trim()) return true;
+        const finalLine = state.doc.lineAt(rawTo);
+        // The selection endpoint can be exactly at the end of the second line
+        // (for example after selecting a whole word with visual-line
+        // navigation). Keep that line break too, so the unselected remainder
+        // of the line is never pulled up beside the new annotation.
+        const keepFinalLineBreak = finalLine.number < state.doc.lines;
+        const insert = `${makeInsert(joinedText)}${keepFinalLineBreak ? "\n" : ""}`;
+        annotationPreview = null;
+        currentStyle = appliedStyle;
+        currentAnnotationVariant = appliedVariant;
+        v.dispatch({
+          changes: { from: rawFrom, to: rawTo, insert },
+          selection: { anchor: rawFrom + insert.length }
+        });
+        return true;
+      }
+
       const { from, to, text: selectedText } = shouldPreserveExactSelection(rawText)
         ? { from: rawFrom, to: rawTo, text: rawText }
         : trimAnnotationPunctuation(rawFrom, rawTo);
