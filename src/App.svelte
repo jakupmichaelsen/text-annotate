@@ -62,6 +62,11 @@
     srtTimestampForTranscriptLine
   } from "./lib/srt";
   import {
+    parseTranscriptFile,
+    transcriptionPayloadToText,
+    type WordTimestamp
+  } from "./lib/transcript";
+  import {
     buildEditorKeymap,
     customShortcutDefinitions,
     isAudioShortcut,
@@ -145,6 +150,7 @@
   let paragraphSpacing = initialLayoutSettings.paragraphSpacing ?? 0;
   let currentLineHighlightStyle: "fill" | "underline" | "borders" = initialLayoutSettings.currentLineHighlightStyle ?? "fill";
   let currentLineHighlightOpacity = initialLayoutSettings.currentLineHighlightOpacity ?? 0.34;
+  let autoFollowPlayback = initialLayoutSettings.autoFollowPlayback ?? true;
   let columnGuideThickness = initialLayoutSettings.columnGuideThickness ?? 1;
   let columnStride = initialLayoutSettings.columnStride ?? 40;
   let arrowWordNavigation = initialLayoutSettings.arrowWordNavigation ?? initialLayoutSettings.wordNavigation ?? false;
@@ -198,10 +204,15 @@
   let audioPlaying = false;
   let audioLoaded = false;
   let audioSourceFile: File | null = null;
+  let audioLevels = Array.from({ length: 32 }, () => 0.22);
+  let transcriptWordTimestamps: WordTimestamp[] = [];
+  let suppressTranscriptTimingPersistence = false;
+  let lastPlaybackCursorPosition = -1;
   let audioRateIndex = 2;
   const audioRates = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
   const mediaSeekSeconds = 10;
   const manualPauseRewindSeconds = 3;
+  const audioOverlayBars = Array.from({ length: 32 }, (_, index) => index);
   type TtsSegment = { text: string; from: number; to: number };
   let ttsAvailable = false;
   let ttsSpeaking = false;
@@ -215,6 +226,7 @@
   const audioDbName = "textAnnotate-state";
   const audioStoreName = "audio";
   const mediaExtensions = [".mp3", ".wav", ".m4a", ".ogg", ".oga", ".webm", ".aac", ".flac", ".mp4", ".mov", ".mkv"];
+  const localWhisperEndpoint = "http://127.0.0.1:8765/transcribe";
   let openAiApiKey = "";
   let rememberOpenAiApiKey = initialAppSettings.rememberOpenAiApiKey;
   let transcriptionModel = initialAppSettings.transcriptionModel;
@@ -376,6 +388,7 @@
     rotateFontOnLoad;
     currentLineHighlightStyle;
     currentLineHighlightOpacity;
+    autoFollowPlayback;
     columnGuideThickness;
     columnStride;
     arrowWordNavigation;
@@ -597,6 +610,72 @@
   function jumpAudioToAndPlay(seconds: number) {
     jumpAudioTo(seconds);
     playAudioIfNeeded();
+  }
+
+  function playTimestampedWord(event: Event, view: EditorView) {
+    if (!audioUrl || !audioLoaded || !transcriptWordTimestamps.length) return false;
+    const mouseEvent = event as MouseEvent;
+    const position = view.posAtCoords({ x: mouseEvent.clientX, y: mouseEvent.clientY });
+    if (position === null) return false;
+    const word = transcriptWordTimestamps.find(timestamp => position >= timestamp.from && position < timestamp.to);
+    if (!word) return false;
+    mouseEvent.preventDefault();
+    mouseEvent.stopPropagation();
+    jumpAudioToAndPlay(word.start);
+    return true;
+  }
+
+  function syncPlaybackCursor() {
+    if (!view) return;
+    if (!autoFollowPlayback || !audioLoaded || !transcriptWordTimestamps.length) {
+      view.dispatch({});
+      return;
+    }
+    const word = transcriptWordTimestamps.find(timestamp => audioCurrentTime >= timestamp.start && audioCurrentTime < timestamp.end);
+    if (!word || word.from === lastPlaybackCursorPosition) {
+      view.dispatch({});
+      return;
+    }
+    lastPlaybackCursorPosition = word.from;
+    view.dispatch({
+      selection: EditorSelection.cursor(word.from),
+      effects: EditorView.scrollIntoView(word.from, { y: "center" })
+    });
+  }
+
+  const transcriptTimingStorageKey = "textAnnotate-transcript-word-timestamps";
+
+  function persistTranscriptWordTimestamps() {
+    if (typeof localStorage === "undefined" || !view) return;
+    if (!transcriptWordTimestamps.length) {
+      localStorage.removeItem(transcriptTimingStorageKey);
+      return;
+    }
+    localStorage.setItem(transcriptTimingStorageKey, JSON.stringify({
+      text: view.state.doc.toString(),
+      timestamps: transcriptWordTimestamps
+    }));
+  }
+
+  function restoreTranscriptWordTimestamps() {
+    if (typeof localStorage === "undefined" || !view) return;
+    try {
+      const stored = localStorage.getItem(transcriptTimingStorageKey);
+      if (!stored) return;
+      const payload = JSON.parse(stored);
+      if (payload?.text !== view.state.doc.toString() || !Array.isArray(payload.timestamps)) return;
+      transcriptWordTimestamps = payload.timestamps.filter((timestamp: WordTimestamp) =>
+        Number.isFinite(timestamp.from) &&
+        Number.isFinite(timestamp.to) &&
+        Number.isFinite(timestamp.start) &&
+        Number.isFinite(timestamp.end) &&
+        timestamp.from >= 0 &&
+        timestamp.to > timestamp.from
+      );
+      lastPlaybackCursorPosition = -1;
+    } catch {
+      localStorage.removeItem(transcriptTimingStorageKey);
+    }
   }
 
   function speechSynth() {
@@ -888,6 +967,27 @@
     event.preventDefault();
     event.stopPropagation();
 
+    const key = event.key.toLowerCase();
+    if (!event.altKey && key === "f") {
+      toggleMediaPlayback();
+      return;
+    }
+    if (!event.altKey && key === "r") {
+      cycleAudioRate();
+      return;
+    }
+    if (event.altKey && key === "a") {
+      seekMediaTransport(-1, 5);
+      return;
+    }
+    if (event.altKey && key === "s") {
+      toggleMediaPlayback();
+      return;
+    }
+    if (event.altKey && key === "d") {
+      seekMediaTransport(1, 5);
+      return;
+    }
     handleMediaShortcut(event.key);
   }
 
@@ -965,27 +1065,34 @@
     text: string,
     preserveLineBreaks = false,
     sourceLines: string[] = [],
-    pagePreviews: DocumentMapPagePreview[] = []
+    pagePreviews: DocumentMapPagePreview[] = [],
+    lineMode: ImportLineMode = importLineMode
   ) {
     if (!view) return;
     sourceDocumentMapLines = sourceLines;
     documentMapPages = pagePreviews;
     applyDocumentLoadFontPreference();
     const normalized = text.replace(/\r\n?/g, "\n").trim();
-    const insert = importTextForEditor(normalized, preserveLineBreaks);
+    const insert = importTextForEditor(normalized, preserveLineBreaks, lineMode);
     const initialCursor = firstVisibleDocumentPosition(insert);
-    view.dispatch({
-      changes: { from: 0, to: view.state.doc.length, insert },
-      selection: { anchor: initialCursor },
-      effects: EditorView.scrollIntoView(initialCursor, { y: "start", yMargin: 0 })
-    });
-    removeBlockquoteMetaMarkup(view);
+    suppressTranscriptTimingPersistence = true;
+    try {
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert },
+        selection: { anchor: initialCursor },
+        effects: EditorView.scrollIntoView(initialCursor, { y: "start", yMargin: 0 })
+      });
+      removeBlockquoteMetaMarkup(view);
+    } finally {
+      suppressTranscriptTimingPersistence = false;
+    }
+    persistTranscriptWordTimestamps();
     view.focus();
   }
 
-  function importTextForEditor(text: string, preserveLineBreaks = false) {
-    if (preserveLineBreaks || importLineMode === "original") return text;
-    if (importLineMode === "reflow") return reflowImportedText(text);
+  function importTextForEditor(text: string, preserveLineBreaks = false, lineMode: ImportLineMode = importLineMode) {
+    if (preserveLineBreaks || lineMode === "original") return text;
+    if (lineMode === "reflow") return reflowImportedText(text);
     return sentenceLineBreaks(text);
   }
 
@@ -1096,6 +1203,7 @@
       await clearPersistedAudioFile();
     }
     if (!documentFiles.length) return;
+    transcriptWordTimestamps = [];
 
     if (documentFiles.length === 1 && isPdfFile(documentFiles[0])) {
       loadedFileName = documentFiles[0].name;
@@ -1118,10 +1226,35 @@
     });
     loadedFileType = multiple ? "MULTI" : documents[0]?.type ?? "TEXT";
     const pagePreviews = !multiple ? documents[0]?.pagePreviews ?? [] : [];
-    replaceDocument(combined, documents.some(document => document.preserveLineBreaks), sourceLines, pagePreviews);
+    const preserveLineBreaks = documents.some(document => document.preserveLineBreaks);
+    const plainTextOnly = documents.length > 0 && documents.every(document => document.type === "TXT" || document.type === "MD");
+    const properDocumentIncluded = documents.some(document => document.type === "DOCX" || document.type === "ODT" || document.type === "PDF");
+    const importMode = plainTextOnly ? "original" : properDocumentIncluded ? "sentences" : importLineMode;
+    replaceDocument(combined, preserveLineBreaks, sourceLines, pagePreviews, importMode);
   }
 
   async function documentTextFromFile(file: File) {
+    if (file.name.toLowerCase().endsWith(".json")) {
+      let payload: unknown;
+      try {
+        payload = JSON.parse(await file.text());
+      } catch {
+        throw new Error(`${file.name} is not valid JSON.`);
+      }
+      if (!payload || typeof payload !== "object" || !Array.isArray((payload as { segments?: unknown }).segments)) {
+        throw new Error(`${file.name} is not a supported WhisperX transcript: expected a segments array.`);
+      }
+      const parsedTranscript = transcriptionPayloadToText(payload);
+      if (!parsedTranscript.text.trim()) throw new Error(`No transcript segments found in ${file.name}.`);
+      transcriptWordTimestamps = parsedTranscript.wordTimestamps;
+      return {
+        file,
+        type: "SRT",
+        text: parsedTranscript.text,
+        sourceLines: sourceLinesFromText(parsedTranscript.text),
+        preserveLineBreaks: true
+      };
+    }
     if (file.name.toLowerCase().endsWith(".srt")) {
       const text = formatSrtTranscript(await file.text());
       return { file, type: "SRT", text, sourceLines: sourceLinesFromText(text), preserveLineBreaks: true };
@@ -1150,7 +1283,19 @@
       const extracted = await extractOdtText(file);
       return { file, type: "ODT", text: extracted.text, sourceLines: extracted.sourceLines, preserveLineBreaks: false };
     }
-    const text = await file.text();
+    const rawText = await file.text();
+    const parsedTranscript = parseTranscriptFile(rawText, file.name);
+    if (parsedTranscript.wordTimestamps.length || documentHasTimestampCue(parsedTranscript.text)) {
+      transcriptWordTimestamps = parsedTranscript.wordTimestamps;
+      return {
+        file,
+        type: "SRT",
+        text: parsedTranscript.text,
+        sourceLines: sourceLinesFromText(parsedTranscript.text),
+        preserveLineBreaks: true
+      };
+    }
+    const text = rawText;
     return {
       file,
       type: file.name.split(".").pop()?.toUpperCase() || "TEXT",
@@ -1338,6 +1483,7 @@
     rotateFontOnLoad: boolean;
     currentLineHighlightStyle: "fill" | "underline" | "borders";
     currentLineHighlightOpacity: number;
+    autoFollowPlayback: boolean;
     columnGuideThickness: number;
     columnStride: number;
     wordNavigation?: boolean;
@@ -1483,6 +1629,7 @@
       rotateFontOnLoad: typeof settings.rotateFontOnLoad === "boolean" ? settings.rotateFontOnLoad : undefined,
       currentLineHighlightStyle,
       currentLineHighlightOpacity: Math.round(numberOr("currentLineHighlightOpacity", 0.34, 0.08, 0.7) * 100) / 100,
+      autoFollowPlayback: typeof settings.autoFollowPlayback === "boolean" ? settings.autoFollowPlayback : undefined,
       columnGuideThickness: Math.round(numberOr("columnGuideThickness", 1, 1, 6)),
       columnStride: Math.round(numberOr("columnStride", 40, 4, 120)),
       wordNavigation: typeof settings.wordNavigation === "boolean" ? settings.wordNavigation : undefined,
@@ -1536,6 +1683,7 @@
       rotateFontOnLoad,
       currentLineHighlightStyle,
       currentLineHighlightOpacity,
+      autoFollowPlayback,
       columnGuideThickness,
       columnStride,
       arrowWordNavigation,
@@ -1581,6 +1729,7 @@
     rotateFontOnLoad = settings.rotateFontOnLoad ?? rotateFontOnLoad;
     currentLineHighlightStyle = settings.currentLineHighlightStyle ?? currentLineHighlightStyle;
     currentLineHighlightOpacity = settings.currentLineHighlightOpacity ?? currentLineHighlightOpacity;
+    autoFollowPlayback = settings.autoFollowPlayback ?? autoFollowPlayback;
     columnGuideThickness = settings.columnGuideThickness ?? columnGuideThickness;
     columnStride = settings.columnStride ?? columnStride;
     arrowWordNavigation = settings.arrowWordNavigation ?? settings.wordNavigation ?? arrowWordNavigation;
@@ -1777,22 +1926,42 @@
       return;
     }
 
-    let apiKey = openAiApiKey.trim();
-    if (!apiKey) {
-      const enteredKey = prompt("OpenAI API key");
-      apiKey = enteredKey?.trim() ?? "";
-      if (!apiKey) {
-        transcriptionError = "OpenAI API key is required for transcription.";
-        return;
-      }
-      openAiApiKey = apiKey;
-      persistOpenAiApiKey();
-    }
-
     transcriptionBusy = true;
-    transcriptionStatus = `Uploading ${audioFileName || "media"}...`;
+    transcriptionStatus = `Transcribing locally with Whisper (${audioFileName || "media"})...`;
 
     try {
+      try {
+        const localFormData = new FormData();
+        localFormData.append("file", audioSourceFile, audioSourceFile.name);
+        const localResponse = await fetch(localWhisperEndpoint, { method: "POST", body: localFormData });
+        if (localResponse.ok) {
+          const localPayload = await localResponse.json();
+          const transcriptResult = transcriptionPayloadToText(localPayload);
+          if (transcriptResult.text.trim()) {
+            transcriptWordTimestamps = transcriptResult.wordTimestamps;
+            loadedFileType = "SRT";
+            replaceDocument(transcriptResult.text, true);
+            transcriptionStatus = `Transcribed locally with Whisper from ${audioFileName || "media"}.`;
+            return;
+          }
+        }
+      } catch {
+        // Fall through to the hosted API when the local Whisper service is unavailable.
+      }
+
+      let apiKey = openAiApiKey.trim();
+      if (!apiKey) {
+        const enteredKey = prompt("OpenAI API key");
+        apiKey = enteredKey?.trim() ?? "";
+        if (!apiKey) {
+          transcriptionError = "Local Whisper is unavailable, and an OpenAI API key was not provided.";
+          return;
+        }
+        openAiApiKey = apiKey;
+        persistOpenAiApiKey();
+      }
+
+      transcriptionStatus = `Uploading ${audioFileName || "media"}...`;
       const formData = new FormData();
       formData.append("file", audioSourceFile, audioSourceFile.name);
       formData.append("model", transcriptionModel);
@@ -1800,6 +1969,7 @@
       if (transcriptionModel === "whisper-1") {
         formData.append("response_format", "verbose_json");
         formData.append("timestamp_granularities[]", "segment");
+        formData.append("timestamp_granularities[]", "word");
       } else {
         formData.append("response_format", "text");
       }
@@ -1813,10 +1983,11 @@
       const payload = contentType.includes("application/json") ? await response.json() : await response.text();
       if (!response.ok) throw new Error(openAiErrorMessage(payload, response.status));
 
-      const transcript = transcriptionPayloadToText(payload);
-      if (!transcript.trim()) throw new Error("The transcription completed, but no text was returned.");
-      loadedFileType = transcriptionModel === "whisper-1" && transcript.includes("-->") ? "SRT" : "TRANSCRIPT";
-      replaceDocument(transcript, loadedFileType === "SRT");
+      const transcriptResult = transcriptionPayloadToText(payload);
+      if (!transcriptResult.text.trim()) throw new Error("The transcription completed, but no text was returned.");
+      transcriptWordTimestamps = transcriptResult.wordTimestamps;
+      loadedFileType = transcriptionModel === "whisper-1" && transcriptResult.text.includes("-->") ? "SRT" : "TRANSCRIPT";
+      replaceDocument(transcriptResult.text, loadedFileType === "SRT");
       transcriptionStatus = `Loaded transcript from ${audioFileName || "media"}.`;
       persistOpenAiApiKey();
     } catch (error) {
@@ -1827,33 +1998,8 @@
     }
   }
 
-  function transcriptionPayloadToText(payload: unknown) {
-    if (typeof payload === "string") return stripEmptyLines(payload);
-    if (!payload || typeof payload !== "object") return "";
-
-    const data = payload as { text?: string; segments?: { start?: number; end?: number; text?: string }[] };
-    if (Array.isArray(data.segments) && data.segments.length) {
-      return data.segments
-        .map(segment => {
-          const text = (segment.text ?? "").replace(/\s+/g, " ").trim();
-          if (!text) return "";
-          return `[${formatSrtTime(segment.start ?? 0)} --> ${formatSrtTime(segment.end ?? segment.start ?? 0)}]\n${text}`;
-        })
-        .filter(Boolean)
-        .join("\n");
-    }
-
-    return stripEmptyLines(data.text ?? "");
-  }
-
-  function formatSrtTime(seconds: number) {
-    const value = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
-    const totalMs = Math.round(value * 1000);
-    const hours = Math.floor(totalMs / 3_600_000);
-    const minutes = Math.floor((totalMs % 3_600_000) / 60_000);
-    const wholeSeconds = Math.floor((totalMs % 60_000) / 1000);
-    const milliseconds = totalMs % 1000;
-    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(wholeSeconds).padStart(2, "0")}.${String(milliseconds).padStart(3, "0")}`;
+  function documentHasTimestampCue(text: string) {
+    return text.split("\n").some(line => isSrtTimestampLine(line));
   }
 
   function openAiErrorMessage(payload: unknown, status: number) {
@@ -2382,7 +2528,7 @@
   }
 
   function loadPdfDraft(text = pdfDraftText) {
-    replaceDocument(text, false, pdfSourceLines.length ? pdfSourceLines : sourceLinesFromText(text), pdfDocumentMapPages);
+    replaceDocument(text, false, pdfSourceLines.length ? pdfSourceLines : sourceLinesFromText(text), pdfDocumentMapPages, "sentences");
     closePdfModal();
   }
 
@@ -4266,6 +4412,7 @@ ${body}
   });
   function formatEditorLineNumber(lineNumber: number, state: EditorState) {
     const hasSrt = documentHasSrtTimestamps(state);
+    if (hasSrt) return "";
     if (lineNumber > state.doc.lines) return hasSrt ? "00:00 → 00:00" : String(lineNumber);
     const line = state.doc.line(lineNumber);
     if (isSrtTimestampLine(line.text)) return "";
@@ -4365,6 +4512,27 @@ ${body}
   }
 
   function buildHighlightDecorator(theme = activeTheme): Extension {
+    const wordPlaybackPlugin = ViewPlugin.fromClass(class {
+      decorations: DecorationSet;
+      constructor(v: EditorView) { this.decorations = this.build(v); }
+      update(u: ViewUpdate) {
+        if (u.docChanged || u.viewportChanged || u.transactions.length > 0)
+          this.decorations = this.build(u.view);
+      }
+      build(v: EditorView): DecorationSet {
+        if (!transcriptWordTimestamps.length) return Decoration.none;
+        let currentWord: WordTimestamp | null = null;
+        for (const word of transcriptWordTimestamps) {
+          if (audioCurrentTime >= word.start) currentWord = word;
+          else break;
+        }
+        if (!currentWord || currentWord.from >= currentWord.to) return Decoration.none;
+        const builder = new RangeSetBuilder<Decoration>();
+        builder.add(currentWord.from, currentWord.to, Decoration.mark({ class: "cm-current-word" }));
+        return builder.finish();
+      }
+    }, { decorations: v => v.decorations });
+
     const previewPlugin = ViewPlugin.fromClass(class {
       decorations: DecorationSet;
       constructor(v: EditorView) { this.decorations = this.build(v); }
@@ -4596,7 +4764,7 @@ ${body}
       return tr;
     });
 
-    return [plugin, previewPlugin, plainTheme, plainPlugin, atomicPlugin, srtPlugin, snapFilter, srtSnapFilter];
+    return [plugin, previewPlugin, plainTheme, plainPlugin, atomicPlugin, srtPlugin, wordPlaybackPlugin, snapFilter, srtSnapFilter];
   }
 
   function wrapSelectionOrWord(v: EditorView, style: number = 0) {
@@ -4837,6 +5005,19 @@ ${body}
         requestAnimationFrame(() => updateEditorScrollMetrics());
         const text = u.state.doc.toString();
         localStorage.setItem("cm6-buffer", text);
+        if (!suppressTranscriptTimingPersistence) {
+          if (transcriptWordTimestamps.length) {
+            transcriptWordTimestamps = transcriptWordTimestamps
+              .map(timestamp => ({
+                ...timestamp,
+                from: u.changes.mapPos(timestamp.from, 1),
+                to: u.changes.mapPos(timestamp.to, -1)
+              }))
+              .filter(timestamp => timestamp.to > timestamp.from);
+            lastPlaybackCursorPosition = -1;
+          }
+          persistTranscriptWordTimestamps();
+        }
         scheduleFileAutosave(text);
       }
     }
@@ -5141,7 +5322,16 @@ ${body}
 
   function scrollCurrentLineIntoView(v: EditorView) {
     const head = v.state.selection.main.head;
-    v.dispatch({ effects: cursorScrollEffect(v, head) });
+    requestAnimationFrame(() => {
+      const coords = v.coordsAtPos(Math.max(0, Math.min(v.state.doc.length, head)));
+      if (!coords) return;
+      const scroller = v.scrollDOM;
+      const scrollerRect = scroller.getBoundingClientRect();
+      const lineCenter = (coords.top + coords.bottom) / 2;
+      const targetCenter = scrollerRect.top + scroller.clientHeight * 0.4;
+      const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      scroller.scrollTop = Math.min(maxScrollTop, Math.max(0, scroller.scrollTop + lineCenter - targetCenter));
+    });
     return true;
   }
 
@@ -5217,6 +5407,9 @@ ${body}
           }
         }
       }),
+      EditorView.domEventHandlers({
+        click: playTimestampedWord
+      }),
       drawSelection(),
       EditorState.allowMultipleSelections.of(true),
       history(),
@@ -5262,6 +5455,7 @@ ${body}
         deleteCurrentLine,
         cycleAnnotationVariant,
         toggleMediaPlayback,
+        cycleMediaRate: cycleAudioRate,
         enterBlockquoteEditMode,
         splitLineEndToBlockquote,
         undo,
@@ -5334,6 +5528,7 @@ ${body}
     });
 
     view.dom.classList.add("mode-normal");
+    restoreTranscriptWordTimestamps();
     removeBlockquoteMetaMarkup(view);
     view.focus();
     updateEditorScrollMetrics();
@@ -5386,7 +5581,6 @@ ${body}
     --active-gutter-edit: #2f4a3a;
     --column-guide-color: ${currentStyleColor};
     --column-guide-width: ${columnGuideThickness}px;
-    --app-font-family: ${layoutFontFamilyCss};
   `}
 >
   <div class="toolbar">
@@ -5526,6 +5720,11 @@ ${body}
                 <option value="underline">Underline</option>
                 <option value="borders">Top and bottom</option>
               </select>
+            </label>
+            <label class="settings-toggle-row">
+              <span class="settings-control-icon" aria-hidden="true">▶</span>
+              <span>auto-follow playback</span>
+              <input type="checkbox" checked={autoFollowPlayback} on:change={event => autoFollowPlayback = (event.target as HTMLInputElement).checked} aria-label="Auto-follow playback" />
             </label>
             <div class="settings-row-grid">
               <div class="settings-row">
@@ -5816,7 +6015,7 @@ ${body}
     <div class="sidebar" class:collapsed={leftSidebarCollapsed}>
       {#if !leftSidebarCollapsed}
       <div class="sidebar-section">
-        <input type="file" accept=".srt,.txt,.md,.docx,.odt,.pdf,.mp3,.wav,.m4a,.ogg,.oga,.webm,.aac,.flac,.mp4,.mov,.mkv" multiple style="display:none" bind:this={fileInput} on:change={loadFile} />
+        <input type="file" accept=".srt,.txt,.json,.md,.docx,.odt,.pdf,.mp3,.wav,.m4a,.ogg,.oga,.webm,.aac,.flac,.mp4,.mov,.mkv" multiple style="display:none" bind:this={fileInput} on:change={loadFile} />
         <button class="sidebar-label load-btn sidebar-load-btn" on:click={() => fileInput.click()}>LOAD</button>
         <div class="file-actions">
           <button class="sidebar-label load-btn" on:click={saveDocument}>SAVE</button>
@@ -5857,8 +6056,12 @@ ${body}
             class:active-style={currentStyle === 0}
             role="listitem"
           >
-            <span class="style-key-badge">0</span>
-            <span class="style-swatch-placeholder" aria-hidden="true"></span>
+            <span class="style-key-badge" title="0 or the physical key immediately left of 1">0</span>
+            <span
+              class="style-swatch style-swatch-plain"
+              style={`--swatch-color: ${activeTheme.plainCodeBg}; --swatch-text: ${activeTheme.yellow};`}
+              aria-hidden="true"
+            >{'`'}</span>
             <div class="style-title-cell">
               <button
                 class="style-name style-title-action"
@@ -6223,6 +6426,28 @@ ${body}
   </div>
 
   {#if !summaryFullscreen}
+    {#if false && audioUrl}
+      <div class="audio-playing-overlay" style="--status-accent: {editorMode === 'insert' ? activeTheme.green : activeTheme.orange}" role="status" aria-label={`Playing ${audioFileName || 'audio'}`}>
+        <div class="audio-playing-heading">
+          <span class="audio-playing-kicker">{audioPlaying ? "NOW PLAYING" : "PAUSED"}</span>
+          <span class="audio-playing-file" title={audioFileName}>{audioFileName || "Audio"}</span>
+          <button class="audio-playing-close" type="button" on:click={toggleAudioPlayback} aria-label={audioPlaying ? "Pause audio" : "Play audio"} title={audioPlaying ? "Pause audio" : "Play audio"}>{audioPlaying ? "×" : "▶"}</button>
+        </div>
+        <div class="audio-waveform" aria-hidden="true">
+          {#each audioOverlayBars as bar}
+            <span class:paused={!audioPlaying} style={`--bar-index: ${bar}; --bar-level: ${audioLevels[bar] ?? 0.22}`}></span>
+          {/each}
+        </div>
+        <div class="audio-playing-progress" aria-hidden="true">
+          <span style={`width: ${audioDuration ? Math.min(100, (audioCurrentTime / audioDuration) * 100) : 0}%`}></span>
+        </div>
+        <div class="audio-playing-footer">
+          <span>{formatAudioTime(audioCurrentTime)}</span>
+          <span>{formatAudioTime(audioDuration)}</span>
+        </div>
+      </div>
+    {/if}
+
     <div class="statusbar" style="--status-accent: {editorMode === 'insert' ? activeTheme.green : activeTheme.orange}">
       <div class="status-cluster status-primary">
         {#if documentMapPages.length || documentMapLineCount}
@@ -6516,6 +6741,7 @@ ${body}
     }}
     on:timeupdate={() => {
       audioCurrentTime = audioElement?.currentTime ?? 0;
+      syncPlaybackCursor();
     }}
     on:play={() => {
       audioPlaying = true;

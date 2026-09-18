@@ -12,7 +12,7 @@ markdown instead of a proprietary document format.
 
 ## Core Workflow
 
-1. Paste text or load a `.srt`, `.txt`, `.md`, `.docx`, `.odt`, or `.pdf` file.
+1. Paste text or load a `.srt`, `.txt`, WhisperX `.json`, `.md`, `.docx`, `.odt`, or `.pdf` file.
 2. Use Annotate mode for fast keyboard navigation and phrase marking.
 3. Switch to Edit mode when you want normal text entry.
 4. Optionally load a matching media file and use gutter timestamps for playback.
@@ -40,10 +40,12 @@ markdown instead of a proprietary document format.
   fullscreen.
 - **Blockquote note controls** - adjust feedback-note alignment and background
   width while preserving those settings in markdown comments.
-- **File loading** - supports `.srt`, `.txt`, `.md`, `.docx`, `.odt`, and `.pdf` input.
+- **File loading** - supports `.srt`, `.txt`, WhisperX `.json`, `.md`, `.docx`, `.odt`, and `.pdf` input.
 - **SRT transcript view** - drops cue IDs, normalizes timestamps, strips simple
   subtitle tags, collapses raw timestamp source lines, and shows clickable cue
   timestamps in the line-number gutter beside transcript lines.
+- **WhisperX transcript view** - recognizes segment and per-word timings from
+  WhisperX `.json` files and highlights words during media playback.
 - **Transcript media playback** - load a media file beside an SRT transcript,
   click gutter timestamps, press `Enter` on transcript text, or use keyboard
   shortcuts to play and seek while reviewing.
@@ -105,6 +107,7 @@ markdown editors and rendered comments stay hidden in normal markdown output.
 | Input | Behavior |
 | --- | --- |
 | `.srt` | Converts cues to hidden timestamp source lines plus transcript text, with cue labels shown in the gutter. |
+| WhisperX `.json` | Recognized by its `segments` array; reads `segments[].text` and `segments[].words[]`, preserving segment timestamps and synchronized word highlighting. |
 | `.txt` / `.md` | Loads text directly into the editor and clears any previous media session unless new media is selected too. |
 | `.docx` | Extracts raw text with `mammoth` and clears any previous media session unless new media is selected too. |
 | `.odt` | Extracts text from OpenDocument `content.xml` and clears any previous media session unless new media is selected too. |
@@ -131,7 +134,8 @@ Annotate mode uses Vim-style movement plus arrow-key equivalents.
 | --- | --- |
 | `h` / `l`, `q` / `e` | Move left / right |
 | Arrow keys | Move left / down / up / right |
-| `Tab` / `Shift+Tab` | Move right / left by the configured column stride |
+| `Tab` | Scroll the current line to 40% of the viewport |
+| `Shift+Tab` | Move to the previous annotation variant |
 | `w` / `k` | Move one visual line up |
 | `s` / `j` | Move one visual line down |
 | `a` / `d` | Move one word left / right |
@@ -143,7 +147,7 @@ Annotate mode uses Vim-style movement plus arrow-key equivalents.
 | `Shift` movement variants | Extend the current selection |
 | `Ctrl+Shift+a` / `Ctrl+Shift+d` | Select five words left / right |
 | Style keys | Select or recolor using the editable keys shown in the Annotation styles list. |
-| `0` | Use plain backtick annotation |
+| `0` / key left of `1` | Use plain backtick annotation; the physical key works regardless of keyboard layout |
 | `z` / `c` | Previous / next annotation style |
 | `n` / `N` | Previous / next annotation |
 | `v` / `V` | Next / previous annotation variant |
@@ -156,10 +160,9 @@ Annotate mode uses Vim-style movement plus arrow-key equivalents.
 | `Ctrl+Z` / `Ctrl+Y` | Undo / redo |
 | `F2` | Toggle Annotate / Edit mode |
 | `Esc` | Return to Annotate mode |
-| `f` | Play / pause loaded media or TTS |
+| `f` / `Alt+s` | Play / pause loaded media or TTS |
 | `r` | Cycle playback / TTS speed |
-| `Alt+Space` | Play / pause loaded media or TTS |
-| `Alt+a` / `Alt+d` | Seek loaded media 5 seconds or step TTS backward / forward |
+| `Alt+a` / `Alt+d` | Seek loaded media 5 seconds backward / forward |
 | `Alt+Left` / `Alt+Right` | Seek loaded media 10 seconds or step TTS backward / forward |
 | Media rewind / fast-forward | Seek loaded media or step TTS backward / forward |
 | `Alt+r` / `Alt+w` | Cycle playback / TTS speed |

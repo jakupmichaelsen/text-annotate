@@ -3,6 +3,10 @@ import { EditorView, keymap, type EditorView as EditorViewType } from "@codemirr
 
 export const reservedStyleKeys = new Set(["h", "j", "k", "l", "w", "a", "s", "d", "q", "e", "z", "c", "n", "u", "v", "x", "?", " "]);
 
+export function isPlainAnnotationKey(event: KeyboardEvent) {
+  return !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && event.code === "Backquote";
+}
+
 export const customShortcutActions = [
   "annotationPrevious",
   "annotationNext",
@@ -64,7 +68,7 @@ export const annotateHandledKeySections: readonly KeyboardHelpSection[] = [
       ["Space", "wrap word / selection"],
       ["n / N", "next / previous annotation"],
       ["1 / 2 / 3", "select styles"],
-      ["0", "plain annotation"],
+      ["0 / key left of 1", "plain annotation"],
       ["Tab / Shift+Tab", "variant next / previous"],
       ["<", "new blockquote below"],
       [">", "split rest of line to blockquote"],
@@ -84,7 +88,10 @@ export const annotateHandledKeySections: readonly KeyboardHelpSection[] = [
     items: [
       ["F2", "enter Edit mode"],
       ["Esc", "exit Edit mode / close panels"],
-      ["Alt+Space", "play / pause media / TTS"],
+      ["f", "play / pause media / TTS"],
+      ["r", "cycle playback / TTS speed"],
+      ["Alt+s", "play / pause media / TTS"],
+      ["Alt+a/d", "seek media 5s"],
       ["Alt+←/→", "seek media 10s / step TTS"],
       ["Media RW/FF", "seek media / step TTS"],
       ["Ctrl/Cmd+,", "toggle settings"],
@@ -137,10 +144,11 @@ export function isModeShortcut(event: KeyboardEvent) {
 
 export function isAudioShortcut(event: KeyboardEvent) {
   const key = event.key.toLowerCase();
+  if (!event.ctrlKey && !event.metaKey && !event.altKey && (key === "f" || key === "r")) return true;
   if (!event.altKey && !event.ctrlKey && !event.metaKey &&
     (key === "mediarewind" || key === "mediafastforward" || key === "mediatrackprevious" || key === "mediatracknext")) return true;
   return event.altKey && !event.ctrlKey && !event.metaKey &&
-    (event.key === " " || event.key === "ArrowLeft" || event.key === "Left" || event.key === "ArrowRight" || event.key === "Right");
+    (event.key === "s" || event.key === "a" || event.key === "d" || event.key === "ArrowLeft" || event.key === "Left" || event.key === "ArrowRight" || event.key === "Right");
 }
 
 function normalizeShortcutKey(key: string) {
@@ -222,6 +230,7 @@ export function isAppShortcutCandidate(
   event: KeyboardEvent,
   styleNumberForKey: (key: string) => number | null
 ) {
+  if (isPlainAnnotationKey(event)) return true;
   if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key === ",") return true;
   if (event.metaKey) return false;
   if (isModeShortcut(event) || isAudioShortcut(event)) return true;
@@ -291,6 +300,7 @@ export type EditorKeymapHandlers = {
   deleteCurrentLine: (view: EditorViewType) => boolean;
   cycleAnnotationVariant: (view: EditorViewType, delta: 1 | -1) => boolean;
   toggleMediaPlayback: () => void;
+  cycleMediaRate: () => void;
   enterBlockquoteEditMode: (view: EditorViewType) => boolean;
   splitLineEndToBlockquote: (view: EditorViewType) => boolean;
   undo: (view: EditorViewType) => boolean;
@@ -419,7 +429,14 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
 
   const customShortcutBehavior = EditorView.domEventHandlers({
     keydown(event, view) {
+      const scrollTab = handlers.getEditorMode() === "normal" && event.key === "Tab" && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey;
+      if (scrollTab) handlers.scrollCurrentLineIntoView(view);
       if (handleUserShortcutKey(view, event)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return true;
+      }
+      if (scrollTab) {
         event.preventDefault();
         event.stopImmediatePropagation();
         return true;
@@ -442,6 +459,7 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
     normalNavigationBehavior,
     normalPrintableKeyBehavior,
     Prec.high(keymap.of([
+      { any: (view, event) => handlers.getEditorMode() === "normal" && isPlainAnnotationKey(event) && handlers.setAnnotationColorOrStyle(view, 0) },
       { any: (view, event) => handlers.getEditorMode() === "normal" && handlers.handleVariantPickerKey(view, event) },
       { any: (view, event) => handleUserShortcutKey(view, event) },
       { any: (view, event) => handleShiftedAnnotationKey(view, event) },
@@ -495,7 +513,11 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       { key: "Ctrl-y", run: normal(view => handlers.redo(view)) },
       { key: "Ctrl-Z", run: normal(view => handlers.redo(view)) },
       { key: "?",      run: normal(() => handlers.toggleHelp()) },
-      { key: "Alt-Space",  run: normal(() => { handlers.toggleMediaPlayback(); return true; }) },
+      { key: "Alt-s",      run: normal(() => { handlers.toggleMediaPlayback(); return true; }) },
+      { key: "f",         run: normal(() => { handlers.toggleMediaPlayback(); return true; }) },
+      { key: "r",         run: normal(() => { handlers.cycleMediaRate(); return true; }) },
+      { key: "Alt-a",     run: normal(() => { handlers.seekAudio(-5); return true; }) },
+      { key: "Alt-d",     run: normal(() => { handlers.seekAudio(5); return true; }) },
       { key: "Alt-ArrowLeft",  run: normal(() => { handlers.seekAudio(-10); return true; }) },
       { key: "Alt-ArrowRight", run: normal(() => { handlers.seekAudio(10); return true; }) },
       { key: "MediaRewind", run: normal(() => { handlers.handleMediaShortcut("MediaRewind"); return true; }) },

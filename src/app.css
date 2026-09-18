@@ -989,7 +989,7 @@
     align-items: center;
     justify-content: center;
     flex: 0 0 auto;
-    font-family: var(--app-font-family);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     font-weight: 700;
     line-height: 1;
   }
@@ -1112,7 +1112,7 @@
     border-radius: 0;
     background: transparent;
     color: var(--fg-muted);
-    font-family: var(--app-font-family);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     font-size: 13px;
     font-weight: 700;
     line-height: 1;
@@ -1265,7 +1265,7 @@
   }
 
   .shortcut-input {
-    font-family: var(--app-font-family);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     font-size: 11px;
   }
 
@@ -1411,6 +1411,18 @@
     border: 1px solid transparent;
     background: var(--swatch-color);
     cursor: pointer;
+  }
+
+  .style-swatch-plain {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--swatch-text);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: default;
   }
 
   .style-row.active-style .style-swatch {
@@ -2185,7 +2197,7 @@
     background: var(--bg-hard);
     border-top: 1px solid var(--border);
     color: var(--fg-muted);
-    font-family: var(--app-font-family);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     font-size: 11px;
     box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg-muted) 12%, transparent);
   }
@@ -2451,7 +2463,7 @@
   .audio-widget {
     gap: 7px;
     max-width: 100%;
-    font-family: var(--app-font-family);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   }
 
   .audio-name {
@@ -2514,6 +2526,128 @@
   .audio-glyph:focus-visible {
     outline: none;
     color: var(--yellow);
+  }
+
+  .audio-playing-overlay {
+    position: fixed;
+    right: 18px;
+    bottom: 58px;
+    z-index: 80;
+    width: min(320px, calc(100vw - 36px));
+    padding: 12px 14px 10px;
+    border: 1px solid color-mix(in srgb, var(--status-accent) 48%, var(--border));
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--bg-hard) 94%, var(--status-accent));
+    color: var(--fg-muted);
+    box-shadow: 0 10px 30px color-mix(in srgb, #000 32%, transparent), inset 0 1px 0 color-mix(in srgb, var(--fg) 8%, transparent);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    pointer-events: auto;
+  }
+
+  .audio-playing-heading,
+  .audio-playing-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .audio-playing-heading {
+    min-width: 0;
+    margin-bottom: 9px;
+  }
+
+  .audio-playing-kicker {
+    flex: 0 0 auto;
+    color: var(--status-accent);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+  }
+
+  .audio-playing-file {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--fg);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .audio-playing-close {
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--fg-muted);
+    font: 16px/15px system-ui, -apple-system, "Segoe UI", sans-serif;
+    cursor: pointer;
+  }
+
+  .audio-playing-close:hover,
+  .audio-playing-close:focus-visible {
+    border-color: var(--border);
+    color: var(--yellow);
+    outline: none;
+  }
+
+  .audio-waveform {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 38px;
+    gap: 3px;
+    overflow: hidden;
+  }
+
+  .audio-waveform span {
+    display: block;
+    flex: 1 1 0;
+    min-width: 2px;
+    height: calc(10px + (((var(--bar-index) * 17) % 21) * 1px));
+    border-radius: 2px;
+    background: linear-gradient(to top, var(--status-accent), color-mix(in srgb, var(--status-accent) 45%, var(--fg)));
+    transform-origin: center;
+    animation: audio-wave 850ms ease-in-out infinite alternate;
+    animation-delay: calc(var(--bar-index) * -47ms);
+    opacity: 0.86;
+  }
+
+  .audio-playing-progress {
+    height: 2px;
+    margin-top: 8px;
+    overflow: hidden;
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--border) 82%, transparent);
+  }
+
+  .audio-playing-progress span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--status-accent);
+    transition: width 120ms linear;
+  }
+
+  .audio-playing-footer {
+    margin-top: 5px;
+    color: var(--fg-muted);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  @keyframes audio-wave {
+    from { transform: scaleY(0.48); }
+    to { transform: scaleY(1); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .audio-waveform span {
+      animation: none;
+    }
   }
 
   .style-modal-overlay {
@@ -2647,6 +2781,11 @@
   .cm-line.cm-srt-transcript-line {
     box-sizing: border-box;
     position: relative;
+  }
+
+  .cm-current-word {
+    color: yellow;
+    text-decoration: bold;
   }
 
   .cm-lineNumbers .cm-gutterElement.cm-srt-gutter-source {
