@@ -48,7 +48,9 @@ markdown instead of a proprietary document format.
   WhisperX `.json` files and highlights words during media playback.
 - **Transcript media playback** - load a media file beside an SRT transcript,
   click gutter timestamps, press `Enter` on transcript text, or use keyboard
-  shortcuts to play and seek while reviewing.
+  shortcuts to play and seek while reviewing. With a word-timed transcript,
+  use `Alt`/`Option`-click on a word to seek playback without interrupting
+  ordinary text selection.
 - **Bring-your-own-key transcription** - load an audio or video file, enter an
   OpenAI API key in the Transcribe settings, and transcribe with `whisper-1`,
   `gpt-4o-transcribe`, or `gpt-4o-mini-transcribe`. `whisper-1` transcripts

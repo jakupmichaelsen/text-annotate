@@ -93,6 +93,7 @@ export const annotateHandledKeySections: readonly KeyboardHelpSection[] = [
       ["Alt+s", "play / pause media / TTS"],
       ["Alt+a/d", "seek media 5s"],
       ["Alt+←/→", "seek media 10s / step TTS"],
+      ["Alt/Option+click", "seek transcript word"],
       ["Media RW/FF", "seek media / step TTS"],
       ["Ctrl/Cmd+,", "toggle settings"],
       ["F1 / ?", "toggle this help"]

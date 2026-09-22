@@ -211,6 +211,7 @@
   let audioRateIndex = 2;
   const audioRates = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
   const mediaSeekSeconds = 10;
+  const transcriptHighlightLeadSeconds = 0.35;
   const manualPauseRewindSeconds = 3;
   const audioOverlayBars = Array.from({ length: 32 }, (_, index) => index);
   type TtsSegment = { text: string; from: number; to: number };
@@ -248,8 +249,8 @@
 
   let currentStyle = 0;
   type AnnotationStyle = { name: string; color: string; colorName?: string };
-  type AnnotationVariant = "fill" | "box" | "underline" | "rail" | "bars";
-  const annotationVariants: AnnotationVariant[] = ["fill", "box", "underline", "rail", "bars"];
+  type AnnotationVariant = "fill" | "box" | "underline" | "rail" | "bars" | "left" | "right";
+  const annotationVariants: AnnotationVariant[] = ["fill", "box", "underline", "rail", "bars", "left", "right"];
   type AnnotationPreview = { from: number; to: number; style: number; variant: AnnotationVariant };
   const namedStyleColors = [
     { name: "red", color: "#fb4934" },
@@ -615,6 +616,7 @@
   function playTimestampedWord(event: Event, view: EditorView) {
     if (!audioUrl || !audioLoaded || !transcriptWordTimestamps.length) return false;
     const mouseEvent = event as MouseEvent;
+    if (!mouseEvent.altKey) return false;
     const position = view.posAtCoords({ x: mouseEvent.clientX, y: mouseEvent.clientY });
     if (position === null) return false;
     const word = transcriptWordTimestamps.find(timestamp => position >= timestamp.from && position < timestamp.to);
@@ -2687,12 +2689,7 @@
     // text color. Resolve it first so callouts have a predictable contrast.
     const resolvedColor = color === "currentColor" ? theme.fg : color;
     const textColor = annotationTextColorForStyle(styleName, resolvedColor, theme);
-    const base = `--annotation-color:${resolvedColor};--annotation-text-color:${textColor};--annotation-editor-color:${theme.fg};font-style:normal !important;border-radius:3px;padding:0 2px;`;
-    if (variant === "fill") return `${base}background-color:${resolvedColor};color:${textColor} !important;`;
-    if (variant === "box") return `${base}background-color:transparent;color:${theme.fg};border:1px solid ${resolvedColor};`;
-    if (variant === "underline") return `${base}color:${theme.fg};border-bottom:2px solid ${resolvedColor};`;
-    if (variant === "rail") return `${base}color:${theme.fg};border-top:1px solid ${resolvedColor};border-bottom:1px solid ${resolvedColor};`;
-    return `${base}color:${theme.fg};border-left:2px solid ${resolvedColor};border-right:2px solid ${resolvedColor};`;
+    return `--annotation-color:${resolvedColor};--annotation-text-color:${textColor};--annotation-editor-color:${theme.fg};--annotation-bg:${theme.bg};font-style:normal !important;`;
   }
 
   function annotationStyleForPreview(style: number) {
@@ -3455,6 +3452,57 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
       border: 1px solid rgba(0, 0, 0, 0.18);
       display: inline-block;
     }
+    .annotation-token.annotation-variant-fill {
+      background-color: var(--annotation-color);
+      color: var(--annotation-text-color) !important;
+      border: 0;
+      border-radius: 3px;
+      padding: 0;
+    }
+    .annotation-token.annotation-variant-box {
+      background: var(--annotation-bg);
+      color: var(--annotation-editor-color);
+      border: 0;
+      border-radius: 3px;
+      outline: 1px solid var(--annotation-color);
+      outline-offset: 0;
+      padding: 0 0.25rem;
+    }
+    .annotation-token.annotation-variant-underline {
+      background: linear-gradient(to right, transparent 0%, var(--annotation-color) 10%, var(--annotation-color) 90%, transparent 100%) bottom / 100% 1px no-repeat;
+      color: var(--annotation-editor-color);
+      border: 0;
+      border-radius: 0;
+      padding: 0 0.25rem;
+    }
+    .annotation-token.annotation-variant-rail {
+      color: var(--annotation-editor-color);
+      border-top: 1px solid var(--annotation-color);
+      border-bottom: 1px solid var(--annotation-color);
+      border-radius: 3px;
+      padding: 0 0.25rem;
+    }
+    .annotation-token.annotation-variant-bars {
+      color: var(--annotation-editor-color);
+      border-left: 2px solid var(--annotation-color);
+      border-right: 2px solid var(--annotation-color);
+      border-radius: 3px;
+      padding: 0 0.25rem;
+    }
+    .annotation-token.annotation-variant-left {
+      color: var(--annotation-editor-color);
+      background: linear-gradient(to bottom, var(--annotation-color) 0%, var(--annotation-color) 90%, transparent 100%) left / 2px 100% no-repeat, linear-gradient(to right, var(--annotation-color) 0%, var(--annotation-color) 90%, transparent 100%) top / 100% 1px no-repeat;
+      border: 0;
+      border-radius: 4px 0 0 0;
+      padding: 0 0.25rem;
+    }
+    .annotation-token.annotation-variant-right {
+      color: var(--annotation-editor-color);
+      background: linear-gradient(to top, var(--annotation-color) 0%, var(--annotation-color) 90%, transparent 100%) right / 2px 100% no-repeat, linear-gradient(to left, var(--annotation-color) 0%, var(--annotation-color) 90%, transparent 100%) bottom / 100% 1px no-repeat;
+      border: 0;
+      border-radius: 0 0 4px 0;
+      padding: 0 0.25rem;
+    }
     .annotation-timestamp {
       display: inline-flex;
       align-items: center;
@@ -3627,7 +3675,7 @@ ${body}
       html += renderPlainInlineHtml(text.slice(lastIndex, match.index));
       const { style, variant } = annotationStyleParts(match[2]);
       const color = annotationColorForStyle(style);
-      html += `<span class="annotation-token" style="${escapeHtml(annotationMarkCss(style, variant, color))}">${escapeHtml(match[1])}</span>`;
+      html += `<span class="annotation-token annotation-variant-${variant}" style="${escapeHtml(annotationMarkCss(style, variant, color))}">${escapeHtml(match[1])}</span>`;
       html += `<span class="annotation-timestamp" title="${escapeHtml(match[3])}">${escapeHtml(match[3])}</span>`;
       lastIndex = match.index + match[0].length;
     }
@@ -4523,7 +4571,7 @@ ${body}
         if (!transcriptWordTimestamps.length) return Decoration.none;
         let currentWord: WordTimestamp | null = null;
         for (const word of transcriptWordTimestamps) {
-          if (audioCurrentTime >= word.start) currentWord = word;
+          if (audioCurrentTime >= word.start - transcriptHighlightLeadSeconds) currentWord = word;
           else break;
         }
         if (!currentWord || currentWord.from >= currentWord.to) return Decoration.none;
@@ -4556,7 +4604,7 @@ ${body}
           ? `background-color:color-mix(in srgb, ${color} 16%, transparent);color:${theme.fg};border-bottom:2px solid ${color};border-radius:3px;padding:0 2px;`
           : annotationMarkCss(style, preview.variant, color, theme);
         return Decoration.set([
-          Decoration.mark({ attributes: { style: css }, inclusive: false }).range(preview.from, preview.to)
+          Decoration.mark({ attributes: { class: preview.style === 0 ? "" : `cm-annotation-mark cm-annotation-mark-${preview.variant === "fill" ? "fill" : "outline"} cm-annotation-variant-${preview.variant}`, style: css }, inclusive: false }).range(preview.from, preview.to)
         ]);
       }
     }, { decorations: v => v.decorations });
@@ -4592,13 +4640,13 @@ ${body}
                 builder.add(spanStart, spanEnd, Decoration.mark({ attributes: { style: `background-color:color-mix(in srgb, ${color} 18%, transparent);border-radius:3px;` } }));
               } else {
                 builder.add(spanStart, wordStart, Decoration.replace({ widget: new EmptyWidget(color), inclusive: false }));
-                builder.add(wordStart, wordEnd, Decoration.mark({ attributes: { class: `cm-annotation-mark cm-annotation-mark-${variant === "fill" ? "fill" : "outline"}`, style: annotationMarkCss(colorName, variant, color, theme) } }));
+                builder.add(wordStart, wordEnd, Decoration.mark({ attributes: { class: `cm-annotation-mark cm-annotation-mark-${variant === "fill" ? "fill" : "outline"} cm-annotation-variant-${variant}`, style: annotationMarkCss(colorName, variant, color, theme) } }));
                 builder.add(wordEnd, spanEnd, Decoration.replace({ widget: new EmptyWidget() }));
               }
               continue;
             }
             builder.add(spanStart, wordStart, Decoration.replace({ widget: new EmptyWidget(color), inclusive: false }));
-            builder.add(wordStart, wordEnd, Decoration.mark({ attributes: { class: `cm-annotation-mark cm-annotation-mark-${variant === "fill" ? "fill" : "outline"}`, style: annotationMarkCss(colorName, variant, color, theme) } }));
+            builder.add(wordStart, wordEnd, Decoration.mark({ attributes: { class: `cm-annotation-mark cm-annotation-mark-${variant === "fill" ? "fill" : "outline"} cm-annotation-variant-${variant}`, style: annotationMarkCss(colorName, variant, color, theme) } }));
             if (isEditing) {
               builder.add(wordEnd, spanEnd, Decoration.replace({ widget: new EditWidget(color, comment, spanStart, spanEnd, v) }));
             } else if (annotationModeUsesInlineComments(mode) && comment.trim()) {
@@ -6148,6 +6196,8 @@ ${body}
                     class:variant-underline={currentStyle === index + 1 && currentAnnotationVariant === "underline"}
                     class:variant-rail={currentStyle === index + 1 && currentAnnotationVariant === "rail"}
                     class:variant-bars={currentStyle === index + 1 && currentAnnotationVariant === "bars"}
+                    class:variant-left={currentStyle === index + 1 && currentAnnotationVariant === "left"}
+                    class:variant-right={currentStyle === index + 1 && currentAnnotationVariant === "right"}
                     type="button"
                     title={`Edit ${style.name} name`}
                     on:click={event => startStyleTitleEdit(event, style.name)}

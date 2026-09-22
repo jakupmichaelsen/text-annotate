@@ -1451,7 +1451,8 @@
   .style-swatch.variant-box,
   .variant-preview.variant-box {
     background: transparent;
-    border-color: var(--swatch-color);
+    border: 1px solid var(--swatch-color);
+    border-radius: 2px;
   }
 
   .style-row.active-style .style-swatch.variant-box::after {
@@ -1462,10 +1463,9 @@
 
   .style-swatch.variant-underline,
   .variant-preview.variant-underline {
-    background: transparent;
+    background: linear-gradient(to right, transparent 0%, var(--swatch-color) 10%, var(--swatch-color) 90%, transparent 100%) bottom / 100% 3px no-repeat;
     border-color: transparent;
     border-radius: 0;
-    border-bottom: 3px solid var(--swatch-color);
   }
 
   .style-row.active-style .style-swatch.variant-underline::after {
@@ -1473,7 +1473,7 @@
     bottom: 3px;
     left: 3px;
     height: 3px;
-    background: var(--swatch-color);
+    background: linear-gradient(to right, transparent 0%, var(--swatch-color) 10%, var(--swatch-color) 90%, transparent 100%);
   }
 
   .style-swatch.variant-rail,
@@ -1504,6 +1504,38 @@
     background:
       linear-gradient(var(--swatch-color), var(--swatch-color)) left / 3px 100% no-repeat,
       linear-gradient(var(--swatch-color), var(--swatch-color)) right / 3px 100% no-repeat;
+  }
+
+  .style-swatch.variant-left,
+  .variant-preview.variant-left {
+    background:
+      linear-gradient(to bottom, var(--swatch-color) 0%, var(--swatch-color) 90%, transparent 100%) left / 10px 100% no-repeat,
+      linear-gradient(to right, var(--swatch-color) 0%, var(--swatch-color) 90%, transparent 100%) top / 100% 10px no-repeat;
+    border-color: transparent;
+    border-radius: 3px 0 0 0;
+  }
+
+  .style-row.active-style .style-swatch.variant-left::after {
+    inset: 3px;
+    background:
+      linear-gradient(to bottom, var(--swatch-color) 0%, var(--swatch-color) 90%, transparent 100%) left / 3px 100% no-repeat,
+      linear-gradient(to right, var(--swatch-color) 0%, var(--swatch-color) 90%, transparent 100%) top / 100% 3px no-repeat;
+  }
+
+  .style-swatch.variant-right,
+  .variant-preview.variant-right {
+    background:
+      linear-gradient(to top, var(--swatch-color) 0%, var(--swatch-color) 90%, transparent 100%) right / 4px 100% no-repeat,
+      linear-gradient(to left, var(--swatch-color) 0%, var(--swatch-color) 90%, transparent 100%) bottom / 100% 3px no-repeat;
+    border-color: transparent;
+    border-radius: 0 0 3px 0;
+  }
+
+  .style-row.active-style .style-swatch.variant-right::after {
+    inset: 3px;
+    background:
+      linear-gradient(to top, var(--swatch-color) 0%, var(--swatch-color) 90%, transparent 100%) right / 3px 100% no-repeat,
+      linear-gradient(to left, var(--swatch-color) 0%, var(--swatch-color) 90%, transparent 100%) bottom / 100% 3px no-repeat;
   }
 
   .style-title-cell {
@@ -1544,7 +1576,7 @@
     cursor: text;
   }
 
-  .style-row.active-style .style-title-action:not(.variant-fill):not(.variant-box):not(.variant-underline):not(.variant-rail):not(.variant-bars),
+  .style-row.active-style .style-title-action:not(.variant-fill):not(.variant-box):not(.variant-underline):not(.variant-rail):not(.variant-bars):not(.variant-left):not(.variant-right),
   .style-title-action:hover,
   .style-title-action:focus-visible {
     color: var(--yellow);
@@ -1557,12 +1589,14 @@
   }
 
   .style-title-action.variant-box {
+    background: transparent;
     border: 1px solid var(--swatch-color);
+    border-radius: 3px;
     color: var(--swatch-color);
   }
 
   .style-title-action.variant-underline {
-    border-bottom: 3px solid var(--swatch-color);
+    background: linear-gradient(to right, transparent 0%, var(--swatch-color) 10%, var(--swatch-color) 90%, transparent 100%) bottom / 100% 2px no-repeat;
     border-radius: 0;
     color: var(--swatch-color);
   }
@@ -1581,6 +1615,20 @@
     color: var(--swatch-color);
   }
 
+  .style-title-action.variant-left {
+    background:
+      linear-gradient(to bottom, var(--swatch-color) 0%, var(--swatch-color) 90%, transparent 100%) left / 2px 100% no-repeat,
+      linear-gradient(to right, var(--swatch-color) 0%, var(--swatch-color) 90%, transparent 100%) top / 100% 1px no-repeat;
+    border-radius: 4px
+  }
+
+  .style-title-action.variant-right {
+    background:
+      linear-gradient(to top, var(--swatch-color) 0%, var(--swatch-color) 90%, transparent 100%) right / 2px 100% no-repeat,
+      linear-gradient(to left, var(--swatch-color) 0%, var(--swatch-color) 90%, transparent 100%) bottom / 100% 1px no-repeat;
+    border-radius: 0 0 4px 0;
+  }
+
   .style-title-action.variant-fill:hover,
   .style-title-action.variant-fill:focus-visible,
   .style-title-action.variant-box:hover,
@@ -1590,7 +1638,11 @@
   .style-title-action.variant-rail:hover,
   .style-title-action.variant-rail:focus-visible,
   .style-title-action.variant-bars:hover,
-  .style-title-action.variant-bars:focus-visible {
+  .style-title-action.variant-bars:focus-visible,
+  .style-title-action.variant-left:hover,
+  .style-title-action.variant-left:focus-visible,
+  .style-title-action.variant-right:hover,
+  .style-title-action.variant-right:focus-visible {
     outline: 1px solid var(--yellow);
     outline-offset: 2px;
   }
@@ -2044,6 +2096,75 @@
   }
 
   .editor .cm-editor { width: 100%; height: 100%; }
+
+  .cm-annotation-variant-fill,
+  .annotation-token.annotation-variant-fill {
+    background-color: var(--annotation-color);
+    color: var(--annotation-text-color);
+    border: 0;
+    border-radius: 3px;
+    padding: 0;
+  }
+
+  .cm-annotation-variant-box,
+  .annotation-token.annotation-variant-box {
+    background: var(--annotation-bg);
+    color: var(--annotation-editor-color);
+    border: 0;
+    border-radius: 1px;
+    outline: 2px solid var(--annotation-color);
+    outline-offset: 1px;
+    padding: 0 2px;
+  }
+
+  .cm-annotation-variant-underline,
+  .annotation-token.annotation-variant-underline {
+    background: linear-gradient(to right, transparent 0%, var(--annotation-color) 10%, var(--annotation-color) 90%, transparent 100%) bottom / 100% 2px no-repeat;
+    color: var(--annotation-editor-color);
+    border: 0;
+    border-radius: 0;
+    padding: 0;
+  }
+
+  .cm-annotation-variant-rail,
+  .annotation-token.annotation-variant-rail {
+    color: var(--annotation-editor-color);
+    border-top: 2px solid var(--annotation-color);
+    border-bottom: 2px solid var(--annotation-color);
+    border-radius: 3px;
+    padding: 0;
+  }
+
+  .cm-annotation-variant-bars,
+  .annotation-token.annotation-variant-bars {
+    color: var(--annotation-editor-color);
+    border-left: 2.5px solid var(--annotation-color);
+    border-right: 2.5px solid var(--annotation-color);
+    border-radius: 3px;
+    padding: 0 2px;
+  }
+
+  .cm-annotation-variant-left,
+  .annotation-token.annotation-variant-left {
+    color: var(--annotation-editor-color);
+    background:
+      linear-gradient(to bottom, var(--annotation-color) 0%, var(--annotation-color) 90%, transparent 100%) left / 2.5px 100% no-repeat,
+      linear-gradient(to right, var(--annotation-color) 0%, var(--annotation-color) 90%, transparent 100%) top / 100% 2px no-repeat;
+    border: 0;
+    border-radius: 4px 0 0 0;
+    padding: 0 3px;
+  }
+
+  .cm-annotation-variant-right,
+  .annotation-token.annotation-variant-right {
+    color: var(--annotation-editor-color);
+    background:
+      linear-gradient(to top, var(--annotation-color) 0%, var(--annotation-color) 90%, transparent 100%) right / 2px 100% no-repeat,
+      linear-gradient(to left, var(--annotation-color) 0%, var(--annotation-color) 90%, transparent 100%) bottom / 100% 2.5px no-repeat;
+    border: 0;
+    border-radius: 0 0 4px 0;
+    padding: 0 3px;
+  }
 
   .cm-annotation-mark-fill,
   .cm-annotation-mark-fill * {
@@ -2784,7 +2905,7 @@
   }
 
   .cm-current-word {
-    color: yellow;
+    color: GreenYellow;
     text-decoration: bold;
   }
 
