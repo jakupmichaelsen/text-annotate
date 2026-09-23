@@ -2131,6 +2131,154 @@
     outline: none;
   }
 
+  .annotation-style-popup .style-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .annotation-style-popup .popup-plain-button {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    min-height: 28px;
+    padding: 4px 7px;
+    color: var(--swatch-text);
+    background: transparent;
+    border: 1px solid transparent;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .annotation-style-popup .popup-plain-button .style-swatch-plain {
+    display: block;
+    width: auto;
+    height: auto;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    font-size: 0.78em;
+  }
+
+  .annotation-style-popup .popup-plain-button:hover,
+  .annotation-style-popup .popup-plain-button:focus-visible,
+  .annotation-style-popup .style-row-plain.active-style .popup-plain-button {
+    background: transparent;
+    border-color: transparent;
+    outline: none;
+  }
+
+  .annotation-style-popup .style-row-plain,
+  .annotation-style-popup .style-row-plain:hover,
+  .annotation-style-popup .style-row-plain.active-style {
+    background: transparent;
+  }
+
+  .annotation-style-popup .style-row-plain {
+    align-items: center;
+    flex-direction: row;
+    justify-content: space-between;
+  }
+
+  .annotation-style-popup .popup-remove-button {
+    align-self: flex-start;
+    transform: translateY(-1px);
+    padding: 2px 7px;
+    color: var(--fg-muted);
+    background: transparent;
+    border: 1px solid transparent;
+    font: inherit;
+    font-size: 1.1em;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .annotation-style-popup .popup-remove-button:hover,
+  .annotation-style-popup .popup-remove-button:focus-visible {
+    color: var(--red, var(--fg));
+    background: var(--bg-soft);
+    border-color: var(--border);
+    outline: none;
+  }
+
+  .annotation-style-popup .popup-variant-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    padding: 2px 7px 4px;
+  }
+
+  .annotation-style-popup .popup-variant-button {
+    min-width: 42px;
+    padding: 2px 4px;
+    color: var(--variant-color);
+    background: transparent;
+    border: 1px solid color-mix(in srgb, var(--variant-color) 45%, transparent);
+    border-radius: 3px;
+    font: inherit;
+    font-size: 0.72em;
+    cursor: pointer;
+  }
+
+  .annotation-style-popup .popup-variant-button:hover,
+  .annotation-style-popup .popup-variant-button:focus-visible,
+  .annotation-style-popup .popup-variant-button.active-variant {
+    outline: none;
+  }
+
+  .annotation-style-popup .popup-variant-button.variant-fill {
+    color: var(--variant-text);
+    background: var(--variant-color);
+    border-color: var(--variant-color);
+  }
+
+  .annotation-style-popup .popup-variant-button.variant-box {
+    color: var(--fg);
+    background: var(--bg-hard);
+    border-color: var(--variant-color);
+    outline: 2px solid var(--variant-color);
+    outline-offset: -2px;
+  }
+
+  .annotation-style-popup .popup-variant-button.variant-underline {
+    border: 0;
+    border-radius: 0;
+    background: linear-gradient(to right, transparent 0%, var(--variant-color) 10%, var(--variant-color) 90%, transparent 100%) bottom / 100% 2px no-repeat;
+  }
+
+  .annotation-style-popup .popup-variant-button.variant-rail {
+    border-top: 2px solid var(--variant-color);
+    border-bottom: 2px solid var(--variant-color);
+  }
+
+  .annotation-style-popup .popup-variant-button.variant-bars {
+    border-left: 3px solid var(--variant-color);
+    border-right: 3px solid var(--variant-color);
+  }
+
+  .annotation-style-popup .popup-variant-button.variant-left {
+    border: 0;
+    border-radius: 4px 0 0 0;
+    background:
+      linear-gradient(to bottom, var(--variant-color) 0%, var(--variant-color) 90%, transparent 100%) left / 3px 100% no-repeat,
+      linear-gradient(to right, var(--variant-color) 0%, var(--variant-color) 90%, transparent 100%) top / 100% 2px no-repeat;
+  }
+
+  .annotation-style-popup .popup-variant-button.variant-right {
+    border: 0;
+    border-radius: 0 0 4px 0;
+    background:
+      linear-gradient(to top, var(--variant-color) 0%, var(--variant-color) 90%, transparent 100%) right / 3px 100% no-repeat,
+      linear-gradient(to left, var(--variant-color) 0%, var(--variant-color) 90%, transparent 100%) bottom / 100% 2px no-repeat;
+  }
+
+  .annotation-style-popup .popup-variant-button:hover,
+  .annotation-style-popup .popup-variant-button:focus-visible,
+  .annotation-style-popup .popup-variant-button.active-variant {
+    box-shadow: inset 0 0 0 1px var(--variant-color);
+  }
+
   .editor .cm-editor.has-annotation-preview .cm-selectionBackground,
   .editor .cm-editor.has-annotation-preview .cm-selectionLayer .cm-selectionBackground,
   .editor .cm-editor.has-annotation-preview .cm-content ::selection {

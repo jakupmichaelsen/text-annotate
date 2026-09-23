@@ -288,6 +288,8 @@
   let annotationStylePopupOpen = false;
   let annotationStylePopupX = 0;
   let annotationStylePopupY = 0;
+  let contextAnnotation: { from: number; to: number } | null = null;
+  let contextSelection: { from: number; to: number } | null = null;
   let blockquoteAlign = initialLayoutSettings.blockquoteAlign ?? 0;
   let blockquoteBgWidth = 100;
   let blockquoteEditReturnAnchor: number | null = null;
@@ -640,12 +642,37 @@
   function openAnnotationStylePopup(event: Event, view: EditorView) {
     if (editorMode !== "normal") return false;
     const mouseEvent = event as MouseEvent;
-    if (mouseEvent.type === "mousedown" && mouseEvent.button !== 1) return false;
+    if (mouseEvent.button !== 2) return false;
     mouseEvent.preventDefault();
     if (annotationStylePopupOpen) {
       annotationStylePopupOpen = false;
+      contextAnnotation = null;
+      contextSelection = null;
       return true;
     }
+    const selection = view.state.selection.main;
+    contextSelection = selection.empty ? null : { from: selection.from, to: selection.to };
+    const position = view.posAtCoords({ x: mouseEvent.clientX, y: mouseEvent.clientY });
+    if (position !== null) {
+      const docText = view.state.doc.toString();
+      annotationPattern.lastIndex = 0;
+      let match: RegExpExecArray | null;
+      while ((match = annotationPattern.exec(docText)) !== null) {
+        const from = match.index + 1;
+        const to = match.index + match[0].length - 1;
+        if (position >= from && position <= to) {
+          const { style, variant } = annotationStyleParts(match[2]);
+          const styleIndex = highlightStyles.findIndex(item => item.name === style);
+          if (styleIndex >= 0) {
+            currentStyle = styleIndex + 1;
+            currentAnnotationVariant = variant;
+            contextAnnotation = { from: match.index, to: match.index + match[0].length };
+          }
+          break;
+        }
+      }
+    }
+    if (!contextAnnotation) contextAnnotation = null;
     annotationStylePopupX = Math.min(mouseEvent.clientX, window.innerWidth - 230);
     annotationStylePopupY = Math.min(mouseEvent.clientY, window.innerHeight - 80);
     annotationStylePopupOpen = true;
@@ -683,8 +710,46 @@
 
   function choosePopupStyle(style: number) {
     currentStyle = style;
+    if (contextAnnotation && view) {
+      view.dispatch({ selection: { anchor: contextAnnotation.from + 1 } });
+      setAnnotationColorOrStyle(view, style);
+    }
     annotationStylePopupOpen = false;
+    contextAnnotation = null;
+    contextSelection = null;
     view?.focus();
+  }
+
+  function choosePopupStyleVariant(style: number, variant: AnnotationVariant) {
+    currentStyle = style;
+    currentAnnotationVariant = variant;
+    if (contextAnnotation && view) {
+      view.dispatch({ selection: { anchor: contextAnnotation.from + 1 } });
+      setAnnotationColorOrStyle(view, style);
+      view.dispatch({ selection: { anchor: contextAnnotation.from + 1 } });
+      setAnnotationVariant(view, variant);
+    }
+    annotationStylePopupOpen = false;
+    contextAnnotation = null;
+    contextSelection = null;
+    view?.focus();
+  }
+
+  function removeContextTarget() {
+    if (!view) return;
+    if (contextAnnotation) {
+      view.dispatch({ selection: { anchor: contextAnnotation.from + 1 } });
+      removeAnnotation(view);
+    } else if (contextSelection && contextSelection.from < contextSelection.to) {
+      view.dispatch({
+        changes: { from: contextSelection.from, to: contextSelection.to, insert: "" },
+        selection: { anchor: contextSelection.from }
+      });
+    }
+    annotationStylePopupOpen = false;
+    contextAnnotation = null;
+    contextSelection = null;
+    view.focus();
   }
 
   function chooseSidebarStyle(style: number) {
@@ -1163,6 +1228,8 @@
   function handleWindowKeydown(event: KeyboardEvent) {
     if (event.key === "Escape" && annotationStylePopupOpen) {
       annotationStylePopupOpen = false;
+      contextAnnotation = null;
+      contextSelection = null;
       event.preventDefault();
       event.stopPropagation();
       view?.focus();
@@ -5645,12 +5712,11 @@ ${body}
         }
       }),
       EditorView.domEventHandlers({
-        mousedown: (event, view) => event.button === 1
-          ? openAnnotationStylePopup(event, view)
-          : startAnnotationDrag(event, view),
+        mousedown: startAnnotationDrag,
         mousemove: (event, view) => updateAnnotationDrag(event, view) || updateHoverAnnotation(event, view),
         mouseup: finishAnnotationDrag,
         click: (event, view) => playTimestampedWord(event, view) || applyAnnotationOnClick(event, view),
+        contextmenu: openAnnotationStylePopup,
       }),
       drawSelection(),
       EditorState.allowMultipleSelections.of(true),
@@ -5738,6 +5804,8 @@ ${body}
       }
       if (annotationStylePopupOpen && !(target instanceof Element && target.closest(".annotation-style-popup"))) {
         annotationStylePopupOpen = false;
+        contextAnnotation = null;
+        contextSelection = null;
       }
     };
     window.addEventListener("keydown", onWindowKeydown);
@@ -6490,35 +6558,44 @@ ${body}
         on:wheel|preventDefault={cyclePopupStyle}
         on:pointerdown={event => event.stopPropagation()}
       >
-        <button
-          class="style-name style-title-action"
-          class:active-style={currentStyle === 0}
-          type="button"
-          role="menuitem"
-          on:click={() => choosePopupStyle(0)}
-        >
-          <span class="style-swatch style-swatch-plain" style={`--swatch-color: ${activeTheme.plainCodeBg}; --swatch-text: ${activeTheme.yellow};`} aria-hidden="true">`</span>
-          plain
-        </button>
-        {#each highlightStyles as style, index}
+        <div class="style-row style-row-plain" class:active-style={currentStyle === 0}>
           <button
-            class="style-name style-title-action"
-            class:active-style={currentStyle === index + 1}
-            class:variant-fill={currentStyle === index + 1 && currentAnnotationVariant === "fill"}
-            class:variant-box={currentStyle === index + 1 && currentAnnotationVariant === "box"}
-            class:variant-underline={currentStyle === index + 1 && currentAnnotationVariant === "underline"}
-            class:variant-rail={currentStyle === index + 1 && currentAnnotationVariant === "rail"}
-            class:variant-bars={currentStyle === index + 1 && currentAnnotationVariant === "bars"}
-            class:variant-left={currentStyle === index + 1 && currentAnnotationVariant === "left"}
-            class:variant-right={currentStyle === index + 1 && currentAnnotationVariant === "right"}
+            class="popup-plain-button"
             type="button"
             role="menuitem"
-            style={`--swatch-color: ${style.color}; --swatch-text: ${annotationTextColorForStyle(style.name, style.color)};`}
-            on:click={() => choosePopupStyle(index + 1)}
+            aria-label="plain"
+            title="plain"
+            on:click={() => choosePopupStyle(0)}
           >
-            <span class="style-swatch" aria-hidden="true"></span>
-            {style.name}
+            <span class="style-swatch style-swatch-plain" style={`--swatch-color: ${activeTheme.plainCodeBg}; --swatch-text: ${activeTheme.yellow};`} aria-hidden="true">{'`plain`'}</span>
           </button>
+          <button
+            class="popup-remove-button"
+            type="button"
+            aria-label={contextAnnotation ? "Remove annotation" : "Delete selection"}
+            title={contextAnnotation ? "Remove annotation" : "Delete selection"}
+            on:click={removeContextTarget}
+          >×</button>
+        </div>
+        {#each highlightStyles as style, index}
+          <div class="style-row" class:active-style={currentStyle === index + 1}>
+            <div
+              class="popup-variant-list"
+              role="group"
+              aria-label={`${style.name} variants`}
+              style={`--variant-color: ${style.color}; --variant-text: ${annotationTextColorForStyle(style.name, style.color)};`}
+            >
+              {#each annotationVariants as variant}
+                <button
+                  class={`popup-variant-button variant-${variant}`}
+                  class:active-variant={currentStyle === index + 1 && currentAnnotationVariant === variant}
+                  type="button"
+                  title={`${style.name} ${variant}`}
+                  on:click={() => choosePopupStyleVariant(index + 1, variant)}
+                >{variant}</button>
+              {/each}
+            </div>
+          </div>
         {/each}
       </div>
     {/if}
