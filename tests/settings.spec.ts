@@ -1,5 +1,42 @@
 import { test, expect } from "@playwright/test";
 
+for (const hoverSelectionMode of ["word", "sentence"]) {
+  test(`${hoverSelectionMode} hover uses normal clicks and annotates selections with Space`, async ({ page }) => {
+    const text = "alpha beta. gamma delta.";
+    await page.addInitScript(({ text, hoverSelectionMode }) => {
+      localStorage.clear();
+      localStorage.setItem("cm6-buffer", text);
+      localStorage.setItem("textAnnotate-settings", JSON.stringify({ hoverSelectionMode }));
+    }, { text, hoverSelectionMode });
+    await page.goto("/");
+    const editor = page.locator(".cm-content");
+    const selectedText = () => page.evaluate(() => getSelection()?.toString() ?? "");
+    const buffer = () => page.evaluate(() => localStorage.getItem("cm6-buffer"));
+    await editor.focus();
+    const point = await editor.locator(".cm-line").first().evaluate(el => {
+      const range = document.createRange();
+      range.setStart(el.firstChild!, 2);
+      range.setEnd(el.firstChild!, 3);
+      const rect = range.getBoundingClientRect();
+      return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+    });
+    await page.mouse.move(point.x, point.y);
+    await expect.poll(selectedText).toContain("alpha");
+    await page.mouse.click(point.x, point.y);
+    await expect.poll(buffer).toBe(text);
+    await expect.poll(selectedText).toBe("");
+    await page.keyboard.press("Space");
+    await expect.poll(buffer).toBe(text);
+
+    await page.mouse.move(point.x + 1, point.y);
+    await expect.poll(selectedText).toContain("alpha");
+    await page.keyboard.press("Space");
+    await expect.poll(buffer).toBe(hoverSelectionMode === "word"
+      ? "`alpha` beta. gamma delta."
+      : "`alpha beta`. gamma delta.");
+  });
+}
+
 test("settings controls update values and stay text-like", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Settings" }).click();
@@ -41,7 +78,7 @@ test("settings controls update values and stay text-like", async ({ page }) => {
   await currentHighlightSelect.selectOption("underline");
   await expect(currentHighlightSelect).toHaveValue("underline");
 
-  const columnGuideRow = page.locator(".settings-row", { hasText: "column guide" }).first();
+  const columnGuideRow = page.locator(".settings-row", { has: page.getByRole("button", { name: "Increase column guide thickness" }) });
   await expect(columnGuideRow).toContainText("1px");
   await columnGuideRow.locator("button").last().click();
   await expect(columnGuideRow).toContainText("2px");
@@ -412,13 +449,18 @@ test("hyphenated styles keep multi-word inline comments and editable colors", as
   await page.goto("/");
 
   await expect(page.locator(".cm-annotation-comment")).toHaveText("old note");
+  await expect(page.locator(".cm-annotation-mark-has-comment")).toHaveCount(1);
+  await expect(page.locator(".cm-annotation-mark-has-comment")).toHaveCSS("white-space", "nowrap");
+  await expect(page.locator(".cm-annotation-comment")).toHaveCSS("white-space", "nowrap");
   await page.locator(".cm-content").click();
   await page.keyboard.press("Control+Home");
   await page.keyboard.press("Enter");
   const commentInput = page.getByPlaceholder("add note…");
   await expect(commentInput).toBeVisible();
-  await commentInput.fill("new note");
+  await commentInput.fill("new <note> >");
   await commentInput.press("Enter");
+  await expect(page.locator(".cm-annotation-comment")).toHaveText("new <note> >");
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("cm6-buffer"))).toContain("new <note> >");
   await page.getByRole("button", { name: "Edit color for custom-style" }).click();
   const colorDialog = page.getByRole("dialog", { name: "Edit color for custom-style" });
   await colorDialog.getByRole("button", { name: "mint" }).click();

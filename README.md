@@ -160,7 +160,7 @@ Annotate mode uses Vim-style movement plus arrow-key equivalents.
 | `x` | Remove annotation, or delete the selection / next character |
 | `u` / `U` | Undo / redo |
 | `Ctrl+Z` / `Ctrl+Y` | Undo / redo |
-| `F2` | Toggle Annotate / Edit mode |
+| `F2` | Edit the selection in a modal, or enter Edit mode when nothing is selected |
 | `Esc` | Return to Annotate mode |
 | `f` / `Alt+s` | Play / pause loaded media or TTS |
 | `r` | Cycle playback / TTS speed |

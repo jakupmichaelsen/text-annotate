@@ -12,7 +12,10 @@ export function summaryVisibleText(text: string) {
 }
 
 export function annotationWithComment(match: RegExpExecArray, comment: string) {
-  const normalizedComment = comment.replace(/"/g, "'").replace(/[<>]/g, "").replace(/--+/g, "-");
+  // Comments are rendered with textContent, so angle brackets are text and
+  // must be preserved. Only normalize characters that would break the
+  // annotation's quoted HTML-comment format.
+  const normalizedComment = comment.replace(/"/g, "'").replace(/--+/g, "-");
   return `\`${match[1]}\`<!-- ${match[2]}, ${match[3]}: "${normalizedComment}" -->`;
 }
 

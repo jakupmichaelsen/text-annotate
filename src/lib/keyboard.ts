@@ -86,7 +86,7 @@ export const annotateHandledKeySections: readonly KeyboardHelpSection[] = [
   {
     title: "Other",
     items: [
-      ["F2", "enter Edit mode"],
+      ["F2", "edit selection, or enter Edit mode when nothing is selected"],
       ["Esc", "exit Edit mode / close panels"],
       ["f", "play / pause media / TTS"],
       ["r", "cycle playback / TTS speed"],
@@ -270,6 +270,7 @@ export type EditorKeymapHandlers = {
   setAnnotationColorOrStyle: (view: EditorViewType, style: number) => boolean;
   setMode: (mode: EditorMode) => boolean;
   handleEscape: () => boolean;
+  handleF2: (view: EditorViewType) => boolean;
   toggleHelp: () => boolean;
   toggleSettings: () => boolean;
   finishBlockquoteEditMode: (view: EditorViewType) => boolean;
@@ -465,7 +466,7 @@ export function buildEditorKeymap(handlers: EditorKeymapHandlers): Extension {
       { any: (view, event) => handleUserShortcutKey(view, event) },
       { any: (view, event) => handleShiftedAnnotationKey(view, event) },
       { key: "Escape", run: () => handlers.handleEscape() },
-      { key: "F2", run: normal(view => { handlers.setMode("insert"); return true; }) },
+      { key: "F2", run: normal(view => handlers.handleF2(view)) },
       { key: "F1", run: normal(() => handlers.toggleHelp()) },
       { key: "Mod-,", run: normal(() => handlers.toggleSettings()) },
       { key: "Ctrl-Tab", run: normal(view => handlers.scrollCurrentLineIntoView(view)) },

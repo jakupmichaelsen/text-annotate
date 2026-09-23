@@ -20,6 +20,7 @@ export const highlightStyles = [
 export const gruvbox = {
   bg: "#282828", bgSoft: "#32302f", bgHard: "#1d2021",
   bgAlt: "#3c3836", border: "#504945", fg: "#ebdbb2",
+  editorFg: "#ebdbb2",
   fgMuted: "#a89984", yellow: "#fabd2f", green: "#b8bb26",
   blue: "#83a598", aqua: "#8ec07c", orange: "#fe8019",
   red: "#fb4934", purple: "#d3869b", selection: "#7c6f64",
@@ -57,7 +58,7 @@ export const themes: Record<ThemeMode, ThemePalette> = {
   "basic-light": {
     dark: false,
     bg: "#eceff4", bgSoft: "#e5e9f0", bgHard: "#d8dee9",
-    bgAlt: "#e5e9f0", border: "#cfd7e3", fg: "#2e3440",
+    bgAlt: "#e5e9f0", border: "#cfd7e3", fg: "#2e3440", editorFg: "#2e3440",
     fgMuted: "#4c566a", yellow: "#8f5f00", green: "#4f7d33",
     blue: "#81a1c1", aqua: "#8fbcbb", orange: "#b65f4a",
     red: "#bf616a", purple: "#b48ead", selection: "#b8c2d4",
@@ -70,7 +71,7 @@ export const themes: Record<ThemeMode, ThemePalette> = {
   "basic-dark": {
     dark: true,
     bg: "#2e3235", bgSoft: "#292d30", bgHard: "#202325",
-    bgAlt: "#383d40", border: "#4a5054", fg: "#dddddd",
+    bgAlt: "#383d40", border: "#4a5054", fg: "#dddddd", editorFg: "#dddddd",
     fgMuted: "#b0b0b0", yellow: "#fda331", green: "#b5bd68",
     blue: "#6fb3d2", aqua: "#8abeb7", orange: "#fc6d24",
     red: "#a54543", purple: "#cc99cc", selection: "#202325",
@@ -84,7 +85,7 @@ export const themes: Record<ThemeMode, ThemePalette> = {
   "gruvbox-light": {
     dark: false,
     bg: "#fbf1c7", bgSoft: "#f2e5bc", bgHard: "#ebdbb2",
-    bgAlt: "#f2e5bc", border: "#d5c4a1", fg: "#3c3836",
+    bgAlt: "#f2e5bc", border: "#d5c4a1", fg: "#3c3836", editorFg: "#3c3836",
     fgMuted: "#7c6f64", yellow: "#b57614", green: "#79740e",
     blue: "#076678", aqua: "#427b58", orange: "#af3a03",
     red: "#9d0006", purple: "#8f3f71", selection: "#d5c4a1",
@@ -107,7 +108,7 @@ export const themes: Record<ThemeMode, ThemePalette> = {
   "material-dark": {
     dark: true,
     bg: "#263238", bgSoft: "#2f3b41", bgHard: "#1e272b",
-    bgAlt: "#37474f", border: "#455a64", fg: "#eeffff",
+    bgAlt: "#37474f", border: "#455a64", fg: "#eeffff", editorFg: "#bdbdbd",
     fgMuted: "#90a4ae", yellow: "#ffcb6b", green: "#c3e88d",
     blue: "#82aaff", aqua: "#89ddff", orange: "#f78c6c",
     red: "#ff5370", purple: "#c792ea", selection: "#33444e",
@@ -120,7 +121,7 @@ export const themes: Record<ThemeMode, ThemePalette> = {
   nord: {
     dark: true,
     bg: "#2e3440", bgSoft: "#3b4252", bgHard: "#252a33",
-    bgAlt: "#434c5e", border: "#4c566a", fg: "#d8dee9",
+    bgAlt: "#434c5e", border: "#4c566a", fg: "#d8dee9", editorFg: "#d8dee9",
     fgMuted: "#81a1c1", yellow: "#ebcb8b", green: "#a3be8c",
     blue: "#5e81ac", aqua: "#8fbcbb", orange: "#d08770",
     red: "#bf616a", purple: "#b48ead", selection: "#4c566a",
@@ -133,7 +134,7 @@ export const themes: Record<ThemeMode, ThemePalette> = {
   "solarized-light": {
     dark: false,
     bg: "#fdf6e3", bgSoft: "#eee8d5", bgHard: "#e7e0c7",
-    bgAlt: "#eee8d5", border: "#d8c9a8", fg: "#657b83",
+    bgAlt: "#eee8d5", border: "#d8c9a8", fg: "#657b83", editorFg: "#657b83",
     fgMuted: "#93a1a1", yellow: "#b58900", green: "#859900",
     blue: "#268bd2", aqua: "#2aa198", orange: "#cb4b16",
     red: "#dc322f", purple: "#6c71c4", selection: "#d6cfc0",
@@ -146,7 +147,7 @@ export const themes: Record<ThemeMode, ThemePalette> = {
   "solarized-dark": {
     dark: true,
     bg: "#002b36", bgSoft: "#073642", bgHard: "#001f27",
-    bgAlt: "#0b3a46", border: "#586e75", fg: "#eee8d5",
+    bgAlt: "#0b3a46", border: "#586e75", fg: "#eee8d5", editorFg: "#93a1a1",
     fgMuted: "#93a1a1", yellow: "#b58900", green: "#859900",
     blue: "#268bd2", aqua: "#2aa198", orange: "#cb4b16",
     red: "#dc322f", purple: "#6c71c4", selection: "#586e75",
@@ -206,7 +207,7 @@ export const gruvboxHighlight = buildHighlightStyle(themes["gruvbox-dark"]);
 
 export function buildEditorTheme(theme: ThemePalette): Extension {
   return EditorView.theme({
-    "&": { height: "100%", color: theme.fg, backgroundColor: theme.bg },
+    "&": { height: "100%", color: theme.editorFg, backgroundColor: theme.bg },
     ".cm-scroller": { overflow: "auto", fontFamily: "var(--app-font-family)", lineHeight: "1.75" },
     ".cm-content": { textAlign: "left", padding: "1rem 1.25rem 4rem", minHeight: "100%", caretColor: theme.cursor, whiteSpace: "pre-wrap", wordBreak: "break-word" },
     ".cm-line": { textAlign: "left" },

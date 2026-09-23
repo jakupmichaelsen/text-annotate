@@ -142,13 +142,13 @@
   let editorScrollBottom = 0;
   let cursorScrollMarginTopLines = initialLayoutSettings.cursorScrollMarginTopLines ?? initialLayoutSettings.cursorScrollMarginLines ?? 4;
   let cursorScrollMarginBottomLines = initialLayoutSettings.cursorScrollMarginBottomLines ?? initialLayoutSettings.cursorScrollMarginLines ?? 4;
-  type ScrollBorderTone = "background" | "border" | "muted" | "accent" | "style";
+  type ScrollBorderTone = "off" | "background" | "border" | "muted" | "accent" | "style";
   let scrollBorderTone: ScrollBorderTone = initialLayoutSettings.scrollBorderTone ?? "muted";
   let scrollBorderOpacity = initialLayoutSettings.scrollBorderOpacity ?? 0.35;
   let lineHeight = initialLayoutSettings.lineHeight ?? 1.6;
   let fontSize = initialLayoutSettings.fontSize ?? 14;
   let paragraphSpacing = initialLayoutSettings.paragraphSpacing ?? 0;
-  let currentLineHighlightStyle: "fill" | "underline" | "borders" = initialLayoutSettings.currentLineHighlightStyle ?? "fill";
+  let currentLineHighlightStyle: "fill" | "underline" | "borders" | "guide" = initialLayoutSettings.currentLineHighlightStyle ?? "fill";
   let currentLineHighlightOpacity = initialLayoutSettings.currentLineHighlightOpacity ?? 0.34;
   let autoFollowPlayback = initialLayoutSettings.autoFollowPlayback ?? true;
   let columnGuideThickness = initialLayoutSettings.columnGuideThickness ?? 1;
@@ -180,6 +180,9 @@
   const initialAppSettings = loadAppSettings();
   let settingsTab: SettingsTab = initialAppSettings.settingsTab;
   let hoverSelectionMode = initialAppSettings.hoverSelectionMode;
+  let selectionEdit: { from: number; to: number; doc: EditorState["doc"] } | null = null;
+  let selectionEditDraft = "";
+  let selectionEditTextarea: HTMLTextAreaElement;
   type ImportLineMode = "original" | "sentences" | "reflow";
   let importLineMode: ImportLineMode = initialLayoutSettings.importLineMode ?? (initialLayoutSettings.divideImportSentences === false ? "original" : "sentences");
   const annotationCommentOpen = "<" + "!--";
@@ -282,10 +285,10 @@
   let newStyleKeyDraft = "";
   let newStyleKeyError = "";
   let annotationMode: AnnotationMode = initialAppSettings.annotationMode;
-  let annotationDragStart: number | null = null;
-  let annotationDragMoved = false;
-  let suppressNextAnnotationClick = false;
   let annotationStylePopupOpen = false;
+  let popupStyle = 0;
+  let popupVariant: AnnotationVariant = "fill";
+  let popupPreviewActive = false;
   let annotationStylePopupX = 0;
   let annotationStylePopupY = 0;
   let contextAnnotation: { from: number; to: number } | null = null;
@@ -646,11 +649,15 @@
     mouseEvent.preventDefault();
     if (annotationStylePopupOpen) {
       annotationStylePopupOpen = false;
+      if (popupPreviewActive) { annotationPreview = null; popupPreviewActive = false; view.dispatch({}); }
       contextAnnotation = null;
       contextSelection = null;
       return true;
     }
     const selection = view.state.selection.main;
+    popupStyle = currentStyle;
+    popupVariant = currentAnnotationVariant;
+    contextAnnotation = null;
     contextSelection = selection.empty ? null : { from: selection.from, to: selection.to };
     const position = view.posAtCoords({ x: mouseEvent.clientX, y: mouseEvent.clientY });
     if (position !== null) {
@@ -664,8 +671,8 @@
           const { style, variant } = annotationStyleParts(match[2]);
           const styleIndex = highlightStyles.findIndex(item => item.name === style);
           if (styleIndex >= 0) {
-            currentStyle = styleIndex + 1;
-            currentAnnotationVariant = variant;
+            popupStyle = styleIndex + 1;
+            popupVariant = variant;
             contextAnnotation = { from: match.index, to: match.index + match[0].length };
           }
           break;
@@ -673,14 +680,46 @@
       }
     }
     if (!contextAnnotation) contextAnnotation = null;
-    annotationStylePopupX = Math.min(mouseEvent.clientX, window.innerWidth - 230);
-    annotationStylePopupY = Math.min(mouseEvent.clientY, window.innerHeight - 80);
+    setPopupPreview(view);
+    const popupWidth = Math.min(180, Math.max(160, window.innerWidth - 20));
+    annotationStylePopupX = Math.min(Math.max(10, mouseEvent.clientX), Math.max(10, window.innerWidth - popupWidth - 10));
+    annotationStylePopupY = Math.min(Math.max(10, mouseEvent.clientY), Math.max(10, window.innerHeight - 180));
     annotationStylePopupOpen = true;
     view.focus();
     return true;
   }
 
-  function cyclePopupStyle(event: Event) {
+  function cyclePopupVariant(event: WheelEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!event.deltaY) return;
+    const index = annotationVariants.indexOf(popupVariant);
+    popupVariant = annotationVariants[(index + (event.deltaY > 0 ? 1 : -1) + annotationVariants.length) % annotationVariants.length];
+    if (view) setPopupPreview(view);
+  }
+
+  function setPopupPreview(v: EditorView) {
+    let range = contextSelection;
+    if (contextAnnotation) {
+      const source = v.state.doc.sliceString(contextAnnotation.from, contextAnnotation.to);
+      annotationPattern.lastIndex = 0;
+      const match = annotationPattern.exec(source);
+      if (!match) return;
+      range = {
+        from: contextAnnotation.from + 1,
+        to: contextAnnotation.from + 1 + match[1].length
+      };
+    }
+    if (!range || range.from >= range.to) return;
+    if (v.state.selection.main.from !== range.from || v.state.selection.main.to !== range.to) {
+      v.dispatch({ selection: EditorSelection.range(range.from, range.to) });
+    }
+    annotationPreview = { from: range.from, to: range.to, style: popupStyle, variant: popupVariant };
+    popupPreviewActive = true;
+    v.dispatch({});
+  }
+
+  function cycleSidebarStyle(event: Event) {
     if (!highlightStyles.length) return false;
     const mouseEvent = event as WheelEvent;
     if (!mouseEvent.deltaY) return false;
@@ -701,7 +740,7 @@
     if (activeAnnotationRow) {
       cycleAnnotationVariant(null, mouseEvent.deltaY > 0 ? 1 : -1);
     } else {
-      cyclePopupStyle(event);
+      cycleSidebarStyle(event);
     }
     mouseEvent.preventDefault();
     mouseEvent.stopPropagation();
@@ -715,6 +754,7 @@
       setAnnotationColorOrStyle(view, style);
     }
     annotationStylePopupOpen = false;
+    popupPreviewActive = false;
     contextAnnotation = null;
     contextSelection = null;
     view?.focus();
@@ -730,6 +770,7 @@
       setAnnotationVariant(view, variant);
     }
     annotationStylePopupOpen = false;
+    popupPreviewActive = false;
     contextAnnotation = null;
     contextSelection = null;
     view?.focus();
@@ -747,6 +788,7 @@
       });
     }
     annotationStylePopupOpen = false;
+    if (popupPreviewActive) { annotationPreview = null; popupPreviewActive = false; }
     contextAnnotation = null;
     contextSelection = null;
     view.focus();
@@ -755,6 +797,20 @@
   function chooseSidebarStyle(style: number) {
     currentStyle = style;
     view?.focus();
+  }
+
+  function cycleHoverSelectionMode(delta = 1) {
+    const modes: HoverSelectionMode[] = ["off", "word", "sentence"];
+    const index = modes.indexOf(hoverSelectionMode);
+    hoverSelectionMode = modes[(index + delta + modes.length) % modes.length];
+    view?.focus();
+  }
+
+  function handleHoverSelectionWheel(event: WheelEvent) {
+    if (!event.deltaY) return;
+    event.preventDefault();
+    event.stopPropagation();
+    cycleHoverSelectionMode(event.deltaY > 0 ? 1 : -1);
   }
 
   function updateHoverAnnotation(event: Event, view: EditorView) {
@@ -782,64 +838,15 @@
     v.dispatch({ selection: EditorSelection.range(from, to) });
   }
 
-  function startAnnotationDrag(event: Event, view: EditorView) {
+  function prepareHoverMouseSelection(event: MouseEvent, view: EditorView) {
     if (editorMode !== "normal" || hoverSelectionMode === "off") return false;
-    const mouseEvent = event as MouseEvent;
-    if (mouseEvent.button !== 0) return false;
-    const position = view.posAtCoords({ x: mouseEvent.clientX, y: mouseEvent.clientY });
+    if (event.button !== 0 || event.detail > 1 || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return false;
+    const position = view.posAtCoords({ x: event.clientX, y: event.clientY });
     if (position === null) return false;
-    const range = hoverRangeAt(view.state.doc.toString(), position);
-    if (!range) return false;
-    annotationDragStart = range.from;
-    annotationDragMoved = false;
-    mouseEvent.preventDefault();
-    return true;
-  }
-
-  function updateAnnotationDrag(event: Event, view: EditorView) {
-    if (annotationDragStart === null) return false;
-    const mouseEvent = event as MouseEvent;
-    if (!(mouseEvent.buttons & 1)) return false;
-    const position = view.posAtCoords({ x: mouseEvent.clientX, y: mouseEvent.clientY });
-    if (position === null) return false;
-    const docText = view.state.doc.toString();
-    const start = hoverRangeAt(docText, annotationDragStart);
-    const end = hoverRangeAt(docText, position);
-    if (!start || !end) return false;
-    const from = Math.min(start.from, end.from);
-    const to = Math.max(start.to, end.to);
-    annotationDragMoved = from !== start.from || to !== start.to;
-    setAnnotationPreviewForRange(view, from, to);
-    mouseEvent.preventDefault();
-    return true;
-  }
-
-  function finishAnnotationDrag(event: Event, view: EditorView) {
-    const moved = annotationDragMoved;
-    annotationDragStart = null;
-    annotationDragMoved = false;
-    if (!moved) return false;
-    const mouseEvent = event as MouseEvent;
-    if (mouseEvent.button !== 0) return false;
-    wrapSelectionOrWord(view, currentStyle);
-    suppressNextAnnotationClick = true;
-    mouseEvent.preventDefault();
-    return true;
-  }
-
-  function applyAnnotationOnClick(event: Event, view: EditorView) {
-    if (suppressNextAnnotationClick) {
-      suppressNextAnnotationClick = false;
-      return true;
-    }
-
-    if (editorMode !== "normal" || hoverSelectionMode === "off") return false;
-    const mouseEvent = event as MouseEvent;
-    if (mouseEvent.button !== 0 || mouseEvent.altKey) return false;
-    if (view.state.selection.main.empty) return false;
-    wrapSelectionOrWord(view, currentStyle);
-    mouseEvent.preventDefault();
-    return true;
+    // Hover creates a real selection. Collapse it before CodeMirror decides
+    // whether this press starts a new selection or drags selected text.
+    view.dispatch({ selection: EditorSelection.cursor(position) });
+    return false;
   }
 
   function syncPlaybackCursor() {
@@ -858,6 +865,16 @@
       selection: EditorSelection.cursor(word.from),
       effects: EditorView.scrollIntoView(word.from, { y: "center" })
     });
+  }
+
+  function activePlaybackWord(): WordTimestamp | null {
+    if (!autoFollowPlayback || !audioLoaded || !transcriptWordTimestamps.length) return null;
+    let active: WordTimestamp | null = null;
+    for (const word of transcriptWordTimestamps) {
+      if (audioCurrentTime >= word.start - transcriptHighlightLeadSeconds && audioCurrentTime < word.end) active = word;
+      else if (audioCurrentTime < word.start - transcriptHighlightLeadSeconds) break;
+    }
+    return active;
   }
 
   const transcriptTimingStorageKey = "textAnnotate-transcript-word-timestamps";
@@ -1650,7 +1667,7 @@
   }
 
   function normalizeScrollBorderTone(value: unknown): ScrollBorderTone {
-    return value === "background" || value === "border" || value === "accent" || value === "style" ? value : "muted";
+    return value === "off" || value === "background" || value === "border" || value === "accent" || value === "style" ? value : "muted";
   }
 
   function normalizeSettingsTab(value: unknown): SettingsTab {
@@ -1712,7 +1729,7 @@
     fontFamilyName: string;
     randomizeFontOnLoad: boolean;
     rotateFontOnLoad: boolean;
-    currentLineHighlightStyle: "fill" | "underline" | "borders";
+    currentLineHighlightStyle: "fill" | "underline" | "borders" | "guide";
     currentLineHighlightOpacity: number;
     autoFollowPlayback: boolean;
     columnGuideThickness: number;
@@ -1837,7 +1854,7 @@
 
     const style = settings.currentLineHighlightStyle;
     const currentLineHighlightStyle =
-      style === "fill" || style === "underline" || style === "borders" ? style : undefined;
+      style === "fill" || style === "underline" || style === "borders" || style === "guide" ? style : undefined;
     const fontFamilyName = typeof settings.fontFamilyName === "string"
       ? normalizeLayoutFontFamilyName(settings.fontFamilyName)
       : undefined;
@@ -2101,6 +2118,63 @@
       event.preventDefault();
       shortcutEditDraft = shortcutBindingFromEvent(event);
       shortcutEditError = "";
+    }
+  }
+
+  function handleF2(v: EditorView) {
+    const { from, to, empty } = v.state.selection.main;
+    if (empty) return setMode("insert");
+    selectionEdit = { from, to, doc: v.state.doc };
+    selectionEditDraft = v.state.sliceDoc(from, to);
+    void tick().then(() => selectionEditTextarea?.focus());
+    return true;
+  }
+
+  function closeSelectionEdit() {
+    selectionEdit = null;
+    view?.focus();
+  }
+
+  function saveSelectionEdit() {
+    if (!view || !selectionEdit) return;
+    const { from, to, doc } = selectionEdit;
+    if (view.state.doc !== doc) return;
+    view.dispatch({
+      changes: { from, to, insert: selectionEditDraft },
+      selection: EditorSelection.range(from, from + selectionEditDraft.length),
+      userEvent: "input"
+    });
+    closeSelectionEdit();
+  }
+
+  function handleOverlayEscape(event: KeyboardEvent) {
+    if (event.key !== "Escape") return;
+    if (selectionEdit) closeSelectionEdit();
+    else if (pdfModalOpen) { closePdfModal(); view?.focus(); }
+    else if (showHelp) { showHelp = false; view?.focus(); }
+    else if (editingStyleColorName) { editingStyleColorName = null; view?.focus(); }
+    else if (addStyleModalOpen) { addStyleModalOpen = false; view?.focus(); }
+    else if (annotationStylePopupOpen) {
+      annotationStylePopupOpen = false;
+      contextAnnotation = null;
+      contextSelection = null;
+      view?.focus();
+    }
+    else if (documentPreviewOpen) closeDocumentPreview();
+    else if (settingsOpen) {
+      if (shortcutEditAction) cancelShortcutEdit();
+      else { settingsOpen = false; view?.focus(); }
+    }
+    else return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }
+
+  function handleSelectionEditKeydown(event: KeyboardEvent) {
+    event.stopPropagation();
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      saveSelectionEdit();
     }
   }
 
@@ -4604,11 +4678,11 @@ ${body}
       span.title = this.comment;
       span.textContent = this.comment;
       if (this.mode === "sticky") {
-        span.style.cssText = `display:inline-block;vertical-align:baseline;margin-left:2px;color:${this.color};opacity:0.72;font-size:inherit;line-height:inherit;white-space:nowrap;pointer-events:none;`;
+        span.style.cssText = `display:inline-block;vertical-align:baseline;color:${this.color};opacity:0.72;font-size:inherit;line-height:inherit;white-space:nowrap;pointer-events:none;`;
       } else if (this.mode === "superscript") {
-        span.style.cssText = `display:inline-block;vertical-align:super;margin-left:2px;color:${this.color};opacity:0.72;font-size:0.72em;line-height:1;white-space:nowrap;pointer-events:none;`;
+        span.style.cssText = `display:inline-block;vertical-align:super;color:${this.color};opacity:0.72;font-size:0.72em;line-height:1;white-space:nowrap;pointer-events:none;`;
       } else {
-        span.style.cssText = `display:inline-block;vertical-align:sub;margin-left:2px;color:${this.color};opacity:0.72;font-size:0.72em;line-height:1;white-space:nowrap;pointer-events:none;`;
+        span.style.cssText = `display:inline-block;vertical-align:sub;color:${this.color};opacity:0.72;font-size:0.72em;line-height:1;white-space:nowrap;pointer-events:none;`;
       }
       return span;
     }
@@ -4822,11 +4896,7 @@ ${body}
       }
       build(v: EditorView): DecorationSet {
         if (!transcriptWordTimestamps.length) return Decoration.none;
-        let currentWord: WordTimestamp | null = null;
-        for (const word of transcriptWordTimestamps) {
-          if (audioCurrentTime >= word.start - transcriptHighlightLeadSeconds) currentWord = word;
-          else break;
-        }
+        const currentWord = activePlaybackWord();
         if (!currentWord || currentWord.from >= currentWord.to) return Decoration.none;
         const builder = new RangeSetBuilder<Decoration>();
         builder.add(currentWord.from, currentWord.to, Decoration.mark({ class: "cm-current-word" }));
@@ -4902,7 +4972,7 @@ ${body}
               continue;
             }
             builder.add(spanStart, wordStart, Decoration.replace({ widget: new EmptyWidget(color), inclusive: false }));
-            builder.add(wordStart, wordEnd, Decoration.mark({ attributes: { class: `cm-annotation-mark cm-annotation-mark-${variant === "fill" ? "fill" : "outline"} cm-annotation-variant-${variant}`, style: annotationMarkCss(colorName, variant, color, theme) } }));
+            builder.add(wordStart, wordEnd, Decoration.mark({ attributes: { class: `cm-annotation-mark cm-annotation-mark-${variant === "fill" ? "fill" : "outline"} cm-annotation-variant-${variant}${annotationModeUsesInlineComments(mode) && comment.trim() ? " cm-annotation-mark-has-comment" : ""}`, style: annotationMarkCss(colorName, variant, color, theme) } }));
             if (isEditing) {
               builder.add(wordEnd, spanEnd, Decoration.replace({ widget: new EditWidget(color, comment, spanStart, spanEnd, v) }));
             } else if (annotationModeUsesInlineComments(mode) && comment.trim()) {
@@ -5074,6 +5144,7 @@ ${body}
   function wrapSelectionOrWord(v: EditorView, style: number = 0) {
     const state = v.state;
     const range = state.selection.main;
+    if (hoverSelectionMode !== "off" && range.empty) return true;
     const preview = annotationPreview &&
       !range.empty &&
       annotationPreview.from === Math.min(range.from, range.to) &&
@@ -5402,12 +5473,14 @@ ${body}
     updateMarker = () => {
       if (this.scheduled) return;
       this.scheduled = true;
-      this.view.requestMeasure({
-        read: view => {
-          if (!view.hasFocus || !view.state.selection.main.empty) return null;
-          const coords = view.coordsAtPos(view.state.selection.main.head);
-          if (!coords) return null;
-          const scroller = view.scrollDOM;
+        this.view.requestMeasure({
+          read: view => {
+            const followWord = activePlaybackWord();
+            if (!followWord && (!view.hasFocus || !view.state.selection.main.empty)) return null;
+            const position = followWord?.from ?? view.state.selection.main.head;
+            const coords = view.coordsAtPos(position);
+            if (!coords) return null;
+            const scroller = view.scrollDOM;
           const scrollerRect = scroller.getBoundingClientRect();
           return {
             left: coords.left - scrollerRect.left + scroller.scrollLeft,
@@ -5669,10 +5742,11 @@ ${body}
 
   const dblClickBehavior = EditorView.domEventHandlers({
     dblclick(event, v) {
+      if (event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false;
       const pos = v.posAtCoords({ x: event.clientX, y: event.clientY });
       if (pos === null) return false;
       const docText = v.state.doc.toString();
-      if (!annotationModeUsesRawMarkup()) {
+      {
         annotationPattern.lastIndex = 0;
         let m: RegExpExecArray | null;
         while ((m = annotationPattern.exec(docText)) !== null) {
@@ -5680,8 +5754,10 @@ ${body}
           const wordStart = spanStart + 1;
           const wordEnd   = wordStart + m[1].length;
           if (pos >= wordStart && pos <= wordEnd) {
+            if (annotationModeUsesRawMarkup()) return false;
             editingSpan = editingSpan === spanStart ? null : spanStart;
-            v.dispatch({});
+            annotationPreview = null;
+            v.dispatch({ selection: EditorSelection.cursor(wordStart) });
             return true;
           }
         }
@@ -5689,6 +5765,7 @@ ${body}
       const wordRange = wordRangeAt(docText, pos, editorMode === "normal");
       if (!wordRange) return false;
       v.dispatch({ selection: EditorSelection.range(wordRange.from, wordRange.to) });
+      if (editorMode === "normal") wrapSelectionOrWord(v, currentStyle);
       return true;
     }
   });
@@ -5712,10 +5789,9 @@ ${body}
         }
       }),
       EditorView.domEventHandlers({
-        mousedown: startAnnotationDrag,
-        mousemove: (event, view) => updateAnnotationDrag(event, view) || updateHoverAnnotation(event, view),
-        mouseup: finishAnnotationDrag,
-        click: (event, view) => playTimestampedWord(event, view) || applyAnnotationOnClick(event, view),
+        mousedown: prepareHoverMouseSelection,
+        mousemove: updateHoverAnnotation,
+        click: playTimestampedWord,
         contextmenu: openAnnotationStylePopup,
       }),
       drawSelection(),
@@ -5736,6 +5812,7 @@ ${body}
         setAnnotationColorOrStyle,
         setMode: mode => { setMode(mode); return true; },
         handleEscape,
+        handleF2,
         toggleHelp: () => { showHelp = !showHelp; return true; },
         toggleSettings,
         finishBlockquoteEditMode,
@@ -5793,6 +5870,10 @@ ${body}
     settingsPersistenceReady = false;
     restorePersistedSettings();
     const onWindowKeydown = (event: KeyboardEvent) => handleWindowKeydown(event);
+    const onWindowWheel = (event: WheelEvent) => {
+      if (!annotationStylePopupOpen) return;
+      cyclePopupVariant(event);
+    };
     const onWindowPointerDown = (event: PointerEvent) => {
       const target = event.target;
       if (!(target instanceof Node)) return;
@@ -5804,11 +5885,14 @@ ${body}
       }
       if (annotationStylePopupOpen && !(target instanceof Element && target.closest(".annotation-style-popup"))) {
         annotationStylePopupOpen = false;
+        if (popupPreviewActive) { annotationPreview = null; popupPreviewActive = false; view?.dispatch({}); }
         contextAnnotation = null;
         contextSelection = null;
       }
     };
+    window.addEventListener("keydown", handleOverlayEscape, true);
     window.addEventListener("keydown", onWindowKeydown);
+    window.addEventListener("wheel", onWindowWheel, { capture: true, passive: false });
     window.addEventListener("pointerdown", onWindowPointerDown);
     const mediaSession = "mediaSession" in navigator ? navigator.mediaSession : null;
     const setMediaAction = (action: MediaSessionAction, handler: MediaSessionActionHandler | null) => {
@@ -5856,7 +5940,9 @@ ${body}
     void restoreAudioFile();
 
     return () => {
+      window.removeEventListener("keydown", handleOverlayEscape, true);
       window.removeEventListener("keydown", onWindowKeydown);
+      window.removeEventListener("wheel", onWindowWheel, true);
       synth?.removeEventListener("voiceschanged", onVoicesChanged);
       resetTtsState();
       window.removeEventListener("pointerdown", onWindowPointerDown);
@@ -5876,12 +5962,13 @@ ${body}
 
 <div
   class="app"
+  class:active-line-guide={currentLineHighlightStyle === "guide"}
   class:active-line-fill={currentLineHighlightStyle === "fill"}
   class:active-line-underline={currentLineHighlightStyle === "underline"}
   class:active-line-borders={currentLineHighlightStyle === "borders"}
   style={`
     --bg: ${activeTheme.bg}; --bg-soft: ${activeTheme.bgSoft}; --bg-hard: ${activeTheme.bgHard};
-    --bg-alt: ${activeTheme.bgAlt}; --border: ${activeTheme.border}; --fg: ${activeTheme.fg};
+    --bg-alt: ${activeTheme.bgAlt}; --border: ${activeTheme.border}; --fg: ${activeTheme.fg}; --editor-fg: ${activeTheme.editorFg};
     --internal-border: transparent;
     --fg-muted: ${activeTheme.fgMuted}; --yellow: ${activeTheme.yellow}; --green: ${activeTheme.green};
     --blue: ${activeTheme.blue}; --orange: ${activeTheme.orange};
@@ -6040,12 +6127,8 @@ ${body}
                 <option value="fill">Fill</option>
                 <option value="underline">Underline</option>
                 <option value="borders">Top and bottom</option>
+                <option value="guide">Column guide</option>
               </select>
-            </label>
-            <label class="settings-toggle-row">
-              <span class="settings-control-icon" aria-hidden="true">▶</span>
-              <span>auto-follow playback</span>
-              <input type="checkbox" checked={autoFollowPlayback} on:change={event => autoFollowPlayback = (event.target as HTMLInputElement).checked} aria-label="Auto-follow playback" />
             </label>
             <div class="settings-row-grid">
               <div class="settings-row">
@@ -6108,6 +6191,7 @@ ${body}
             <label class="settings-row">
               <span class="settings-row-label">color</span>
               <select class="settings-input settings-select settings-row-value" bind:value={scrollBorderTone} aria-label="Scroll border color">
+                <option value="off">Off</option>
                 <option value="background">Theme background</option>
                 <option value="border">Theme border</option>
                 <option value="muted">Theme muted</option>
@@ -6367,6 +6451,14 @@ ${body}
           </span>
           <span class:active={editorMode === "insert"}>Edit</span>
         </label>
+        <button
+          class="hover-mode-toggle"
+          type="button"
+          aria-label={`Hover selection: ${hoverSelectionMode}`}
+          title="Click or scroll to cycle hover selection"
+          on:click={() => cycleHoverSelectionMode()}
+          on:wheel|nonpassive={handleHoverSelectionWheel}
+        >HOVER: {hoverSelectionMode}</button>
       </div>
 
       <div class="sidebar-section" on:wheel|preventDefault={cycleSidebarStyleOrVariant}>
@@ -6533,10 +6625,10 @@ ${body}
       bind:this={editorEl}
       style={`--editor-right-padding: ${padRight}px; --scroll-border-top: ${scrollBorderTopPx}px; --scroll-border-bottom: ${scrollBorderBottomPx}px; --scroll-border-color: ${scrollBorderColor}; --scroll-border-opacity: ${scrollBorderOpacity};`}
     >
-      {#if scrollBorderOpacity > 0 && cursorScrollMarginTopLines > 0}
+      {#if scrollBorderTone !== "off" && scrollBorderOpacity > 0 && cursorScrollMarginTopLines > 0}
         <span class="scroll-border-guide scroll-border-guide-top" aria-hidden="true"></span>
       {/if}
-      {#if scrollBorderOpacity > 0 && cursorScrollMarginBottomLines > 0}
+      {#if scrollBorderTone !== "off" && scrollBorderOpacity > 0 && cursorScrollMarginBottomLines > 0}
         <span class="scroll-border-guide scroll-border-guide-bottom" aria-hidden="true"></span>
       {/if}
       <button
@@ -6555,10 +6647,9 @@ ${body}
         role="menu"
         tabindex="-1"
         aria-label="Annotation styles"
-        on:wheel|preventDefault={cyclePopupStyle}
         on:pointerdown={event => event.stopPropagation()}
       >
-        <div class="style-row style-row-plain" class:active-style={currentStyle === 0}>
+        <div class="style-row style-row-plain" class:active-style={popupStyle === 0}>
           <button
             class="popup-plain-button"
             type="button"
@@ -6575,28 +6666,28 @@ ${body}
             aria-label={contextAnnotation ? "Remove annotation" : "Delete selection"}
             title={contextAnnotation ? "Remove annotation" : "Delete selection"}
             on:click={removeContextTarget}
-          >×</button>
+          >DELETE</button>
         </div>
-        {#each highlightStyles as style, index}
-          <div class="style-row" class:active-style={currentStyle === index + 1}>
-            <div
-              class="popup-variant-list"
-              role="group"
-              aria-label={`${style.name} variants`}
-              style={`--variant-color: ${style.color}; --variant-text: ${annotationTextColorForStyle(style.name, style.color)};`}
-            >
-              {#each annotationVariants as variant}
-                <button
-                  class={`popup-variant-button variant-${variant}`}
-                  class:active-variant={currentStyle === index + 1 && currentAnnotationVariant === variant}
-                  type="button"
-                  title={`${style.name} ${variant}`}
-                  on:click={() => choosePopupStyleVariant(index + 1, variant)}
-                >{variant}</button>
-              {/each}
-            </div>
-          </div>
-        {/each}
+        <div class="popup-variant-list" role="group" aria-label="Current annotation variant">
+          <div
+            class={`popup-variant-choice variant-${popupVariant}`}
+            aria-label={popupVariant}
+          >{popupVariant}</div>
+        </div>
+        <div class="popup-color-list" role="group" aria-label="Annotation colors">
+          {#each highlightStyles as style, index}
+            <button
+              class="popup-color-button"
+              class:active-color={popupStyle === index + 1}
+              style={`--swatch-color: ${style.color};`}
+              type="button"
+              role="menuitem"
+              aria-label={style.name}
+              title={`${style.name} ${popupVariant}`}
+              on:click={() => choosePopupStyleVariant(index + 1, popupVariant)}
+            ><span class="popup-color-swatch" aria-hidden="true"></span></button>
+          {/each}
+        </div>
       </div>
     {/if}
 
@@ -6853,6 +6944,15 @@ ${body}
             <button class="audio-glyph" type="button" on:click={() => seekAudioAndPlay(mediaSeekSeconds)} title={`Forward ${mediaSeekSeconds} seconds`} aria-label={`Forward ${mediaSeekSeconds} seconds`}>&gt;&gt;</button>
             <span class="audio-sep">|</span>
             <button class="audio-rate-text" type="button" on:click={cycleAudioRate} aria-label="Playback speed" title="Playback speed">{audioRateText}</button>
+            <button
+              class="audio-follow-toggle"
+              class:active={autoFollowPlayback}
+              type="button"
+              on:click={() => autoFollowPlayback = !autoFollowPlayback}
+              aria-pressed={autoFollowPlayback}
+              aria-label="Auto-follow playback"
+              title={autoFollowPlayback ? "Auto-follow playback: on" : "Auto-follow playback: off"}
+            >follow</button>
             <span class="audio-sep">|</span>
             <span class="audio-time">{formatAudioTime(audioCurrentTime)} / {formatAudioTime(audioDuration)}</span>
           </div>
@@ -6865,6 +6965,15 @@ ${body}
             <button class="audio-glyph" type="button" on:click={() => stepTts(1)} title="Next spoken chunk" aria-label="Next spoken chunk">&gt;&gt;</button>
             <span class="audio-sep">|</span>
             <button class="audio-rate-text" type="button" on:click={cycleAudioRate} aria-label="TTS speed" title="TTS speed">{audioRateText}</button>
+            <button
+              class="audio-follow-toggle"
+              class:active={autoFollowPlayback}
+              type="button"
+              on:click={() => autoFollowPlayback = !autoFollowPlayback}
+              aria-pressed={autoFollowPlayback}
+              aria-label="Auto-follow playback"
+              title={autoFollowPlayback ? "Auto-follow playback: on" : "Auto-follow playback: off"}
+            >follow</button>
             <span class="audio-sep">|</span>
             <span class="audio-time">{ttsProgressText}</span>
           </div>
@@ -6968,6 +7077,14 @@ ${body}
         </div>
       </div>
     {/if}
+  {/if}
+
+  {#if selectionEdit}
+    <div class="selection-edit-overlay" role="presentation">
+      <div class="selection-edit-widget" role="dialog" aria-modal="true" aria-label="Edit selection">
+        <textarea class="selection-edit-textarea" aria-label="Selected text" bind:this={selectionEditTextarea} bind:value={selectionEditDraft} spellcheck="false" on:keydown={handleSelectionEditKeydown}></textarea>
+      </div>
+    </div>
   {/if}
 
   {#if addStyleModalOpen}
