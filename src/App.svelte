@@ -168,8 +168,10 @@
   let settingsPopoverEl: HTMLDivElement | null = null;
   type SettingsTab = "layout" | "shortcuts" | "import";
   type AnnotationMode = "clean" | "raw" | "all" | "sticky" | "superscript" | "subscript";
+  type HoverSelectionMode = "off" | "word" | "sentence";
   type AppSettings = {
     annotationMode: AnnotationMode;
+    hoverSelectionMode: HoverSelectionMode;
     settingsTab: SettingsTab;
     rememberOpenAiApiKey: boolean;
     transcriptionModel: string;
@@ -177,6 +179,7 @@
   };
   const initialAppSettings = loadAppSettings();
   let settingsTab: SettingsTab = initialAppSettings.settingsTab;
+  let hoverSelectionMode = initialAppSettings.hoverSelectionMode;
   type ImportLineMode = "original" | "sentences" | "reflow";
   let importLineMode: ImportLineMode = initialLayoutSettings.importLineMode ?? (initialLayoutSettings.divideImportSentences === false ? "original" : "sentences");
   const annotationCommentOpen = "<" + "!--";
@@ -279,6 +282,12 @@
   let newStyleKeyDraft = "";
   let newStyleKeyError = "";
   let annotationMode: AnnotationMode = initialAppSettings.annotationMode;
+  let annotationDragStart: number | null = null;
+  let annotationDragMoved = false;
+  let suppressNextAnnotationClick = false;
+  let annotationStylePopupOpen = false;
+  let annotationStylePopupX = 0;
+  let annotationStylePopupY = 0;
   let blockquoteAlign = initialLayoutSettings.blockquoteAlign ?? 0;
   let blockquoteBgWidth = 100;
   let blockquoteEditReturnAnchor: number | null = null;
@@ -405,6 +414,7 @@
   }
   $: if (settingsPersistenceReady) {
     annotationMode;
+    hoverSelectionMode;
     settingsTab;
     rememberOpenAiApiKey;
     transcriptionModel;
@@ -624,6 +634,146 @@
     mouseEvent.preventDefault();
     mouseEvent.stopPropagation();
     jumpAudioToAndPlay(word.start);
+    return true;
+  }
+
+  function openAnnotationStylePopup(event: Event, view: EditorView) {
+    if (editorMode !== "normal") return false;
+    const mouseEvent = event as MouseEvent;
+    if (mouseEvent.type === "mousedown" && mouseEvent.button !== 1) return false;
+    mouseEvent.preventDefault();
+    if (annotationStylePopupOpen) {
+      annotationStylePopupOpen = false;
+      return true;
+    }
+    annotationStylePopupX = Math.min(mouseEvent.clientX, window.innerWidth - 230);
+    annotationStylePopupY = Math.min(mouseEvent.clientY, window.innerHeight - 80);
+    annotationStylePopupOpen = true;
+    view.focus();
+    return true;
+  }
+
+  function cyclePopupStyle(event: Event) {
+    if (!highlightStyles.length) return false;
+    const mouseEvent = event as WheelEvent;
+    if (!mouseEvent.deltaY) return false;
+    const styleCount = highlightStyles.length + 1;
+    const current = currentStyle >= 0 && currentStyle < styleCount ? currentStyle : 0;
+    currentStyle = (current + (mouseEvent.deltaY > 0 ? 1 : -1) + styleCount) % styleCount;
+    mouseEvent.preventDefault();
+    mouseEvent.stopPropagation();
+    return true;
+  }
+
+  function cycleSidebarStyleOrVariant(event: Event) {
+    const mouseEvent = event as WheelEvent;
+    if (!mouseEvent.deltaY) return false;
+    const target = event.target;
+    const row = target instanceof Element ? target.closest(".style-row") : null;
+    const activeAnnotationRow = row?.classList.contains("active-style") && currentStyle > 0;
+    if (activeAnnotationRow) {
+      cycleAnnotationVariant(null, mouseEvent.deltaY > 0 ? 1 : -1);
+    } else {
+      cyclePopupStyle(event);
+    }
+    mouseEvent.preventDefault();
+    mouseEvent.stopPropagation();
+    return true;
+  }
+
+  function choosePopupStyle(style: number) {
+    currentStyle = style;
+    annotationStylePopupOpen = false;
+    view?.focus();
+  }
+
+  function chooseSidebarStyle(style: number) {
+    currentStyle = style;
+    view?.focus();
+  }
+
+  function updateHoverAnnotation(event: Event, view: EditorView) {
+    if (editorMode !== "normal" || hoverSelectionMode === "off") return false;
+    const mouseEvent = event as MouseEvent;
+    if (mouseEvent.buttons !== 0 || mouseEvent.altKey) return false;
+    const position = view.posAtCoords({ x: mouseEvent.clientX, y: mouseEvent.clientY });
+    if (position === null) return false;
+    const range = hoverRangeAt(view.state.doc.toString(), position);
+    if (!range) return false;
+    setAnnotationPreviewForRange(view, range.from, range.to);
+    return false;
+  }
+
+  function setAnnotationPreviewForRange(v: EditorView, from: number, to: number) {
+    const current = annotationPreview;
+    if (
+      current &&
+      current.from === from &&
+      current.to === to &&
+      current.style === currentStyle &&
+      current.variant === currentAnnotationVariant
+    ) return;
+    annotationPreview = { from, to, style: currentStyle, variant: currentAnnotationVariant };
+    v.dispatch({ selection: EditorSelection.range(from, to) });
+  }
+
+  function startAnnotationDrag(event: Event, view: EditorView) {
+    if (editorMode !== "normal" || hoverSelectionMode === "off") return false;
+    const mouseEvent = event as MouseEvent;
+    if (mouseEvent.button !== 0) return false;
+    const position = view.posAtCoords({ x: mouseEvent.clientX, y: mouseEvent.clientY });
+    if (position === null) return false;
+    const range = hoverRangeAt(view.state.doc.toString(), position);
+    if (!range) return false;
+    annotationDragStart = range.from;
+    annotationDragMoved = false;
+    mouseEvent.preventDefault();
+    return true;
+  }
+
+  function updateAnnotationDrag(event: Event, view: EditorView) {
+    if (annotationDragStart === null) return false;
+    const mouseEvent = event as MouseEvent;
+    if (!(mouseEvent.buttons & 1)) return false;
+    const position = view.posAtCoords({ x: mouseEvent.clientX, y: mouseEvent.clientY });
+    if (position === null) return false;
+    const docText = view.state.doc.toString();
+    const start = hoverRangeAt(docText, annotationDragStart);
+    const end = hoverRangeAt(docText, position);
+    if (!start || !end) return false;
+    const from = Math.min(start.from, end.from);
+    const to = Math.max(start.to, end.to);
+    annotationDragMoved = from !== start.from || to !== start.to;
+    setAnnotationPreviewForRange(view, from, to);
+    mouseEvent.preventDefault();
+    return true;
+  }
+
+  function finishAnnotationDrag(event: Event, view: EditorView) {
+    const moved = annotationDragMoved;
+    annotationDragStart = null;
+    annotationDragMoved = false;
+    if (!moved) return false;
+    const mouseEvent = event as MouseEvent;
+    if (mouseEvent.button !== 0) return false;
+    wrapSelectionOrWord(view, currentStyle);
+    suppressNextAnnotationClick = true;
+    mouseEvent.preventDefault();
+    return true;
+  }
+
+  function applyAnnotationOnClick(event: Event, view: EditorView) {
+    if (suppressNextAnnotationClick) {
+      suppressNextAnnotationClick = false;
+      return true;
+    }
+
+    if (editorMode !== "normal" || hoverSelectionMode === "off") return false;
+    const mouseEvent = event as MouseEvent;
+    if (mouseEvent.button !== 0 || mouseEvent.altKey) return false;
+    if (view.state.selection.main.empty) return false;
+    wrapSelectionOrWord(view, currentStyle);
+    mouseEvent.preventDefault();
     return true;
   }
 
@@ -1011,6 +1161,13 @@
   }
 
   function handleWindowKeydown(event: KeyboardEvent) {
+    if (event.key === "Escape" && annotationStylePopupOpen) {
+      annotationStylePopupOpen = false;
+      event.preventDefault();
+      event.stopPropagation();
+      view?.focus();
+      return;
+    }
     if (event.key === "Escape" && documentPreviewOpen) {
       documentPreviewOpen = false;
       event.preventDefault();
@@ -1441,6 +1598,7 @@
   function loadAppSettings(): AppSettings {
     const defaults: AppSettings = {
       annotationMode: "clean",
+      hoverSelectionMode: "off",
       settingsTab: "layout",
       rememberOpenAiApiKey: false,
       transcriptionModel: "whisper-1",
@@ -1458,6 +1616,10 @@
         settings.annotationMode === "subscript"
           ? settings.annotationMode
           : "clean",
+      hoverSelectionMode:
+        settings.hoverSelectionMode === "word" || settings.hoverSelectionMode === "sentence"
+          ? settings.hoverSelectionMode
+          : "off",
       settingsTab: normalizeSettingsTab(settings.settingsTab),
       rememberOpenAiApiKey: typeof settings.rememberOpenAiApiKey === "boolean" ? settings.rememberOpenAiApiKey : false,
       transcriptionModel: typeof settings.transcriptionModel === "string" && settings.transcriptionModel.trim()
@@ -1706,6 +1868,7 @@
     if (typeof localStorage === "undefined") return;
     const payload: AppSettings = {
       annotationMode,
+      hoverSelectionMode,
       settingsTab,
       rememberOpenAiApiKey,
       transcriptionModel,
@@ -1747,6 +1910,7 @@
 
   function applyAppSettings(settings: AppSettings) {
     annotationMode = settings.annotationMode;
+    hoverSelectionMode = settings.hoverSelectionMode;
     settingsTab = settings.settingsTab;
     rememberOpenAiApiKey = settings.rememberOpenAiApiKey;
     transcriptionModel = settings.transcriptionModel;
@@ -2589,6 +2753,7 @@
     if (!v) return;
     v.dom.classList.toggle("mode-insert", editorMode === "insert");
     v.dom.classList.toggle("mode-normal", editorMode === "normal");
+    v.dom.classList.toggle("has-annotation-preview", !!annotationPreview);
   }
 
   $: if (view) {
@@ -3380,6 +3545,27 @@ By mid-morning the mist had lifted. The fox was gone. Jasper had fallen back asl
       while (end < text.length && endingPunctuationPattern.test(text[end] ?? "")) end += 1;
     }
     return { from: start, to: end };
+  }
+
+  function sentenceRangeAt(text: string, pos: number): WordRange | null {
+    const safePos = Math.max(0, Math.min(pos, text.length));
+    let sentenceStart = 0;
+    for (let index = 0; index < text.length; index += 1) {
+      if (!/[.!?]/.test(text[index] ?? "")) continue;
+      let sentenceEnd = index + 1;
+      while (sentenceEnd < text.length && /["'”’)\]]/.test(text[sentenceEnd] ?? "")) sentenceEnd += 1;
+      let nextStart = sentenceEnd;
+      while (nextStart < text.length && /\s/.test(text[nextStart] ?? "")) nextStart += 1;
+      if (safePos <= sentenceEnd) return { from: sentenceStart, to: sentenceEnd };
+      sentenceStart = nextStart;
+      index = sentenceEnd - 1;
+    }
+    return safePos >= sentenceStart ? { from: sentenceStart, to: text.length } : null;
+  }
+
+  function hoverRangeAt(text: string, pos: number): WordRange | null {
+    if (hoverSelectionMode === "sentence") return sentenceRangeAt(text, pos);
+    return wordRangeAt(text, pos, editorMode === "normal");
   }
 
   function wordBoundary(text: string, pos: number, forward: boolean): number {
@@ -4601,10 +4787,13 @@ ${body}
         const style = annotationStyleForPreview(preview.style);
         const color = preview.style === 0 ? theme.orange : annotationColorForStyle(style, theme);
         const css = preview.style === 0
-          ? `background-color:color-mix(in srgb, ${color} 16%, transparent);color:${theme.fg};border-bottom:2px solid ${color};border-radius:3px;padding:0 2px;`
+          ? `color:${theme.yellow};background:${theme.plainCodeBg};border:0;border-radius:3px;padding:0;`
           : annotationMarkCss(style, preview.variant, color, theme);
+        const classes = preview.style === 0
+          ? "cm-annotation-preview"
+          : `cm-annotation-preview cm-annotation-mark cm-annotation-mark-${preview.variant === "fill" ? "fill" : "outline"} cm-annotation-variant-${preview.variant}`;
         return Decoration.set([
-          Decoration.mark({ attributes: { class: preview.style === 0 ? "" : `cm-annotation-mark cm-annotation-mark-${preview.variant === "fill" ? "fill" : "outline"} cm-annotation-variant-${preview.variant}`, style: css }, inclusive: false }).range(preview.from, preview.to)
+          Decoration.mark({ attributes: { class: classes, style: css }, inclusive: false }).range(preview.from, preview.to)
         ]);
       }
     }, { decorations: v => v.decorations });
@@ -5456,7 +5645,12 @@ ${body}
         }
       }),
       EditorView.domEventHandlers({
-        click: playTimestampedWord
+        mousedown: (event, view) => event.button === 1
+          ? openAnnotationStylePopup(event, view)
+          : startAnnotationDrag(event, view),
+        mousemove: (event, view) => updateAnnotationDrag(event, view) || updateHoverAnnotation(event, view),
+        mouseup: finishAnnotationDrag,
+        click: (event, view) => playTimestampedWord(event, view) || applyAnnotationOnClick(event, view),
       }),
       drawSelection(),
       EditorState.allowMultipleSelections.of(true),
@@ -5541,6 +5735,9 @@ ${body}
       }
       if (documentPreviewOpen) {
         if (!documentPreviewPopoverEl?.contains(target) && !documentPreviewButtonEl?.contains(target)) documentPreviewOpen = false;
+      }
+      if (annotationStylePopupOpen && !(target instanceof Element && target.closest(".annotation-style-popup"))) {
+        annotationStylePopupOpen = false;
       }
     };
     window.addEventListener("keydown", onWindowKeydown);
@@ -5677,6 +5874,14 @@ ${body}
                 <option value="sticky">Sticky comments</option>
                 <option value="superscript">Superscript comments</option>
                 <option value="subscript">Subscript comments</option>
+              </select>
+            </label>
+            <label class="settings-row">
+              <span class="settings-row-label">hover selection</span>
+              <select class="settings-input settings-select settings-row-value" bind:value={hoverSelectionMode} aria-label="Hover selection">
+                <option value="off">Off</option>
+                <option value="word">Word</option>
+                <option value="sentence">Sentence</option>
               </select>
             </label>
           </section>
@@ -6096,7 +6301,7 @@ ${body}
         </label>
       </div>
 
-      <div class="sidebar-section">
+      <div class="sidebar-section" on:wheel|preventDefault={cycleSidebarStyleOrVariant}>
         <div class="sidebar-label">Annotation styles</div>
         <div class="style-list sidebar-style-list">
           <div
@@ -6116,7 +6321,7 @@ ${body}
                 type="button"
                 title="Use plain text"
                 aria-label="Use plain text"
-                on:click={() => { currentStyle = 0; view?.focus(); }}
+                on:click={() => chooseSidebarStyle(0)}
                 on:keydown={event => event.stopPropagation()}
               >
                 plain
@@ -6274,6 +6479,49 @@ ${body}
         on:pointerdown={startRightPaddingDrag}
       ></button>
     </div>
+
+    {#if annotationStylePopupOpen}
+      <div
+        class="annotation-style-popup"
+        style={`left:${annotationStylePopupX}px;top:${annotationStylePopupY}px;`}
+        role="menu"
+        tabindex="-1"
+        aria-label="Annotation styles"
+        on:wheel|preventDefault={cyclePopupStyle}
+        on:pointerdown={event => event.stopPropagation()}
+      >
+        <button
+          class="style-name style-title-action"
+          class:active-style={currentStyle === 0}
+          type="button"
+          role="menuitem"
+          on:click={() => choosePopupStyle(0)}
+        >
+          <span class="style-swatch style-swatch-plain" style={`--swatch-color: ${activeTheme.plainCodeBg}; --swatch-text: ${activeTheme.yellow};`} aria-hidden="true">`</span>
+          plain
+        </button>
+        {#each highlightStyles as style, index}
+          <button
+            class="style-name style-title-action"
+            class:active-style={currentStyle === index + 1}
+            class:variant-fill={currentStyle === index + 1 && currentAnnotationVariant === "fill"}
+            class:variant-box={currentStyle === index + 1 && currentAnnotationVariant === "box"}
+            class:variant-underline={currentStyle === index + 1 && currentAnnotationVariant === "underline"}
+            class:variant-rail={currentStyle === index + 1 && currentAnnotationVariant === "rail"}
+            class:variant-bars={currentStyle === index + 1 && currentAnnotationVariant === "bars"}
+            class:variant-left={currentStyle === index + 1 && currentAnnotationVariant === "left"}
+            class:variant-right={currentStyle === index + 1 && currentAnnotationVariant === "right"}
+            type="button"
+            role="menuitem"
+            style={`--swatch-color: ${style.color}; --swatch-text: ${annotationTextColorForStyle(style.name, style.color)};`}
+            on:click={() => choosePopupStyle(index + 1)}
+          >
+            <span class="style-swatch" aria-hidden="true"></span>
+            {style.name}
+          </button>
+        {/each}
+      </div>
+    {/if}
 
     <aside class="summary-sidebar" class:collapsed={summaryCollapsed} class:fullscreen={summaryFullscreen} class:resizing={resizingSummarySidebar} aria-label="Annotation summary">
       {#if !summaryCollapsed && !summaryFullscreen}
